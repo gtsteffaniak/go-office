@@ -28,7 +28,8 @@ SAMPLE_DOC ?= $(SAMPLES_DIR)/sample.doc
 
 .PHONY: help setup build demo doctor fonts test test-integration clean \
         check-linux check-go mod-download fetch-assets compile check-assets check-samples test-x2t \
-        playwright-base playwright-npm test-playwright test-playwright-ui check-sample-matrix
+        playwright-base playwright-npm test-playwright test-playwright-ui check-sample-matrix \
+        build-docker build-docker-image build-docker-builder run-docker stop-docker
 
 help:
 	@echo "go-office"
@@ -45,9 +46,14 @@ help:
 	@echo "  make check-sample-matrix  Verify all Playwright sample files exist"
 	@echo "  make test-playwright    E2E Playwright tests in Docker (runs build first)"
 	@echo "  make test-playwright-ui Local Playwright UI (server in Docker, tests on host)"
+	@echo "  make build-docker       Build Docker image and run demo server (sample-files/)"
+	@echo "  make build-docker-image Build Docker image only (debian-slim runtime for x2t)"
+	@echo "  make build-docker-builder  Build reusable Alpine Go builder image"
+	@echo "  make run-docker         Run demo from existing Docker image"
 	@echo "  make clean              Remove bin/ and downloaded assets/"
 	@echo ""
 	@echo "Variables: ADDR=$(ADDR)  GO_OFFICE_ASSETS=$(GO_OFFICE_ASSETS)  SAMPLES_DIR=$(SAMPLES_DIR)"
+	@echo "           DOCKER_IMAGE=$(DOCKER_IMAGE)  DOCKER_PORT=$(DOCKER_PORT)"
 	@echo ""
 	@echo "Typical flow:"
 	@echo "  make setup && make demo"
@@ -159,6 +165,35 @@ test:
 PLAYWRIGHT_BASE_IMAGE ?= go-office-playwright-base
 PLAYWRIGHT_TEST_IMAGE ?= go-office-playwright-tests
 PLAYWRIGHT_LOCAL_CONTAINER ?= go-office-playwright-local
+
+DOCKER_IMAGE ?= go-office:demo
+DOCKER_BUILDER_IMAGE ?= go-office:builder
+DOCKER_CONTAINER ?= go-office-demo
+DOCKER_PORT ?= 8080
+DOCKER_PUBLIC ?= http://localhost:$(DOCKER_PORT)
+
+build-docker: build-docker-image run-docker
+
+build-docker-image: check-linux check-samples
+	@mkdir -p assets
+	@echo "==> Docker image $(DOCKER_IMAGE)"
+	docker build -t "$(DOCKER_IMAGE)" -f _docker/Dockerfile .
+
+build-docker-builder:
+	@echo "==> Docker builder image $(DOCKER_BUILDER_IMAGE)"
+	docker build -t "$(DOCKER_BUILDER_IMAGE)" -f _docker/Dockerfile.builder .
+
+run-docker: stop-docker
+	@echo ""
+	@echo "Demo server (Docker) on $(DOCKER_PUBLIC)/"
+	@echo "  site:  $(DOCKER_PUBLIC)/"
+	@echo "  demo:  $(DOCKER_PUBLIC)/office/demo/"
+	@echo "Press Ctrl+C to stop"
+	docker run --rm -p "$(DOCKER_PORT):8080" --name "$(DOCKER_CONTAINER)" "$(DOCKER_IMAGE)" \
+		-assets /app/assets -addr :8080 -data /app -samples sample-files -demo -public "$(DOCKER_PUBLIC)"
+
+stop-docker:
+	@docker rm -f "$(DOCKER_CONTAINER)" 2>/dev/null || true
 
 test-integration: build
 	GO_OFFICE_ASSETS="$(GO_OFFICE_ASSETS)" $(GO) test -tags=integration ./...

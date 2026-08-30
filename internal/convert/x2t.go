@@ -78,7 +78,7 @@ func (c *Converter) ToEditorBin(ctx context.Context, sourcePath, outDir string) 
 	taskPath := taskFile.Name()
 	defer os.Remove(taskPath)
 
-	xml := buildTaskXML(sourcePath, outFile, c.fontDir, c.themeDir)
+	xml := buildTaskXML(sourcePath, outFile, c.fontDir, c.themeDir, filepath.Ext(sourcePath))
 	if _, err := taskFile.WriteString(xml); err != nil {
 		taskFile.Close()
 		return err
@@ -133,18 +133,31 @@ func ensureExecutable(path string) error {
 	return nil
 }
 
-func buildTaskXML(from, to, fontDir, themeDir string) string {
+func buildTaskXML(from, to, fontDir, themeDir, sourceExt string) string {
+	ext := strings.TrimPrefix(strings.ToLower(sourceExt), ".")
+	formatFrom := FormatFromExtension(ext)
+	formatTo := FormatCanvasTo(ext)
 	now := time.Now().UTC().Format(time.RFC3339)
+
+	var extra strings.Builder
+	if formatFrom > 0 {
+		fmt.Fprintf(&extra, "<m_nFormatFrom>%d</m_nFormatFrom>\n", formatFrom)
+	}
+	if ext == "csv" {
+		extra.WriteString("<m_nCsvTxtEncoding>46</m_nCsvTxtEncoding>\n")
+		extra.WriteString("<m_nCsvDelimiter>4</m_nCsvDelimiter>\n")
+	}
+
 	return fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
 <TaskQueueDataConvert xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
 <m_sFileFrom>%s</m_sFileFrom>
 <m_sFileTo>%s</m_sFileTo>
 <m_nFormatTo>%d</m_nFormatTo>
-<m_sFontDir>%s</m_sFontDir>
+%s<m_sFontDir>%s</m_sFontDir>
 <m_sThemeDir>%s</m_sThemeDir>
 <m_oTimestamp>%s</m_oTimestamp>
 </TaskQueueDataConvert>
-`, escapeXML(from), escapeXML(to), FormatCanvas, escapeXML(fontDir), escapeXML(themeDir), now)
+`, escapeXML(from), escapeXML(to), formatTo, extra.String(), escapeXML(fontDir), escapeXML(themeDir), now)
 }
 
 func escapeXML(s string) string {

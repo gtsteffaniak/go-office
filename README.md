@@ -39,6 +39,8 @@ make test     # unit tests (no assets)
 | `make test-integration` | `build` then integration tests |
 | `make test-playwright` | `build` then Playwright E2E in Docker |
 | `make test-playwright-ui` | Demo server in Docker + Playwright UI on host |
+| `make build-docker` | Build Docker image and run demo (`sample-files/`) |
+| `make build-docker-image` | Build Docker image only |
 | `make clean` | Remove `bin/` and `assets/` |
 
 Useful variables: `ADDR=:8080`, `GO_OFFICE_ASSETS=./assets`, `SAMPLES_DIR=sample-files`.
@@ -85,6 +87,16 @@ make build              # Euro-Office assets required
 make test-playwright    # full CI-style run in Docker
 make test-playwright-ui # server in Docker, Playwright --ui on host
 ```
+
+### Docker demo
+
+```bash
+make build-docker          # build image + run on http://localhost:8080/
+make build-docker-image    # image only (reuses ./assets if present)
+DOCKER_PORT=9090 make run-docker
+```
+
+The image bundles `go-office`, Euro-Office assets, and `sample-files/`. If `./assets` exists from `make build`, the Docker build reuses it instead of re-downloading.
 
 Variables:
 

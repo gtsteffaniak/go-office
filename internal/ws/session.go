@@ -31,13 +31,18 @@ type session struct {
 	indexUser int
 }
 
-var sessions sync.Map // sid -> *session
+var sessions sync.Map // sessionKey -> *session
 
-func getSession(sid, docKey string, build BuildInfo, basePath string) *session {
+func sessionKey(sid, docKey string) string {
 	if sid == "" {
 		sid = defaultSessionID
 	}
-	if v, ok := sessions.Load(sid); ok {
+	return sid + "\x00" + docKey
+}
+
+func getSession(sid, docKey string, build BuildInfo, basePath string) *session {
+	key := sessionKey(sid, docKey)
+	if v, ok := sessions.Load(key); ok {
 		s := v.(*session)
 		if s.build.Release == "" && build.Release != "" {
 			s.build = build
@@ -48,7 +53,7 @@ func getSession(sid, docKey string, build BuildInfo, basePath string) *session {
 		return s
 	}
 	s := &session{docKey: docKey, build: build, basePath: basePath, indexUser: 1}
-	actual, _ := sessions.LoadOrStore(sid, s)
+	actual, _ := sessions.LoadOrStore(key, s)
 	return actual.(*session)
 }
 

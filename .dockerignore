@@ -1,13 +1,19 @@
+# Shrink build context — only explicit COPY paths in _docker/Dockerfile are used.
 .git
 .github
 bin/*
 !bin/go-office
-frontend/node_modules
-frontend/test-results
-frontend/playwright-report
-frontend/blob-report
-**/*.md
-!sample-files/README.md
-cache
+
+# Not needed for the demo image build
+frontend/
+integration/
+cache/
 doctor-report.txt
 debug-*.log
+**/*.md
+!sample-files/README.md
+
+# Extra cmds / tests (sources are copied selectively in the Dockerfile)
+cmd/doctor/
+cmd/test-x2t/
+**/*_test.go

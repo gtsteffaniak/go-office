@@ -25,6 +25,8 @@ FONT_SELECTION := $(GO_OFFICE_ASSETS)/converter/bin/font_selection.bin
 X2T_BIN := $(GO_OFFICE_ASSETS)/converter/bin/x2t
 SAMPLES_DIR ?= sample-files
 SAMPLE_DOC ?= $(SAMPLES_DIR)/sample.doc
+DOCKER_BUILD_TIMEOUT ?= 10m
+DOCKER_BUILD = timeout $(DOCKER_BUILD_TIMEOUT) docker build
 
 .PHONY: help setup build demo doctor fonts test test-integration clean \
         check-linux check-go mod-download fetch-assets compile check-assets check-samples test-x2t \
@@ -179,11 +181,11 @@ build-docker: build-docker-image run-docker
 build-docker-image: check-linux check-samples
 	@mkdir -p assets
 	@echo "==> Docker image $(DOCKER_IMAGE)"
-	docker build -t "$(DOCKER_IMAGE)" -f _docker/Dockerfile .
+	$(DOCKER_BUILD) -t "$(DOCKER_IMAGE)" -f _docker/Dockerfile .
 
 build-docker-builder:
 	@echo "==> Docker builder image $(DOCKER_BUILDER_IMAGE)"
-	docker build -t "$(DOCKER_BUILDER_IMAGE)" -f _docker/Dockerfile.builder .
+	$(DOCKER_BUILD) -t "$(DOCKER_BUILDER_IMAGE)" -f _docker/Dockerfile.builder .
 
 run-docker: stop-docker
 	@echo ""
@@ -202,7 +204,7 @@ test-integration: build
 
 playwright-base:
 	@echo "==> Playwright base image"
-	docker build -t "$(PLAYWRIGHT_BASE_IMAGE)" -f _docker/Dockerfile.playwright-base .
+	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_BASE_IMAGE)" -f _docker/Dockerfile.playwright-base .
 
 playwright-npm:
 	@echo "==> Playwright npm dependencies"
@@ -211,13 +213,13 @@ playwright-npm:
 test-playwright: ensure-assets check-sample-matrix
 	@echo "==> Playwright E2E (Docker)"
 	GOOS=linux $(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
-	docker build -t "$(PLAYWRIGHT_TEST_IMAGE)" -f _docker/Dockerfile.playwright-office .
+	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_TEST_IMAGE)" -f _docker/Dockerfile.playwright-office .
 
 test-playwright-ui: build check-sample-matrix
 	@echo "==> Playwright UI (server in Docker, tests on host)"
 	GOOS=linux $(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
 	docker rm -f "$(PLAYWRIGHT_LOCAL_CONTAINER)" 2>/dev/null || true
-	docker build -t "$(PLAYWRIGHT_LOCAL_CONTAINER)" -f _docker/Dockerfile.playwright-local .
+	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_LOCAL_CONTAINER)" -f _docker/Dockerfile.playwright-local .
 	docker run -d -p 8080:8080 --name "$(PLAYWRIGHT_LOCAL_CONTAINER)" "$(PLAYWRIGHT_LOCAL_CONTAINER)"
 	cd frontend && npm install && npx playwright install --with-deps firefox
 	@echo "Open Playwright UI — server at http://127.0.0.1:8080/"

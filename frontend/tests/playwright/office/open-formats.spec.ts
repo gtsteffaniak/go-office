@@ -8,6 +8,13 @@ import {
 
 const maxTier = Number(process.env.PLAYWRIGHT_SAMPLE_TIER ?? "3") as 1 | 2 | 3;
 
+/** Fail fast when the editor shell never mounts (no 90s hangs). */
+const EDITOR_IFRAME_TIMEOUT = 25_000;
+const STATUS_OK_TIMEOUT = 10_000;
+const SETTLE_MS = 1_000;
+
+test.describe.configure({ mode: "parallel" });
+
 async function assertEditorOpens(page: import("@playwright/test").Page, sample: SampleFile) {
   const font404s: string[] = [];
   page.on("response", (res) => {
@@ -20,13 +27,16 @@ async function assertEditorOpens(page: import("@playwright/test").Page, sample: 
   await page.goto(`/office/demo/view?file=${encodeURIComponent(sample.path)}`);
 
   await expect(page.locator("#sample-path")).toContainText(sample.path.split("/").pop()!);
-  await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: 15_000 });
+  await expect(page.locator("#status")).not.toContainText(/^Error:/, {
+    timeout: STATUS_OK_TIMEOUT,
+  });
 
   // DocsAPI mounts an iframe for the editor chrome.
-  await expect(page.locator("#editor iframe")).toBeVisible({ timeout: 90_000 });
+  await expect(page.locator("#editor iframe")).toBeVisible({
+    timeout: EDITOR_IFRAME_TIMEOUT,
+  });
 
-  // Allow coauthoring + font fetches to settle.
-  await page.waitForTimeout(3_000);
+  await page.waitForTimeout(SETTLE_MS);
 
   expect(font404s, `font 404s: ${font404s.join(", ")}`).toHaveLength(0);
   await expect(page.locator("#status")).not.toContainText(/fonts are not loaded/i);

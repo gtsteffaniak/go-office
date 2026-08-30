@@ -75,7 +75,7 @@ go run ./cmd/go-office -assets "$GO_OFFICE_ASSETS"
 
 - Unit tests on every push (no assets).
 - Integration job: `go run ./cmd/fetch-assets`, cache `assets/`, then `go test -tags=integration ./...`.
-- Playwright job: cache `assets/`, `make test-playwright` (skips sample files not yet in `sample-files/`).
+- Playwright job: cache `assets/`, verify `sample-files/` matrix (all 16 samples are git-tracked), then `make test-playwright`.
 
 ## Playwright E2E tests
 
@@ -83,7 +83,7 @@ End-to-end tests mirror the [FileBrowser Playwright pattern](https://github.com/
 
 ```bash
 make build              # Euro-Office assets required
-# add samples under sample-files/ (see sample-files/README.md)
+make check-sample-matrix  # verify git-tracked samples under sample-files/
 make test-playwright    # full CI-style run in Docker
 make test-playwright-ui # server in Docker, Playwright --ui on host
 ```

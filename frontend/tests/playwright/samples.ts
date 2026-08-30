@@ -15,7 +15,7 @@ export type SampleFile = {
 
 /**
  * Canonical sample matrix for Playwright open tests.
- * Tests skip files that are not present yet (tier 1 failures fail CI).
+ * All files are git-tracked under sample-files/; CI runs make check-sample-matrix first.
  */
 export const SAMPLE_FILES: SampleFile[] = [
   // Tier 1 — primary formats

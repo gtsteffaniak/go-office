@@ -43,7 +43,7 @@ help:
 	@echo "  make fonts     Regenerate AllFonts.js and font_selection.bin"
 	@echo ""
 	@echo "  make test-integration   Integration tests (runs build first)"
-	@echo "  make check-sample-matrix  Verify all Playwright sample files exist"
+	@echo "  make check-sample-matrix  Verify all Playwright sample files exist (git-tracked under sample-files/)"
 	@echo "  make test-playwright    E2E Playwright tests in Docker (runs build first)"
 	@echo "  make test-playwright-ui Local Playwright UI (server in Docker, tests on host)"
 	@echo "  make build-docker       Build Docker image and run demo server (sample-files/)"

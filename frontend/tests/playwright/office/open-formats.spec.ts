@@ -35,13 +35,9 @@ async function assertEditorOpens(page: import("@playwright/test").Page, sample: 
 for (const sample of samplesForTier(maxTier)) {
   test(`opens ${sample.path} (${sample.editor})`, async ({ page }) => {
     if (!sampleExists(sample.path)) {
-      const strict = process.env.PLAYWRIGHT_STRICT === "1";
-      if (strict && sample.tier === 1) {
-        throw new Error(
-          `missing tier-1 sample ${sample.path} — add it under ${REPO_ROOT}/sample-files/`,
-        );
-      }
-      test.skip(true, `${sample.path} not present yet`);
+      throw new Error(
+        `missing sample ${sample.path} — commit it under ${REPO_ROOT}/sample-files/ (see make check-sample-matrix)`,
+      );
     }
     await assertEditorOpens(page, sample);
   });

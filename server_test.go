@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -21,12 +23,12 @@ func (nopStorage) Stat(context.Context, string) (office.FileInfo, error) {
 }
 
 func TestHealthEndpoint(t *testing.T) {
-	srv, err := office.New(nopStorage{}, office.Options{BasePath: "/api/office"})
+	srv, err := office.New(nopStorage{}, office.Options{BasePath: "/office"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/office/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/office/health", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 
@@ -50,12 +52,44 @@ func TestBuildEditorConfigRequiresKey(t *testing.T) {
 }
 
 func TestDocumentServerURL(t *testing.T) {
-	srv, err := office.New(nopStorage{}, office.Options{BasePath: "/myapp/api/office"})
+	srv, err := office.New(nopStorage{}, office.Options{BasePath: "/myapp/office"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := srv.DocumentServerURL("http://localhost:8080")
-	if got != "http://localhost:8080/myapp/api/office/" {
+	if got != "http://localhost:8080/myapp/office/" {
 		t.Fatalf("url = %q", got)
+	}
+}
+
+func TestMirrorsRootAssets(t *testing.T) {
+	dir := t.TempDir()
+	for _, sub := range []string{"web-apps/apps", "sdkjs/common"} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sdkjs", "common", "device_scale.js"), []byte("// ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv, err := office.New(nopStorage{}, office.Options{
+		AssetDir: dir,
+		BasePath: "/office",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{"/sdkjs/common/device_scale.js", "/office/sdkjs/common/device_scale.js"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d", path, rec.Code)
+		}
+		if !strings.Contains(rec.Header().Get("Content-Type"), "javascript") {
+			t.Fatalf("%s content-type = %q", path, rec.Header().Get("Content-Type"))
+		}
 	}
 }

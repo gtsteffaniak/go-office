@@ -15,7 +15,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - run: go test ./...
+      - run: make test
 
   integration:
     name: Integration (Euro-Office assets)
@@ -34,10 +34,10 @@ jobs:
           key: euro-office-assets-${{ hashFiles('scripts/euro-office.version') }}
       - name: Fetch Euro-Office assets
         if: steps.assets-cache.outputs.cache-hit != 'true'
-        run: go run ./cmd/fetch-assets
+        run: make build
       - name: Verify api.js
         run: test -f assets/web-apps/apps/api/documents/api.js.tpl -o -f assets/web-apps/apps/api/documents/api.js
       - name: Integration tests
         env:
           GO_OFFICE_ASSETS: ${{ github.workspace }}/assets
-        run: go test -tags=integration ./...
+        run: make test-integration

@@ -14,6 +14,7 @@ import (
 type Handler struct {
 	Version string
 	Logger  *slog.Logger
+	Debug   bool
 }
 
 func New(version string, logger *slog.Logger) *Handler {
@@ -21,6 +22,13 @@ func New(version string, logger *slog.Logger) *Handler {
 		logger = slog.Default()
 	}
 	return &Handler{Version: version, Logger: logger}
+}
+
+// NewWithOptions creates a coauthoring handler.
+func NewWithOptions(version string, logger *slog.Logger, debug bool) *Handler {
+	h := New(version, logger)
+	h.Debug = debug
+	return h
 }
 
 // Match reports whether path is a coauthoring route: /{version}/doc/{key}/c/...
@@ -50,6 +58,16 @@ func (h *Handler) ServePath(w http.ResponseWriter, r *http.Request, path string)
 		return
 	}
 
+	if h.Debug {
+		h.Logger.Debug("coauthoring",
+			"method", r.Method,
+			"path", path,
+			"key", key,
+			"transport", r.URL.Query().Get("transport"),
+			"query", r.URL.RawQuery,
+		)
+	}
+
 	// Socket.IO polling handshake (EIO=4) — minimal response for Phase 0 debugging.
 	if r.URL.Query().Get("transport") == "polling" {
 		h.servePolling(w, r, key)
@@ -71,8 +89,15 @@ func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, key strin
 
 	// Engine.IO open packet: "0" + JSON session id payload
 	if r.URL.Query().Get("t") == "" {
+		if h.Debug {
+			h.Logger.Debug("coauthoring polling open", "key", key)
+		}
 		_, _ = w.Write([]byte(`0{"sid":"go-office","upgrades":["websocket"],"pingInterval":25000,"pingTimeout":20000}`))
 		return
+	}
+
+	if h.Debug {
+		h.Logger.Debug("coauthoring polling license", "key", key)
 	}
 
 	// License message as Socket.IO message packet "42" + JSON array

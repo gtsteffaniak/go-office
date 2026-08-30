@@ -40,7 +40,14 @@ func Fetch(opts Options) error {
 	marker := filepath.Join(opts.OutDir, ".extracted")
 	if !opts.Force && isUpToDate(marker, v.Release, opts.OutDir) {
 		fmt.Printf("assets already present for %s (%s)\n", v.Release, opts.OutDir)
-		return nil
+		return GenerateAllFonts(opts.OutDir)
+	}
+	if !opts.Force && needsFontGeneration(opts.OutDir) {
+		fmt.Println("Generating missing AllFonts.js for existing assets...")
+		if err := ensureFontToolchain(opts, v); err != nil {
+			return err
+		}
+		return GenerateAllFonts(opts.OutDir)
 	}
 
 	tmpRoot, err := os.MkdirTemp("", "go-office-fetch-*")
@@ -92,8 +99,28 @@ func Fetch(opts Options) error {
 			return err
 		}
 	}
+	coreFontsSrc := filepath.Join(dsRoot, "core-fonts")
+	if st, err := os.Stat(coreFontsSrc); err == nil && st.IsDir() {
+		if err := copyTree(coreFontsSrc, filepath.Join(opts.OutDir, "core-fonts")); err != nil {
+			return err
+		}
+	}
+	toolsSrc := filepath.Join(dsRoot, "server", "tools", "allfontsgen")
+	if st, err := os.Stat(toolsSrc); err == nil && !st.IsDir() {
+		toolsDst := filepath.Join(opts.OutDir, "tools", "allfontsgen")
+		if err := copyFile(toolsSrc, toolsDst); err != nil {
+			return err
+		}
+		if err := os.Chmod(toolsDst, 0o755); err != nil {
+			return err
+		}
+	}
 
 	if err := writeMetadata(opts.OutDir, v, url); err != nil {
+		return err
+	}
+
+	if err := GenerateAllFonts(opts.OutDir); err != nil {
 		return err
 	}
 
@@ -112,7 +139,11 @@ func isUpToDate(marker, release, outDir string) bool {
 	apiJs := filepath.Join(outDir, "web-apps", "apps", "api", "documents", "api.js")
 	apiTpl := filepath.Join(outDir, "web-apps", "apps", "api", "documents", "api.js.tpl")
 	if _, err := os.Stat(apiJs); err == nil {
-		return true
+		allFonts := filepath.Join(outDir, "sdkjs", "common", "AllFonts.js")
+		if st, err := os.Stat(allFonts); err == nil && st.Size() > 0 {
+			return true
+		}
+		return false
 	}
 	if _, err := os.Stat(apiTpl); err == nil {
 		return true

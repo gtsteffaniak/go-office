@@ -12,13 +12,38 @@ Embedded Go document server library compatible with ONLYOFFICE / Euro-Office bro
 
 Phase 0 scaffold — static asset serving, health checks, editor config builder, and a minimal coauthoring polling stub. Full Socket.IO co-editing, x2t conversion, and multi-user sessions are not implemented yet.
 
+## Quick start (Makefile)
+
+**Develop in WSL** — use the Linux clone at `~/git/go-office` (not the Windows path under `/mnt/c/`).
+
+Linux or WSL only. Targets stack: **setup → build → demo**.
+
+```bash
+cd ~/git/go-office
+make setup    # once: Go module dependencies
+make build    # fetch Euro-Office assets (~600MB) + compile bin/go-office
+make demo     # build (if needed) and start server
+make test     # unit tests (no assets)
+```
+
+| Target | What it does |
+|--------|----------------|
+| `make setup` | `go mod download`, verify Linux |
+| `make build` | Download Euro-Office assets into `./assets/`, compile `bin/go-office` |
+| `make demo` | Runs `build` then starts the server on `:8080` |
+| `make test` | `go test ./...` (no assets) |
+| `make test-integration` | `build` then integration tests |
+| `make clean` | Remove `bin/` and `assets/` |
+
+Useful variables: `ADDR=:8080`, `GO_OFFICE_ASSETS=./assets`, `SAMPLES_DIR=sample-files`.
+
 ## Euro-Office assets (Linux developers & CI)
 
 Euro-Office editor files are **not** committed to this repo (AGPL, ~600MB). On **Linux**, fetch them once into `./assets/` (downloads the official `.deb` from GitHub releases; uses `dpkg-deb`, no Docker or root required):
 
 ```bash
-go run ./cmd/fetch-assets
-# or: make assets
+make build
+# or: go run ./cmd/fetch-assets
 # or: bash scripts/fetch-assets.sh
 ```
 
@@ -49,7 +74,29 @@ go run ./cmd/go-office -assets "$GO_OFFICE_ASSETS"
 
 You do **not** need to clone [Euro-Office/DocumentServer](https://github.com/Euro-Office/DocumentServer) unless you are hacking sdkjs. The fetch tool downloads the official GitHub release `.deb`.
 
-## Quick start
+## Local demo (no FileBrowser)
+
+Linux only. After setup:
+
+```bash
+make demo
+```
+
+Open **http://localhost:8080/** for the site home page, then **http://localhost:8080/office/demo/** to pick a sample document.
+
+| URL | Purpose |
+|-----|---------|
+| `/` | Site home (about, links, next steps) |
+| `/office/demo/` | Landing page with links to sample documents |
+| `/office/demo/view?file=sample-files/file-sample_100kB.doc` | Editor viewer |
+| `/api/office/demo/config?file=sample-files/file-sample_100kB.doc` | Editor init JSON (API) |
+| `/api/office/demo/file/sample-files/file-sample_100kB.doc` | Serves a sample document (API) |
+| `/api/office/demo/callback` | Save callback stub (API) |
+| `/office/health` | Health check |
+
+Flags: `-data .`, `-samples sample-files`, `-base /office`, `-api-base /api/office`, `-assets`, `-addr`, `-public`.
+
+## Quick start (library only)
 
 1. Fetch Euro-Office assets (see above), then run the example server:
 
@@ -60,19 +107,19 @@ go run ./cmd/go-office -assets ./assets -addr :8080
 With a custom application subpath:
 
 ```bash
-go run ./cmd/go-office -assets /path/to/assets -base /myapp/api/office
+go run ./cmd/go-office -assets /path/to/assets -base /myapp/office
 ```
 
 3. Verify static assets (FileBrowser OfficeDebug check):
 
 ```
-http://localhost:8080/api/office/web-apps/apps/api/documents/api.js
+http://localhost:8080/office/web-apps/apps/api/documents/api.js
 ```
 
 4. Health:
 
 ```
-http://localhost:8080/api/office/health
+http://localhost:8080/office/health
 ```
 
 ## Integration
@@ -80,7 +127,7 @@ http://localhost:8080/api/office/health
 ```go
 srv, err := office.New(myStorage, office.Options{
     AssetDir:        "/var/office-assets",
-    BasePath:        office.JoinBasePath(appBaseURL, ""), // e.g. "/myapp/api/office"
+    BasePath:        office.JoinBasePath(appBaseURL, ""), // e.g. "/myapp/office"
     JWTSecret:       []byte("shared-secret"),
     ProtocolVersion: protocol, // office.ReadAssetVersion(assetDir) after fetch
 })
@@ -90,7 +137,7 @@ cfg, err := srv.BuildEditorConfig(ctx, config.EditorRequest{...})
 ```
 
 `appBaseURL` is the host application's configured subpath (FileBrowser `http.baseURL`, e.g. `"/myapp/"`).
-Host API routes like `/api/office/config` remain on the application mux; this library serves editor assets and coauthoring under `BasePath`.
+Host API routes like `/api/office/config` remain on the application mux; this library serves editor assets and coauthoring under `BasePath` (default `/office`).
 
 Set the Vue `documentServerUrl` to `srv.DocumentServerURL(publicOrigin)`.
 
@@ -105,7 +152,7 @@ Set the Vue `documentServerUrl` to `srv.DocumentServerURL(publicOrigin)`.
 | `static/` | Asset file server with cache headers |
 | `internal/ws/` | Coauthoring protocol (Socket.IO stub) |
 | `internal/license/` | License messages for sdkjs |
-| `cmd/go-office/` | Standalone dev server |
+| `cmd/go-office/` | Local demo server with embedded test UI |
 
 ## Roadmap
 

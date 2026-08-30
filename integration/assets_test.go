@@ -53,14 +53,14 @@ func TestServesAPIJS(t *testing.T) {
 
 	srv, err := office.New(nopStorage{}, office.Options{
 		AssetDir:        dir,
-		BasePath:        "/api/office",
+		BasePath:        "/office",
 		ProtocolVersion: protocol,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/office/web-apps/apps/api/documents/api.js", nil)
+	req := httptest.NewRequest(http.MethodGet, "/office/web-apps/apps/api/documents/api.js", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 
@@ -75,7 +75,7 @@ func TestHealthWithAssets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodGet, "/api/office/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/office/health", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

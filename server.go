@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/quantumx-apps/go-office/config"
+	"github.com/quantumx-apps/go-office/internal/debuglog"
 	"github.com/quantumx-apps/go-office/internal/ws"
 	"github.com/quantumx-apps/go-office/session"
 	"github.com/quantumx-apps/go-office/static"
@@ -23,6 +25,8 @@ type Server struct {
 
 	sessions *session.Manager
 	mux      *http.ServeMux
+
+	finishOnce sync.Once
 }
 
 // New creates a document server. AssetDir may be empty for protocol-only testing.
@@ -42,11 +46,27 @@ func New(store Storage, opts Options) (*Server, error) {
 }
 
 // Handler returns the HTTP handler for mounting on a host mux.
+// Call Mount (e.g. demo routes) before serving; coauthoring fallback is registered on first use.
 func (s *Server) Handler() http.Handler {
-	return s.mux
+	s.finishOnce.Do(s.registerCoauthoringFallback)
+	h := http.Handler(s.mux)
+	if s.opts.Debug {
+		h = debuglog.Middleware(s.opts.Logger, h)
+	}
+	return h
 }
 
-// BasePath returns the configured mount prefix (e.g. "/api/office").
+// Debug reports whether verbose logging is enabled.
+func (s *Server) Debug() bool {
+	return s.opts.Debug
+}
+
+// Mount registers an additional handler on the document server mux.
+func (s *Server) Mount(pattern string, handler http.Handler) {
+	s.mux.Handle(pattern, handler)
+}
+
+// BasePath returns the configured mount prefix (e.g. "/office").
 func (s *Server) BasePath() string {
 	return s.opts.BasePath
 }
@@ -96,19 +116,37 @@ func (s *Server) buildRoutes() {
 	s.mux.HandleFunc(prefix+"/healthz", s.handleHealth)
 
 	if s.opts.AssetDir != "" {
-		if h := static.Dir(s.opts.AssetDir, "web-apps"); h != nil {
-			s.mux.Handle(prefix+"/web-apps/", http.StripPrefix(prefix+"/web-apps/", h))
+		webApps := static.Dir(s.opts.AssetDir, "web-apps")
+		sdkjs := static.Dir(s.opts.AssetDir, "sdkjs")
+		if webApps != nil {
+			s.mux.Handle(prefix+"/web-apps/", http.StripPrefix(prefix+"/web-apps/", webApps))
 		}
-		if h := static.Dir(s.opts.AssetDir, "sdkjs"); h != nil {
-			s.mux.Handle(prefix+"/sdkjs/", http.StripPrefix(prefix+"/sdkjs/", h))
+		if sdkjs != nil {
+			s.mux.Handle(prefix+"/sdkjs/", http.StripPrefix(prefix+"/sdkjs/", sdkjs))
+		}
+		s.mux.HandleFunc(prefix+"/document_editor_service_worker.js", s.handleServiceWorker)
+		if mirrorAssetsAtRoot(prefix) {
+			if webApps != nil {
+				s.mux.Handle("/web-apps/", http.StripPrefix("/web-apps/", webApps))
+			}
+			if sdkjs != nil {
+				s.mux.Handle("/sdkjs/", http.StripPrefix("/sdkjs/", sdkjs))
+			}
+			s.mux.HandleFunc("/document_editor_service_worker.js", s.handleServiceWorker)
 		}
 	}
 
 	cacheDir := s.cacheDir()
 	_ = os.MkdirAll(cacheDir, 0o755)
 	s.mux.Handle(prefix+"/cache/files/", http.StripPrefix(prefix+"/cache/files/", http.FileServer(http.Dir(cacheDir))))
+}
 
-	co := ws.New(s.opts.ProtocolVersion, s.opts.Logger)
+func (s *Server) registerCoauthoringFallback() {
+	prefix := s.opts.BasePath
+	if prefix == "" {
+		prefix = "/"
+	}
+	co := ws.NewWithOptions(s.opts.ProtocolVersion, s.opts.Logger, s.opts.Debug)
 	s.mux.Handle(prefix+"/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rel := strings.TrimPrefix(r.URL.Path, prefix)
 		if _, ok := ws.Match(strings.Trim(rel, "/")); ok {
@@ -131,6 +169,26 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"status":"ok","version":` + strconvQuote(s.opts.ProtocolVersion) + `}`))
 }
 
+func (s *Server) handleServiceWorker(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	path := s.opts.AssetDir + string(os.PathSeparator) + "sdkjs" + string(os.PathSeparator) +
+		"common" + string(os.PathSeparator) + "serviceworker" + string(os.PathSeparator) +
+		"document_editor_service_worker.js"
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	http.ServeFile(w, r, path)
+}
+
 func strconvQuote(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+}
+
+// mirrorAssetsAtRoot reports whether editor assets should also be served from /sdkjs and /web-apps.
+// The Euro-Office editor iframe resolves some script paths from the site root.
+func mirrorAssetsAtRoot(basePath string) bool {
+	basePath = strings.TrimSuffix(strings.TrimSpace(basePath), "/")
+	return basePath != "" && basePath != "/"
 }

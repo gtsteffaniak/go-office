@@ -6,7 +6,7 @@ import (
 )
 
 // DefaultBasePath is the default URL prefix for the embedded document server.
-const DefaultBasePath = "/api/office"
+const DefaultBasePath = "/office"
 
 // Options configures a document server instance.
 type Options struct {
@@ -15,7 +15,7 @@ type Options struct {
 	AssetDir string
 
 	// BasePath is the full URL prefix where this server is mounted.
-	// Defaults to DefaultBasePath (/api/office). Use JoinBasePath to combine
+	// Defaults to DefaultBasePath (/office). Use JoinBasePath to combine
 	// an application subpath (e.g. FileBrowser http.baseURL) with the office mount.
 	// Must not include a trailing slash.
 	BasePath string
@@ -30,6 +30,9 @@ type Options struct {
 	// ConvertLimit caps concurrent x2t subprocess conversions (default 1).
 	ConvertLimit int
 
+	// Debug enables verbose request and protocol logging.
+	Debug bool
+
 	Logger *slog.Logger
 }
 
@@ -37,9 +40,9 @@ type Options struct {
 // appBase is typically the host app's configured subpath (e.g. "/myapp/" or "/").
 // mount defaults to DefaultBasePath when empty.
 //
-//	JoinBasePath("/", "")           -> "/api/office"
-//	JoinBasePath("/myapp/", "")     -> "/myapp/api/office"
-//	JoinBasePath("/myapp", "api/office") -> "/myapp/api/office"
+//	JoinBasePath("/", "")           -> "/office"
+//	JoinBasePath("/myapp/", "")     -> "/myapp/office"
+//	JoinBasePath("/myapp", "office") -> "/myapp/office"
 func JoinBasePath(appBase, mount string) string {
 	if mount == "" {
 		mount = DefaultBasePath
@@ -62,6 +65,9 @@ func (o *Options) normalize() {
 	}
 	if o.Logger == nil {
 		o.Logger = slog.Default()
+	}
+	if o.Debug {
+		o.Logger.Debug("go-office debug logging enabled")
 	}
 }
 

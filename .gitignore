@@ -15,7 +15,8 @@ coverage.out
 *.swp
 
 # Euro-Office assets (not vendored in this repo; populated by scripts/fetch-assets.*)
-/assets/
+/assets/*
+!/assets/.gitkeep
 
 # Playwright
 frontend/node_modules/

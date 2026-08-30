@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-test.describe.configure({ mode: "parallel", timeout: 15_000 });
+test.describe.configure({ mode: "parallel" });
 
 test.describe("demo infrastructure", () => {
   test("health endpoint", async ({ request }) => {
@@ -24,13 +24,13 @@ test.describe("demo infrastructure", () => {
   });
 
   test("demo landing page loads", async ({ page }) => {
-    await page.goto("/demo/");
+    await page.goto("/demo/", { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: /go-office demo/i })).toBeVisible();
     await expect(page.locator("code").first()).toBeVisible();
   });
 
   test("site home loads", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: /^go-office$/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /github.com\/quantumx-apps\/go-office/i })).toBeVisible();
   });

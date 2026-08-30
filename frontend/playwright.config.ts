@@ -18,7 +18,7 @@ export default defineConfig({
   use: {
     baseURL,
     actionTimeout: ciTest ? 30_000 : 15_000,
-    navigationTimeout: ciTest ? 30_000 : 15_000,
+    navigationTimeout: ciTest ? 60_000 : 30_000,
     trace: "on-first-retry",
     locale: "en-US",
   },

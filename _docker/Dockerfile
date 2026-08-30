@@ -39,7 +39,7 @@ COPY go.mod ./go.mod
 COPY scripts/euro-office.version ./scripts/euro-office.version
 COPY --from=gobuild /out/fetch-assets /usr/local/bin/fetch-assets
 
-# Optional host-built assets (empty dir is fine — see Makefile mkdir -p assets).
+# Optional host-built assets (populated by make build or CI cache; .gitkeep when empty).
 COPY assets /assets-cache/
 
 RUN set -eux; \

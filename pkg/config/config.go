@@ -9,6 +9,7 @@ type EditorRequest struct {
 	FileType     string
 	DocumentType string // word, cell, slide, pdf — inferred from FileType if empty
 	DocumentURL  string
+	StoragePath  string // host VFS path for Save; empty when only URL is available
 	CallbackURL  string
 	UserID       string
 	UserName     string

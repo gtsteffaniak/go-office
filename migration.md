@@ -118,7 +118,7 @@ Plan accordingly before migrating production **edit-and-save** workflows:
 
 | Feature | ONLYOFFICE Document Server | go-office (current) |
 | ------- | -------------------------- | ------------------- |
-| Save / force-save to integrator | Yes | **No** (callback stub only) — Phase 1 |
+| Save / force-save to integrator | Yes | **Yes** (coauthoring save → reverse x2t → callback → `Storage.Save`) |
 | Multi-user co-editing | Yes | **No** — Phase 3 |
 | WebSocket coauthoring | Yes | Polling only (501 on WS upgrade) |
 | PostgreSQL / Redis / clustering | Yes | **No** (single process) |

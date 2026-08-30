@@ -12,22 +12,25 @@ const defaultPollHold = 20 * time.Second
 
 // Handler serves ONLYOFFICE coauthoring endpoints at /doc/{key}/c/.
 type Handler struct {
-	Version  string
-	Build    BuildInfo
-	BasePath string
-	Logger   *slog.Logger
-	Debug    bool
-	PollHold time.Duration
-	Opener   *Opener
+	Version   string
+	Build     BuildInfo
+	BasePath  string
+	Logger    *slog.Logger
+	Debug     bool
+	PollHold  time.Duration
+	Opener    *Opener
+	Scheduler *saveScheduler
 }
 
 // HandlerOptions configures a coauthoring handler.
 type HandlerOptions struct {
-	Version  string
-	BasePath string
-	Logger   *slog.Logger
-	Debug    bool
-	Opener   *Opener
+	Version   string
+	BasePath  string
+	Logger    *slog.Logger
+	Debug     bool
+	Opener    *Opener
+	CacheDir  string
+	Saver     DocumentSaver
 }
 
 func New(version string, logger *slog.Logger) *Handler {
@@ -48,6 +51,9 @@ func NewWithOptions(opts HandlerOptions) *Handler {
 	h.Debug = opts.Debug
 	h.BasePath = opts.BasePath
 	h.Opener = opts.Opener
+	if opts.Saver != nil && opts.CacheDir != "" {
+		h.Scheduler = newSaveScheduler(opts.CacheDir, opts.Saver, opts.Logger)
+	}
 	return h
 }
 
@@ -132,6 +138,10 @@ func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey st
 				if req, ok := parseAuthPacket(packet); ok {
 					sess.onAuth(req)
 					sess.startOpen(r, h.Opener, req)
+					continue
+				}
+				if msg, ok := parseSocketMessage(packet); ok {
+					h.handleSaveMessage(sess, msg, docKey, r)
 				}
 			}
 		}

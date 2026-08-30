@@ -87,7 +87,13 @@ func (s *Server) BuildEditorConfig(ctx context.Context, req config.EditorRequest
 	if req.DocumentKey == "" {
 		return nil, errors.New("office: document key is required")
 	}
-	s.sessions.Upsert(req.DocumentKey, req.DocumentURL)
+	s.sessions.UpsertDoc(session.Document{
+		Key:         req.DocumentKey,
+		Path:        req.StoragePath,
+		URL:         req.DocumentURL,
+		FileType:    req.FileType,
+		CallbackURL: req.CallbackURL,
+	})
 
 	token := ""
 	if len(s.opts.JWTSecret) > 0 {
@@ -175,6 +181,8 @@ func (s *Server) registerCoauthoringFallback() {
 		Logger:   s.opts.Logger,
 		Debug:    s.opts.Debug,
 		Opener:   opener,
+		CacheDir: s.cacheDir(),
+		Saver:    s,
 	})
 	docPattern := joinURLPath(prefix, "doc") + "/"
 	s.mux.Handle(docPattern, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

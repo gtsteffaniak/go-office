@@ -26,11 +26,14 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	doc, ok := s.sessions.Get(key)
-	if !ok || doc.Path == "" {
+	if !ok || (doc.Path == "" && doc.URL == "") {
 		http.NotFound(w, r)
 		return
 	}
-	docURL := doc.Path
+	docURL := doc.URL
+	if docURL == "" {
+		docURL = doc.Path
+	}
 	if bodyURL := parseDownloadFileBody(r); bodyURL != "" {
 		docURL = bodyURL
 	}

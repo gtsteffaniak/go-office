@@ -13,3 +13,39 @@ GNU Affero General Public License for more details.
 
 You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+Modifications to Euro-Office / ONLYOFFICE components
+--------------------------------------------------
+
+go-office is a Go library and HTTP server that integrates with Euro-Office /
+ONLYOFFICE browser clients. The editor UI (`web-apps/`, `sdkjs/`) and converter
+binaries (`x2t`) are **not** vendored or modified in this repository. They are
+downloaded at build time from the pinned Euro-Office Document Server release
+(see `scripts/euro-office.version` and `THIRD_PARTY_NOTICES`).
+
+Changes made by this project are limited to the Go code in this repository
+(document server, coauthoring protocol adapter, asset fetch tooling, demo UI,
+and Docker packaging). See `CHANGELOG.md` for release history.
+
+No EULA acceptance required
+---------------------------
+
+Users do not need to click, sign, or otherwise accept a separate End User
+License Agreement to download, build, host, or run go-office or its Docker
+images. The GNU Affero General Public License v3.0 grants rights automatically
+when you receive the software. This project provides license text (`LICENSE`),
+source availability (https://github.com/quantumx-apps/go-office), and notices
+to inform you of your rights — not to gate access behind an acceptance step.
+
+Branding (AGPL Section 7)
+-------------------------
+
+The ONLYOFFICE / Euro-Office editor UI includes branding and attribution that
+must remain visible under AGPL Section 7 ("Additional Terms"). When you deploy
+go-office you must **not** remove, obscure, or replace ONLYOFFICE / Euro-Office
+logos, "Powered by" notices, or other required attribution in the editor
+interface unless you have a separate written permission from the rights holder.
+
+go-office does not currently enforce branding in code; compliance is the
+responsibility of deployers and integrators. Future versions may add checks or
+documentation to make this obligation clearer.

@@ -13,6 +13,7 @@ import (
 
 func main() {
 	force := flag.Bool("force", false, "re-download even if assets are present")
+	fonts := flag.Bool("fonts", false, "regenerate font files only (AllFonts.js, font_selection.bin)")
 	out := flag.String("out", "", "output directory (default: ./assets)")
 	versionFile := flag.String("version-file", "", "path to scripts/euro-office.version")
 	flag.Parse()
@@ -30,6 +31,17 @@ func main() {
 	vf := *versionFile
 	if vf == "" {
 		vf = filepath.Join(root, "scripts", "euro-office.version")
+	}
+
+	if *fonts {
+		if err := assetfetch.RegenerateFonts(assetfetch.Options{
+			OutDir:      outDir,
+			VersionFile: vf,
+		}, true); err != nil {
+			fmt.Fprintln(os.Stderr, "fetch-assets:", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	if err := assetfetch.Fetch(assetfetch.Options{

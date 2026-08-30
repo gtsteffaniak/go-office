@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>go-office demo</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; background: #f4f4f4; }
+    header {
+      padding: 0.6rem 1rem;
+      background: #fff;
+      border-bottom: 1px solid #ddd;
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    header code { background: #eee; padding: 0.1rem 0.35rem; border-radius: 4px; }
+    header a { color: #0b57d0; text-decoration: none; }
+    header a:hover { text-decoration: underline; }
+    #editor { height: calc(100% - 48px); }
+    #status { color: #555; font-size: 0.9rem; }
+  </style>
+  <script id="office-api" type="text/javascript"></script>
+</head>
+<body>
+  <header>
+    <a href="{{.LandingURL}}">← Documents</a>
+    <strong id="doc-title">go-office demo</strong>
+    <span id="status">Loading…</span>
+    <span>File: <code id="sample-path"></code></span>
+  </header>
+  <div id="editor"></div>
+  <script>
+    var SAMPLE_FILE = {{.FileJSON}};
+    var officeBase = {{.OfficeBaseJSON}};
+    var apiBase = {{.APIBaseJSON}};
+    var landingURL = {{.LandingURLJSON}};
+
+    document.getElementById("sample-path").textContent = SAMPLE_FILE;
+
+    var statusEl = document.getElementById("status");
+    function setStatus(msg) { statusEl.textContent = msg; }
+
+    var apiScript = document.getElementById("office-api");
+    apiScript.src = officeBase + "/web-apps/apps/api/documents/api.js";
+    apiScript.onload = function () {
+      var configUrl = apiBase + "/demo/config?file=" + encodeURIComponent(SAMPLE_FILE);
+      fetch(configUrl)
+        .then(function (res) {
+          if (!res.ok) throw new Error("config " + res.status);
+          return res.json();
+        })
+        .then(function (config) {
+          document.getElementById("doc-title").textContent = config.document.title;
+          setStatus("Opening " + config.document.title + "…");
+          window.docEditor = new DocsAPI.DocEditor("editor", config);
+          setStatus("Editor ready");
+        })
+        .catch(function (err) {
+          setStatus("Error: " + err.message);
+          console.error(err);
+        });
+    };
+    apiScript.onerror = function () {
+      setStatus("Failed to load api.js — fetch Euro-Office assets first (see README)");
+    };
+  </script>
+</body>
+</html>

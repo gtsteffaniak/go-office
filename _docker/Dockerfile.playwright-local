@@ -1,0 +1,29 @@
+# Long-running demo server for local Playwright UI (tests run on host).
+#   make test-playwright-ui
+
+FROM debian:bookworm-slim
+WORKDIR /app
+
+LABEL org.opencontainers.image.source="https://github.com/quantumx-apps/go-office" \
+      org.opencontainers.image.licenses="AGPL-3.0"
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+
+COPY bin/go-office ./go-office
+COPY assets/ ./assets/
+COPY sample-files/ ./sample-files/
+
+RUN chmod +x /app/go-office /app/assets/converter/bin/* 2>/dev/null || true
+
+ENV GO_OFFICE_ASSETS=/app/assets
+ENV GO_OFFICE_PLAYWRIGHT_TEST=true
+
+EXPOSE 8080
+
+ENTRYPOINT ["./go-office", \
+  "-assets", "/app/assets", \
+  "-addr", ":8080", \
+  "-data", "/app", \
+  "-samples", "sample-files", \
+  "-demo", \
+  "-public", "http://127.0.0.1:8080"]

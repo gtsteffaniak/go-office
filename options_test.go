@@ -10,11 +10,11 @@ func TestJoinBasePath(t *testing.T) {
 	cases := []struct {
 		app, mount, want string
 	}{
-		{"/", "", "/api/office"},
-		{"/myapp/", "", "/myapp/api/office"},
-		{"/myapp", "api/office", "/myapp/api/office"},
-		{"", "api/office", "/api/office"},
-		{"/fb/", "/api/office/", "/fb/api/office"},
+		{"/", "", "/office"},
+		{"/myapp/", "", "/myapp/office"},
+		{"/myapp", "office", "/myapp/office"},
+		{"", "office", "/office"},
+		{"/fb/", "/office/", "/fb/office"},
 	}
 	for _, tc := range cases {
 		got := office.JoinBasePath(tc.app, tc.mount)

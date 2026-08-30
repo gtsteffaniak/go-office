@@ -1,0 +1,48 @@
+# Self-contained CI image: Playwright + go-office demo + E2E tests.
+#   make build && make test-playwright
+
+FROM node:22-bookworm AS playwright-base
+WORKDIR /app/frontend
+RUN npm init -y \
+ && npm i @playwright/test@1.49.1 @types/node@22.10.2 typescript@5.7.2 \
+ && npx playwright install --with-deps firefox
+
+FROM playwright-base
+WORKDIR /app
+
+LABEL org.opencontainers.image.source="https://github.com/quantumx-apps/go-office" \
+      org.opencontainers.image.licenses="AGPL-3.0"
+
+COPY bin/go-office ./go-office
+COPY assets/ ./assets/
+COPY sample-files/ ./sample-files/
+
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json* ./
+COPY frontend/playwright.config.ts ./
+COPY frontend/tests/ ./tests/
+
+RUN npm install \
+ && npx playwright install --with-deps firefox
+
+RUN chmod +x /app/go-office /app/assets/converter/bin/* 2>/dev/null || true
+
+ENV GO_OFFICE_ASSETS=/app/assets
+ENV GO_OFFICE_PLAYWRIGHT_TEST=true
+ENV PLAYWRIGHT_BASE_URL=http://127.0.0.1:8080
+ENV PLAYWRIGHT_STRICT=1
+ENV PLAYWRIGHT_SAMPLE_TIER=3
+
+RUN timeout 10m sh -c 'cd /app && ./go-office \
+      -assets /app/assets \
+      -addr :8080 \
+      -data /app \
+      -samples sample-files \
+      -demo \
+      -public http://127.0.0.1:8080 & \
+    for i in $(seq 1 90); do \
+      curl -sf http://127.0.0.1:8080/office/health >/dev/null && break; \
+      sleep 2; \
+    done && \
+    curl -sf http://127.0.0.1:8080/office/health >/dev/null && \
+    cd /app/frontend && npx playwright test'

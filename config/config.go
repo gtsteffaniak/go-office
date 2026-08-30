@@ -1,11 +1,13 @@
 package config
 
+import "strings"
+
 // EditorRequest is the host-provided metadata needed to open a document.
 type EditorRequest struct {
 	DocumentKey  string
 	Title        string
 	FileType     string
-	DocumentType string // word, cell, slide — inferred from FileType if empty
+	DocumentType string // word, cell, slide, pdf — inferred from FileType if empty
 	DocumentURL  string
 	CallbackURL  string
 	UserID       string
@@ -34,17 +36,7 @@ func Build(req EditorRequest, token string) map[string]any {
 		mode = req.Permissions.Edit
 	}
 	out := map[string]any{
-		"document": map[string]any{
-			"fileType": req.FileType,
-			"key":      req.DocumentKey,
-			"title":    req.Title,
-			"url":      req.DocumentURL,
-			"permissions": map[string]any{
-				"edit":     req.Permissions.Edit,
-				"download": req.Permissions.Download,
-				"print":    req.Permissions.Print,
-			},
-		},
+		"document": buildDocument(req),
 		"documentType": docType,
 		"editorConfig": map[string]any{
 			"callbackUrl": req.CallbackURL,
@@ -67,12 +59,33 @@ func Build(req EditorRequest, token string) map[string]any {
 	return out
 }
 
+func buildDocument(req EditorRequest) map[string]any {
+	doc := map[string]any{
+		"fileType": req.FileType,
+		"key":      req.DocumentKey,
+		"title":    req.Title,
+		"url":      req.DocumentURL,
+		"permissions": map[string]any{
+			"edit":     req.Permissions.Edit,
+			"download": req.Permissions.Download,
+			"print":    req.Permissions.Print,
+		},
+	}
+	// Skip the common/ bootstrap iframe (it hangs when served as /common/ without index.html).
+	if strings.EqualFold(req.FileType, "pdf") {
+		doc["isForm"] = false
+	}
+	return doc
+}
+
 func inferDocumentType(fileType string) string {
 	switch fileType {
 	case "xls", "xlsx", "xlsm", "xlsb", "ods", "csv":
 		return "cell"
 	case "ppt", "pptx", "pptm", "odp":
 		return "slide"
+	case "pdf":
+		return "pdf"
 	default:
 		return "word"
 	}

@@ -40,7 +40,20 @@ func Fetch(opts Options) error {
 	marker := filepath.Join(opts.OutDir, ".extracted")
 	if !opts.Force && isUpToDate(marker, v.Release, opts.OutDir) {
 		fmt.Printf("assets already present for %s (%s)\n", v.Release, opts.OutDir)
+		if err := ensureConverterExecutables(filepath.Join(opts.OutDir, "converter", "bin")); err != nil {
+			return err
+		}
 		return nil
+	}
+	if needsConverterBin(opts.OutDir) {
+		fmt.Println("Converter binaries missing — re-extracting assets...")
+	}
+	if !opts.Force && needsFontGeneration(opts.OutDir) {
+		if fontGenerationPossible(opts.OutDir) {
+			fmt.Println("Generating missing AllFonts.js for existing assets...")
+			return GenerateAllFonts(opts.OutDir)
+		}
+		fmt.Println("Asset tree incomplete — re-extracting from package...")
 	}
 
 	tmpRoot, err := os.MkdirTemp("", "go-office-fetch-*")
@@ -80,15 +93,28 @@ func Fetch(opts Options) error {
 	if err := copyTree(filepath.Join(dsRoot, "sdkjs"), filepath.Join(opts.OutDir, "sdkjs")); err != nil {
 		return err
 	}
-	convSrc := filepath.Join(dsRoot, "server", "FileConverter", "bin")
-	if st, err := os.Stat(convSrc); err == nil && st.IsDir() {
-		if err := copyTree(convSrc, filepath.Join(opts.OutDir, "converter", "bin")); err != nil {
-			return err
-		}
+	if err := copyConverterBin(dsRoot, opts.OutDir); err != nil {
+		return err
 	}
 	fontsSrc := filepath.Join(dsRoot, "fonts")
 	if st, err := os.Stat(fontsSrc); err == nil && st.IsDir() {
 		if err := copyTree(fontsSrc, filepath.Join(opts.OutDir, "fonts")); err != nil {
+			return err
+		}
+	}
+	coreFontsSrc := filepath.Join(dsRoot, "core-fonts")
+	if st, err := os.Stat(coreFontsSrc); err == nil && st.IsDir() {
+		if err := copyTree(coreFontsSrc, filepath.Join(opts.OutDir, "core-fonts")); err != nil {
+			return err
+		}
+	}
+	toolsSrc := filepath.Join(dsRoot, "server", "tools", "allfontsgen")
+	if st, err := os.Stat(toolsSrc); err == nil && !st.IsDir() {
+		toolsDst := filepath.Join(opts.OutDir, "tools", "allfontsgen")
+		if err := copyFile(toolsSrc, toolsDst); err != nil {
+			return err
+		}
+		if err := os.Chmod(toolsDst, 0o755); err != nil {
 			return err
 		}
 	}
@@ -97,8 +123,23 @@ func Fetch(opts Options) error {
 		return err
 	}
 
+	if err := GenerateAllFonts(opts.OutDir); err != nil {
+		return err
+	}
+
 	fmt.Printf("Done. Set GO_OFFICE_ASSETS=%s and ProtocolVersion=%s\n", opts.OutDir, v.Protocol)
 	return nil
+}
+
+func needsConverterBin(outDir string) bool {
+	x2t := filepath.Join(outDir, "converter", "bin", "x2t")
+	st, err := os.Stat(x2t)
+	return err != nil || st.IsDir()
+}
+
+// IsUpToDate reports whether extracted assets are complete for release.
+func IsUpToDate(marker, release, outDir string) bool {
+	return isUpToDate(marker, release, outDir)
 }
 
 func isUpToDate(marker, release, outDir string) bool {
@@ -107,6 +148,9 @@ func isUpToDate(marker, release, outDir string) bool {
 		return false
 	}
 	if string(b) != release {
+		return false
+	}
+	if needsConverterBin(outDir) || !FontsReady(outDir) {
 		return false
 	}
 	apiJs := filepath.Join(outDir, "web-apps", "apps", "api", "documents", "api.js")
@@ -163,13 +207,17 @@ func copyFile(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
 
-	out, err := os.Create(dst)
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode().Perm())
 	if err != nil {
 		return err
 	}

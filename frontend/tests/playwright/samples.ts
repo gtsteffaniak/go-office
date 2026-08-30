@@ -10,7 +10,7 @@ export type SampleFile = {
   /** Path relative to repo root, e.g. sample-files/sample.docx */
   path: string;
   tier: SampleTier;
-  editor: "word" | "cell" | "slide";
+  editor: "word" | "cell" | "slide" | "pdf";
 };
 
 /**
@@ -37,7 +37,7 @@ export const SAMPLE_FILES: SampleFile[] = [
   { path: "sample-files/sample.dotx", tier: 3, editor: "word" },
   { path: "sample-files/sample.xlsm", tier: 3, editor: "cell" },
   { path: "sample-files/sample.pptm", tier: 3, editor: "slide" },
-  { path: "sample-files/sample.pdf", tier: 3, editor: "word" },
+  { path: "sample-files/sample.pdf", tier: 3, editor: "pdf" },
 ];
 
 export function sampleExists(relPath: string): boolean {

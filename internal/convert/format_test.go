@@ -24,6 +24,15 @@ func TestFormatCanvasTo(t *testing.T) {
 	}
 }
 
+func TestIsBrowserEditorFormat(t *testing.T) {
+	if !convert.IsBrowserEditorFormat("pdf") {
+		t.Fatal("pdf should be browser editor format")
+	}
+	if convert.IsBrowserEditorFormat("docx") {
+		t.Fatal("docx should not be browser editor format")
+	}
+}
+
 func TestFormatFromExtension(t *testing.T) {
 	if got := convert.FormatFromExtension("csv"); got != 0x0104 {
 		t.Fatalf("csv = %#x", got)

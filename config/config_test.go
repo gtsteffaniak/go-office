@@ -38,11 +38,23 @@ func TestInferDocumentType(t *testing.T) {
 		"xlsx": "cell",
 		"pptx": "slide",
 		"docx": "word",
+		"pdf":  "pdf",
 	}
 	for ext, want := range cases {
 		got := config.Build(config.EditorRequest{FileType: ext}, "")["documentType"]
 		if got != want {
 			t.Fatalf("%s: got %v want %s", ext, got, want)
 		}
+	}
+}
+
+func TestPDFConfigSkipsCommonBootstrap(t *testing.T) {
+	cfg := config.Build(config.EditorRequest{FileType: "pdf"}, "")
+	doc := cfg["document"].(map[string]any)
+	if doc["isForm"] != false {
+		t.Fatalf("isForm = %v, want false", doc["isForm"])
+	}
+	if cfg["documentType"] != "pdf" {
+		t.Fatalf("documentType = %v", cfg["documentType"])
 	}
 }

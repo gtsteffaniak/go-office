@@ -53,6 +53,16 @@ func FormatFromExtension(ext string) int {
 	}
 }
 
+// IsBrowserEditorFormat reports formats opened client-side without x2t (origin.ext in cache).
+func IsBrowserEditorFormat(ext string) bool {
+	switch strings.TrimPrefix(strings.ToLower(ext), ".") {
+	case "pdf", "pdfa", "djvu", "xps", "oxps":
+		return true
+	default:
+		return false
+	}
+}
+
 // FormatCanvasTo returns the Editor.bin canvas format for the given source extension.
 func FormatCanvasTo(ext string) int {
 	ext = strings.TrimPrefix(strings.ToLower(ext), ".")

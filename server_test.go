@@ -94,6 +94,51 @@ func TestMirrorsRootAssets(t *testing.T) {
 	}
 }
 
+func TestDownloadFile(t *testing.T) {
+	fileSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/pdf")
+		_, _ = w.Write([]byte("%PDF-1.4 test"))
+	}))
+	defer fileSrv.Close()
+
+	srv, err := office.New(nopStorage{}, office.Options{BasePath: "/office"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const key = "abc123"
+	if _, err := srv.BuildEditorConfig(context.Background(), config.EditorRequest{
+		DocumentKey: key,
+		FileType:    "pdf",
+		DocumentURL: fileSrv.URL + "/sample.pdf",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/downloadfile/"+key, strings.NewReader(`{"url":"`+fileSrv.URL+`/sample.pdf"}`))
+	req.Header.Set("Range", "bytes=0-3")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusPartialContent {
+		t.Fatalf("range status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != "%PDF" {
+		t.Fatalf("range body = %q", rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/downloadfile/"+key, nil)
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Header().Get("Content-Type"), "pdf") {
+		t.Fatalf("content-type = %q", rec.Header().Get("Content-Type"))
+	}
+	if !strings.Contains(rec.Body.String(), "%PDF") {
+		t.Fatalf("body = %q", rec.Body.String())
+	}
+}
+
 func TestServesFonts(t *testing.T) {
 	dir := t.TempDir()
 	fontsDir := filepath.Join(dir, "fonts")

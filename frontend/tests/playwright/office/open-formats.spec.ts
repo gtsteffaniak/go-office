@@ -1,4 +1,5 @@
 import { test, expect } from "../test-setup";
+import { waitForEditorShell } from "../editor";
 import {
   REPO_ROOT,
   sampleExists,
@@ -8,10 +9,8 @@ import {
 
 const maxTier = Number(process.env.PLAYWRIGHT_SAMPLE_TIER ?? "3") as 1 | 2 | 3;
 
-/** Fail fast when the editor shell never mounts (no 90s hangs). */
-const EDITOR_IFRAME_TIMEOUT = 25_000;
-const STATUS_OK_TIMEOUT = 10_000;
-const SETTLE_MS = 1_000;
+const STATUS_OK_TIMEOUT = 5_000;
+const SETTLE_MS = 500;
 
 test.describe.configure({ mode: "parallel" });
 
@@ -31,10 +30,7 @@ async function assertEditorOpens(page: import("@playwright/test").Page, sample: 
     timeout: STATUS_OK_TIMEOUT,
   });
 
-  // DocsAPI mounts an iframe for the editor chrome.
-  await expect(page.locator("#editor iframe")).toBeVisible({
-    timeout: EDITOR_IFRAME_TIMEOUT,
-  });
+  await waitForEditorShell(page, sample.editor);
 
   await page.waitForTimeout(SETTLE_MS);
 

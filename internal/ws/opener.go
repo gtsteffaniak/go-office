@@ -35,8 +35,8 @@ func documentOpenPacket(cmdType, status string, data any) (string, error) {
 }
 
 func (o *Opener) Open(ctx context.Context, origin, basePath, docKey string, cmd openCmd) ([]string, error) {
-	if o == nil || o.Converter == nil {
-		pkt, err := documentOpenPacket(cmd.Command, "error", "document converter not configured")
+	if o == nil {
+		pkt, err := documentOpenPacket(cmd.Command, "error", "document opener not configured")
 		if err != nil {
 			return nil, err
 		}
@@ -70,6 +70,16 @@ func (o *Opener) Open(ctx context.Context, origin, basePath, docKey string, cmd 
 	}
 
 	outDir := filepath.Join(o.CacheDir, docKey)
+	if convert.IsBrowserEditorFormat(ext) {
+		return o.openBrowserDocument(cmd, origin, basePath, docKey, ext, tmpPath, outDir)
+	}
+	if o.Converter == nil {
+		pkt, err := documentOpenPacket(cmd.Command, "error", "document converter not configured")
+		if err != nil {
+			return nil, err
+		}
+		return []string{pkt}, nil
+	}
 	if err := o.Converter.ToEditorBin(ctx, tmpPath, outDir); err != nil {
 		if o.Logger != nil {
 			o.Logger.Error("document open failed", "key", docKey, "url", cmd.URL, "err", err)
@@ -100,6 +110,47 @@ func (o *Opener) Open(ctx context.Context, origin, basePath, docKey string, cmd 
 		}
 	}
 	return []string{pkt}, nil
+}
+
+func (o *Opener) openBrowserDocument(cmd openCmd, origin, basePath, docKey, ext, srcPath, outDir string) ([]string, error) {
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return o.errorPackets(cmd.Command, err)
+	}
+	cacheName := "origin." + ext
+	destPath := filepath.Join(outDir, cacheName)
+	if err := copyFile(srcPath, destPath); err != nil {
+		return o.errorPackets(cmd.Command, err)
+	}
+	files := map[string]string{
+		cacheName: fileURL(origin, basePath, docKey, cacheName),
+	}
+	pkt, err := documentOpenPacket(cmd.Command, "ok", files)
+	if err != nil {
+		return nil, err
+	}
+	if o.Logger != nil {
+		if st, err := os.Stat(destPath); err == nil {
+			o.Logger.Info("document open ok", "key", docKey, "originBytes", st.Size(), "format", ext)
+		}
+	}
+	return []string{pkt}, nil
+}
+
+func copyFile(src, dest string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dest)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
 }
 
 func (o *Opener) errorPackets(cmdType string, err error) ([]string, error) {

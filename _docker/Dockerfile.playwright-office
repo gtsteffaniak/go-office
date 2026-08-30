@@ -32,8 +32,6 @@ ENV GO_OFFICE_PLAYWRIGHT_TEST=true
 ENV PLAYWRIGHT_BASE_URL=http://127.0.0.1:8080
 ENV PLAYWRIGHT_STRICT=1
 ENV PLAYWRIGHT_SAMPLE_TIER=3
-ENV PLAYWRIGHT_WORKERS=4
-ENV CI=true
 
 RUN timeout 10m sh -c 'cd /app && ./go-office \
       -assets /app/assets \

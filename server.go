@@ -147,6 +147,11 @@ func (s *Server) buildRoutes() {
 	cacheDir := s.cacheDir()
 	_ = os.MkdirAll(cacheDir, 0o755)
 	s.mux.Handle(prefix+"/cache/files/", http.StripPrefix(prefix+"/cache/files/", http.FileServer(http.Dir(cacheDir))))
+
+	s.mux.HandleFunc("/downloadfile/", s.handleDownloadFile)
+	if base := strings.Trim(strings.TrimSpace(prefix), "/"); base != "" && !mirrorAssetsAtRoot(prefix) {
+		s.mux.HandleFunc("/"+base+"/downloadfile/", s.handleDownloadFile)
+	}
 }
 
 func (s *Server) registerCoauthoringFallback() {

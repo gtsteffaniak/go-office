@@ -15,6 +15,7 @@ func init() {
 	_ = mime.AddExtensionType(".css", "text/css")
 	_ = mime.AddExtensionType(".wasm", "application/wasm")
 	_ = mime.AddExtensionType(".json", "application/json")
+	_ = mime.AddExtensionType(".svg", "image/svg+xml")
 }
 
 // Dir returns an http.Handler that serves files from root/subdir.

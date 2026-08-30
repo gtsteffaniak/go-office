@@ -122,7 +122,8 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /{$}", homeHandler)
-	mux.Handle("GET /docs/api{$}", http.HandlerFunc(homeHandler.ServeAPIDocs))
+	mux.Handle("GET /docs/api", http.HandlerFunc(homeHandler.ServeAPIDocs))
+	mux.Handle("GET /docs/api/", http.RedirectHandler("/docs/api", http.StatusPermanentRedirect))
 	mux.Handle("/", srv.Handler())
 
 	officeBase := strings.TrimSuffix(origin, "/") + strings.TrimSuffix(srv.BasePath(), "/")

@@ -1,0 +1,19 @@
+Third-Party Notices
+===================
+
+go-office does not vendor ONLYOFFICE / Euro-Office editor assets or converter
+binaries. When you deploy go-office you must supply them separately and comply
+with their licenses.
+
+Euro-Office Document Server assets (pinned)
+--------------------------------------------
+- Release: v9.3.4-hotfix.1 (see scripts/euro-office.version)
+- Components: web-apps/, sdkjs/, server/FileConverter/bin (x2t)
+- Source: https://github.com/Euro-Office/DocumentServer
+- License: GNU Affero General Public License v3.0
+- Fetched via `go run ./cmd/fetch-assets` (downloads release .deb; not vendored in git)
+
+github.com/golang-jwt/jwt/v5
+----------------------------
+- License: MIT
+- Used for signing ONLYOFFICE-compatible editor configuration tokens.

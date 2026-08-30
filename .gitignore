@@ -1,0 +1,17 @@
+# Binaries
+/go-office
+/cmd/go-office/go-office
+*.exe
+
+# Test / dev artifacts
+/cache/
+*.test
+coverage.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Euro-Office assets (not vendored in this repo; populated by scripts/fetch-assets.*)
+/assets/

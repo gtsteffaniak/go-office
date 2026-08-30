@@ -31,12 +31,9 @@ jobs:
         id: assets-cache
         with:
           path: assets
-          key: euro-office-assets-${{ hashFiles('scripts/euro-office.version') }}
-      - name: Fetch Euro-Office assets
-        if: steps.assets-cache.outputs.cache-hit != 'true'
-        run: make build
-      - name: Verify api.js
-        run: test -f assets/web-apps/apps/api/documents/api.js.tpl -o -f assets/web-apps/apps/api/documents/api.js
+          key: euro-office-assets-v3-${{ hashFiles('scripts/euro-office.version') }}
+      - name: Prepare assets
+        run: make ensure-assets
       - name: Integration tests
         env:
           GO_OFFICE_ASSETS: ${{ github.workspace }}/assets
@@ -56,12 +53,9 @@ jobs:
         id: assets-cache
         with:
           path: assets
-          key: euro-office-assets-${{ hashFiles('scripts/euro-office.version') }}
-      - name: Fetch Euro-Office assets
-        if: steps.assets-cache.outputs.cache-hit != 'true'
-        run: make build
-      - name: Ensure assets and x2t
-        run: make check-assets
+          key: euro-office-assets-v3-${{ hashFiles('scripts/euro-office.version') }}
+      - name: Prepare assets
+        run: make ensure-assets
       - name: Verify sample matrix
         run: make check-sample-matrix
       - name: Playwright E2E

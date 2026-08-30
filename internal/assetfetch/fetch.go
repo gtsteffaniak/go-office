@@ -144,6 +144,11 @@ func needsConverterBin(outDir string) bool {
 	return err != nil || st.IsDir()
 }
 
+// IsUpToDate reports whether extracted assets are complete for release.
+func IsUpToDate(marker, release, outDir string) bool {
+	return isUpToDate(marker, release, outDir)
+}
+
 func isUpToDate(marker, release, outDir string) bool {
 	b, err := os.ReadFile(marker)
 	if err != nil {
@@ -152,13 +157,13 @@ func isUpToDate(marker, release, outDir string) bool {
 	if string(b) != release {
 		return false
 	}
+	if needsConverterBin(outDir) || !FontsReady(outDir) {
+		return false
+	}
 	apiJs := filepath.Join(outDir, "web-apps", "apps", "api", "documents", "api.js")
 	apiTpl := filepath.Join(outDir, "web-apps", "apps", "api", "documents", "api.js.tpl")
 	if _, err := os.Stat(apiJs); err == nil {
-		if FontsReady(outDir) {
-			return !needsConverterBin(outDir)
-		}
-		return false
+		return true
 	}
 	if _, err := os.Stat(apiTpl); err == nil {
 		return true

@@ -33,7 +33,8 @@ func main() {
 	}
 
 	x2t := filepath.Join(*assets, "converter", "bin", "x2t")
-	if st, err := os.Stat(x2t); err != nil {
+	st, err := os.Stat(x2t)
+	if err != nil {
 		log("x2t stat failed", map[string]any{"path": x2t, "err": err.Error()})
 		writeReport(*report, lines)
 		os.Exit(1)
@@ -89,7 +90,7 @@ func main() {
 	}
 
 	outFile := filepath.Join(outDir, "Editor.bin")
-	st, err := os.Stat(outFile)
+	st, err = os.Stat(outFile)
 	if err != nil || st.Size() == 0 {
 		log("Editor.bin missing", map[string]any{"path": outFile, "err": fmt.Sprint(err)})
 		writeReport(*report, lines)

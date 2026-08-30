@@ -29,7 +29,7 @@ SAMPLE_DOC ?= $(SAMPLES_DIR)/sample.doc
 .PHONY: help setup build demo doctor fonts test test-integration clean \
         check-linux check-go mod-download fetch-assets compile check-assets check-samples test-x2t \
         playwright-base playwright-npm test-playwright test-playwright-ui check-sample-matrix \
-        build-docker build-docker-image build-docker-builder run-docker stop-docker
+        build-docker build-docker-image build-docker-builder run-docker stop-docker ensure-assets
 
 help:
 	@echo "go-office"
@@ -107,13 +107,15 @@ check-sample-matrix: check-samples
 	@chmod +x scripts/check-sample-matrix.sh
 	@scripts/check-sample-matrix.sh "$(SAMPLES_DIR)"
 
-fetch-assets: $(ALL_FONTS)
-
-$(API_JS) $(API_JS_TPL) $(ALL_FONTS): check-linux
+fetch-assets: check-linux
 	@echo "==> Euro-Office assets → $(GO_OFFICE_ASSETS)/"
-	@mkdir -p "$(BIN_DIR)"
+	@mkdir -p "$(BIN_DIR)" "$(GO_OFFICE_ASSETS)"
 	$(GO) build -o "$(FETCH_ASSETS_BIN)" ./cmd/fetch-assets
 	$(FETCH_ASSETS_BIN) -out "$(GO_OFFICE_ASSETS)"
+	@test -f "$(ALL_FONTS)" || (echo "error: fetch-assets did not create $(ALL_FONTS)" && exit 1)
+	@test -s "$(FONT_SELECTION)" || (echo "error: fetch-assets did not create $(FONT_SELECTION)" && exit 1)
+
+ensure-assets: fetch-assets check-assets
 
 compile: $(GO_OFFICE_BIN)
 
@@ -128,8 +130,8 @@ check-assets:
 		echo "       Run: make build"; \
 		exit 1; \
 	fi
-	@if [ ! -f "$(ALL_FONTS)" ]; then \
-		echo "error: AllFonts.js missing — run: make fonts"; \
+	@if [ ! -f "$(ALL_FONTS)" ] || [ ! -s "$(ALL_FONTS)" ]; then \
+		echo "error: AllFonts.js missing or empty — run: make fonts"; \
 		exit 1; \
 	fi
 	@if [ ! -s "$(FONT_SELECTION)" ]; then \
@@ -206,7 +208,7 @@ playwright-npm:
 	@echo "==> Playwright npm dependencies"
 	cd frontend && npm install
 
-test-playwright: build check-sample-matrix
+test-playwright: ensure-assets check-sample-matrix
 	@echo "==> Playwright E2E (Docker)"
 	GOOS=linux $(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
 	docker build -t "$(PLAYWRIGHT_TEST_IMAGE)" -f _docker/Dockerfile.playwright-office .

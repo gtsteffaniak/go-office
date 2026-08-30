@@ -2,9 +2,11 @@ package assetfetch
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 )
 
 // GenerateAllFonts builds sdkjs/common/AllFonts.js using the Euro-Office allfontsgen tool.
@@ -13,8 +15,7 @@ func GenerateAllFonts(outDir string) error {
 		return err
 	}
 
-	allFontsWeb := filepath.Join(outDir, "sdkjs", "common", "AllFonts.js")
-	if st, err := os.Stat(allFontsWeb); err == nil && st.Size() > 0 {
+	if FontsReady(outDir) {
 		return nil
 	}
 
@@ -37,6 +38,7 @@ func GenerateAllFonts(outDir string) error {
 		return err
 	}
 
+	allFontsWeb := filepath.Join(outDir, "sdkjs", "common", "AllFonts.js")
 	fmt.Println("Generating AllFonts.js (may take a minute)...")
 	cmd := exec.Command(gen,
 		"--input="+coreFonts,
@@ -63,19 +65,64 @@ func GenerateAllFonts(outDir string) error {
 	return nil
 }
 
-func needsFontGeneration(outDir string) bool {
-	apiJs := filepath.Join(outDir, "web-apps", "apps", "api", "documents", "api.js")
-	apiTpl := filepath.Join(outDir, "web-apps", "apps", "api", "documents", "api.js.tpl")
-	if _, err := os.Stat(apiJs); err != nil {
-		if _, err := os.Stat(apiTpl); err != nil {
+const minWebAllFontsBytes = 64 * 1024
+
+// FontsReady reports whether editor font bundles were generated.
+func FontsReady(outDir string) bool {
+	checks := []struct {
+		path string
+		min  int64
+	}{
+		{filepath.Join(outDir, "sdkjs", "common", "AllFonts.js"), minWebAllFontsBytes},
+		{filepath.Join(outDir, "converter", "bin", "font_selection.bin"), 1024},
+		{filepath.Join(outDir, "converter", "bin", "AllFonts.js"), 1024},
+	}
+	for _, c := range checks {
+		st, err := os.Stat(c.path)
+		if err != nil || st.Size() < c.min {
 			return false
 		}
 	}
-	allFonts := filepath.Join(outDir, "sdkjs", "common", "AllFonts.js")
-	if st, err := os.Stat(allFonts); err == nil && st.Size() > 0 {
-		return false
-	}
 	return true
+}
+
+// RegenerateFonts rebuilds font cache files, optionally deleting stale outputs first.
+func RegenerateFonts(opts Options, force bool) error {
+	if err := RequireLinux(); err != nil {
+		return err
+	}
+	if opts.OutDir == "" {
+		return fmt.Errorf("assetfetch: OutDir is required")
+	}
+	if opts.VersionFile == "" {
+		return fmt.Errorf("assetfetch: VersionFile is required")
+	}
+	if opts.Client == nil {
+		opts.Client = &http.Client{Timeout: 30 * time.Minute}
+	}
+	v, err := LoadVersion(opts.VersionFile)
+	if err != nil {
+		return err
+	}
+	if force {
+		for _, path := range []string{
+			filepath.Join(opts.OutDir, "sdkjs", "common", "AllFonts.js"),
+			filepath.Join(opts.OutDir, "converter", "bin", "font_selection.bin"),
+			filepath.Join(opts.OutDir, "converter", "bin", "AllFonts.js"),
+		} {
+			_ = os.Remove(path)
+		}
+	}
+	if !FontsReady(opts.OutDir) {
+		if err := ensureFontToolchain(opts, v); err != nil {
+			return err
+		}
+	}
+	return GenerateAllFonts(opts.OutDir)
+}
+
+func needsFontGeneration(outDir string) bool {
+	return !FontsReady(outDir)
 }
 
 func ensureFontToolchain(opts Options, v Version) error {
@@ -117,11 +164,5 @@ func ensureFontToolchain(opts Options, v Version) error {
 			return err
 		}
 	}
-	convSrc := filepath.Join(dsRoot, "server", "FileConverter", "bin")
-	if st, err := os.Stat(convSrc); err == nil && st.IsDir() {
-		if err := copyTree(convSrc, filepath.Join(opts.OutDir, "converter", "bin")); err != nil {
-			return err
-		}
-	}
-	return nil
+	return copyConverterBin(dsRoot, opts.OutDir)
 }

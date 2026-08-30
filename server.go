@@ -12,6 +12,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/quantumx-apps/go-office/config"
+	"github.com/quantumx-apps/go-office/internal/convert"
 	"github.com/quantumx-apps/go-office/internal/debuglog"
 	"github.com/quantumx-apps/go-office/internal/ws"
 	"github.com/quantumx-apps/go-office/session"
@@ -118,11 +119,15 @@ func (s *Server) buildRoutes() {
 	if s.opts.AssetDir != "" {
 		webApps := static.Dir(s.opts.AssetDir, "web-apps")
 		sdkjs := static.Dir(s.opts.AssetDir, "sdkjs")
+		fonts := static.Dir(s.opts.AssetDir, "fonts")
 		if webApps != nil {
 			s.mux.Handle(prefix+"/web-apps/", http.StripPrefix(prefix+"/web-apps/", webApps))
 		}
 		if sdkjs != nil {
 			s.mux.Handle(prefix+"/sdkjs/", http.StripPrefix(prefix+"/sdkjs/", sdkjs))
+		}
+		if fonts != nil {
+			s.mux.Handle(prefix+"/fonts/", http.StripPrefix(prefix+"/fonts/", fonts))
 		}
 		s.mux.HandleFunc(prefix+"/document_editor_service_worker.js", s.handleServiceWorker)
 		if mirrorAssetsAtRoot(prefix) {
@@ -131,6 +136,9 @@ func (s *Server) buildRoutes() {
 			}
 			if sdkjs != nil {
 				s.mux.Handle("/sdkjs/", http.StripPrefix("/sdkjs/", sdkjs))
+			}
+			if fonts != nil {
+				s.mux.Handle("/fonts/", http.StripPrefix("/fonts/", fonts))
 			}
 			s.mux.HandleFunc("/document_editor_service_worker.js", s.handleServiceWorker)
 		}
@@ -146,7 +154,30 @@ func (s *Server) registerCoauthoringFallback() {
 	if prefix == "" {
 		prefix = "/"
 	}
-	co := ws.NewWithOptions(s.opts.ProtocolVersion, s.opts.Logger, s.opts.Debug)
+	var opener *ws.Opener
+	if conv, err := convert.New(convert.Options{
+		AssetDir: s.opts.AssetDir,
+		Limit:    s.opts.ConvertLimit,
+	}); err == nil {
+		opener = &ws.Opener{
+			Converter: conv,
+			CacheDir:  s.cacheDir(),
+			Logger:    s.opts.Logger,
+		}
+	} else if s.opts.Debug {
+		s.opts.Logger.Debug("coauthoring converter unavailable", "err", err)
+	}
+	co := ws.NewWithOptions(ws.HandlerOptions{
+		Version:  s.opts.ProtocolVersion,
+		BasePath: s.opts.BasePath,
+		Logger:   s.opts.Logger,
+		Debug:    s.opts.Debug,
+		Opener:   opener,
+	})
+	s.mux.Handle(prefix+"/doc/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rel := strings.TrimPrefix(r.URL.Path, prefix)
+		co.ServePath(w, r, rel)
+	}))
 	s.mux.Handle(prefix+"/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rel := strings.TrimPrefix(r.URL.Path, prefix)
 		if _, ok := ws.Match(strings.Trim(rel, "/")); ok {

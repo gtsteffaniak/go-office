@@ -41,3 +41,30 @@ jobs:
         env:
           GO_OFFICE_ASSETS: ${{ github.workspace }}/assets
         run: make test-integration
+
+  playwright:
+    name: Playwright E2E
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Cache Euro-Office assets
+        uses: actions/cache@v4
+        id: assets-cache
+        with:
+          path: assets
+          key: euro-office-assets-${{ hashFiles('scripts/euro-office.version') }}
+      - name: Fetch Euro-Office assets
+        if: steps.assets-cache.outputs.cache-hit != 'true'
+        run: make build
+      - name: Ensure assets and x2t
+        run: make check-assets
+      - name: Verify sample matrix
+        run: make check-sample-matrix
+      - name: Playwright E2E
+        env:
+          GO_OFFICE_ASSETS: ${{ github.workspace }}/assets
+        run: make test-playwright

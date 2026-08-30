@@ -39,8 +39,21 @@ func Fetch(opts Options) error {
 
 	marker := filepath.Join(opts.OutDir, ".extracted")
 	if !opts.Force && isUpToDate(marker, v.Release, opts.OutDir) {
-		fmt.Printf("assets already present for %s (%s)\n", v.Release, opts.OutDir)
-		return GenerateAllFonts(opts.OutDir)
+		if needsConverterBin(opts.OutDir) {
+			fmt.Println("Converter binaries missing — re-extracting assets...")
+		} else {
+			fmt.Printf("assets already present for %s (%s)\n", v.Release, opts.OutDir)
+			if err := ensureConverterExecutables(filepath.Join(opts.OutDir, "converter", "bin")); err != nil {
+				return err
+			}
+			if !FontsReady(opts.OutDir) {
+				fmt.Println("Font files incomplete — regenerating AllFonts.js...")
+				if err := ensureFontToolchain(opts, v); err != nil {
+					return err
+				}
+			}
+			return GenerateAllFonts(opts.OutDir)
+		}
 	}
 	if !opts.Force && needsFontGeneration(opts.OutDir) {
 		fmt.Println("Generating missing AllFonts.js for existing assets...")
@@ -87,11 +100,8 @@ func Fetch(opts Options) error {
 	if err := copyTree(filepath.Join(dsRoot, "sdkjs"), filepath.Join(opts.OutDir, "sdkjs")); err != nil {
 		return err
 	}
-	convSrc := filepath.Join(dsRoot, "server", "FileConverter", "bin")
-	if st, err := os.Stat(convSrc); err == nil && st.IsDir() {
-		if err := copyTree(convSrc, filepath.Join(opts.OutDir, "converter", "bin")); err != nil {
-			return err
-		}
+	if err := copyConverterBin(dsRoot, opts.OutDir); err != nil {
+		return err
 	}
 	fontsSrc := filepath.Join(dsRoot, "fonts")
 	if st, err := os.Stat(fontsSrc); err == nil && st.IsDir() {
@@ -128,6 +138,12 @@ func Fetch(opts Options) error {
 	return nil
 }
 
+func needsConverterBin(outDir string) bool {
+	x2t := filepath.Join(outDir, "converter", "bin", "x2t")
+	st, err := os.Stat(x2t)
+	return err != nil || st.IsDir()
+}
+
 func isUpToDate(marker, release, outDir string) bool {
 	b, err := os.ReadFile(marker)
 	if err != nil {
@@ -139,9 +155,8 @@ func isUpToDate(marker, release, outDir string) bool {
 	apiJs := filepath.Join(outDir, "web-apps", "apps", "api", "documents", "api.js")
 	apiTpl := filepath.Join(outDir, "web-apps", "apps", "api", "documents", "api.js.tpl")
 	if _, err := os.Stat(apiJs); err == nil {
-		allFonts := filepath.Join(outDir, "sdkjs", "common", "AllFonts.js")
-		if st, err := os.Stat(allFonts); err == nil && st.Size() > 0 {
-			return true
+		if FontsReady(outDir) {
+			return !needsConverterBin(outDir)
 		}
 		return false
 	}
@@ -194,13 +209,17 @@ func copyFile(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
 
-	out, err := os.Create(dst)
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode().Perm())
 	if err != nil {
 		return err
 	}

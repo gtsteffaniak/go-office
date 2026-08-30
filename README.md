@@ -8,15 +8,19 @@ Embedded Go document server library compatible with ONLYOFFICE / Euro-Office bro
 
 **Platform:** Linux only (`linux/amd64`, `linux/arm64`). Euro-Office assets and x2t are Linux binaries. The Go library is portable and can be cross-compiled into a Windows/macOS host binary, but the document server must run on Linux with a Linux `AssetDir`.
 
+**Go:** 1.25 or newer. `go.mod` pins `toolchain go1.25.14` so the Go command auto-downloads a full patch release (bare `go1.25` is not published). `make setup` verifies your toolchain.
+
 ## Status
 
-Phase 0 scaffold — static asset serving, health checks, editor config builder, and a minimal coauthoring polling stub. Full Socket.IO co-editing, x2t conversion, and multi-user sessions are not implemented yet.
+**Phase 0 complete** — static assets, coauthoring polling handshake, x2t document open, demo UI, full sample matrix, Playwright E2E in CI.
+
+**Phase 1 in progress** — save/force-save back to disk (`Storage.Save` + reverse x2t). Multi-user co-editing is Phase 3.
 
 ## Quick start (Makefile)
 
 **Develop in WSL** — use the Linux clone at `~/git/go-office` (not the Windows path under `/mnt/c/`).
 
-Linux or WSL only. Targets stack: **setup → build → demo**.
+Linux or WSL only. Requires **Go 1.25+**. Targets stack: **setup → build → demo**.
 
 ```bash
 cd ~/git/go-office
@@ -28,11 +32,13 @@ make test     # unit tests (no assets)
 
 | Target | What it does |
 |--------|----------------|
-| `make setup` | `go mod download`, verify Linux |
+| `make setup` | Verify Go 1.25+, `go mod download`, verify Linux |
 | `make build` | Download Euro-Office assets into `./assets/`, compile `bin/go-office` |
 | `make demo` | Runs `build` then starts the server on `:8080` |
 | `make test` | `go test ./...` (no assets) |
 | `make test-integration` | `build` then integration tests |
+| `make test-playwright` | `build` then Playwright E2E in Docker |
+| `make test-playwright-ui` | Demo server in Docker + Playwright UI on host |
 | `make clean` | Remove `bin/` and `assets/` |
 
 Useful variables: `ADDR=:8080`, `GO_OFFICE_ASSETS=./assets`, `SAMPLES_DIR=sample-files`.
@@ -67,6 +73,23 @@ go run ./cmd/go-office -assets "$GO_OFFICE_ASSETS"
 
 - Unit tests on every push (no assets).
 - Integration job: `go run ./cmd/fetch-assets`, cache `assets/`, then `go test -tags=integration ./...`.
+- Playwright job: cache `assets/`, `make test-playwright` (skips sample files not yet in `sample-files/`).
+
+## Playwright E2E tests
+
+End-to-end tests mirror the [FileBrowser Playwright pattern](https://github.com/filebrowser/filebrowser): build the Linux server, start it in Docker, run Playwright (Firefox) against the demo UI.
+
+```bash
+make build              # Euro-Office assets required
+# add samples under sample-files/ (see sample-files/README.md)
+make test-playwright    # full CI-style run in Docker
+make test-playwright-ui # server in Docker, Playwright --ui on host
+```
+
+Variables:
+
+- `PLAYWRIGHT_SAMPLE_TIER=1|2|3` — which sample tiers to test (default `3`)
+- `PLAYWRIGHT_STRICT=1` — fail if tier-1 samples are missing (enabled in Docker CI)
 
 **Non-Linux workstations:** use WSL or let CI populate `assets/` — `fetch-assets` exits immediately on other OSes.
 
@@ -88,9 +111,9 @@ Open **http://localhost:8080/** for the site home page, then **http://localhost:
 |-----|---------|
 | `/` | Site home (about, links, next steps) |
 | `/office/demo/` | Landing page with links to sample documents |
-| `/office/demo/view?file=sample-files/file-sample_100kB.doc` | Editor viewer |
-| `/api/office/demo/config?file=sample-files/file-sample_100kB.doc` | Editor init JSON (API) |
-| `/api/office/demo/file/sample-files/file-sample_100kB.doc` | Serves a sample document (API) |
+| `/office/demo/view?file=sample-files/sample.docx` | Editor viewer |
+| `/api/office/demo/config?file=sample-files/sample.docx` | Editor init JSON (API) |
+| `/api/office/demo/file/sample-files/sample.docx` | Serves a sample document (API) |
 | `/api/office/demo/callback` | Save callback stub (API) |
 | `/office/health` | Health check |
 
@@ -150,15 +173,14 @@ Set the Vue `documentServerUrl` to `srv.DocumentServerURL(publicOrigin)`.
 | `config/` | ONLYOFFICE-compatible editor JSON |
 | `session/` | In-memory document sessions |
 | `static/` | Asset file server with cache headers |
-| `internal/ws/` | Coauthoring protocol (Socket.IO stub) |
-| `internal/license/` | License messages for sdkjs |
+| `internal/ws/` | Coauthoring Engine.IO polling (AGPL community handshake) |
 | `cmd/go-office/` | Local demo server with embedded test UI |
 
 ## Roadmap
 
-- **Phase 0:** static assets, license handshake, OfficeDebug passes
-- **Phase 1:** single-user edit, x2t subprocess, `Storage` save path
-- **Phase 2:** packaging, cache hardening
+- **Phase 0:** ✅ static assets, coauthoring handshake, x2t open, demo, Playwright E2E (16 sample formats)
+- **Phase 1:** single-user edit + save, reverse x2t, `Storage` save path
+- **Phase 2:** packaging, cache hardening, WS golden fixtures
 - **Phase 3:** multi-user co-editing
 
 ## Third-party assets

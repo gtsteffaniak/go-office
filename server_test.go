@@ -93,3 +93,31 @@ func TestMirrorsRootAssets(t *testing.T) {
 		}
 	}
 }
+
+func TestServesFonts(t *testing.T) {
+	dir := t.TempDir()
+	fontsDir := filepath.Join(dir, "fonts")
+	if err := os.MkdirAll(fontsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fontsDir, "151"), []byte("font-data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv, err := office.New(nopStorage{}, office.Options{
+		AssetDir: dir,
+		BasePath: "/office",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{"/office/fonts/151", "/fonts/151"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d body = %s", path, rec.Code, rec.Body.String())
+		}
+	}
+}

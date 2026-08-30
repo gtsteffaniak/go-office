@@ -39,7 +39,7 @@ func (m *memStore) Stat(_ context.Context, rel string) (office.FileInfo, error) 
 
 func TestDemoLandingAndConfig(t *testing.T) {
 	repoRoot := filepath.Join("..", "..")
-	sample := demo.DefaultSamplesDir + "/file-sample_100kB.doc"
+	sample := demo.DefaultSamplesDir + "/sample.doc"
 	samplePath := filepath.Join(repoRoot, filepath.FromSlash(sample))
 	if _, err := os.Stat(samplePath); err != nil {
 		t.Skipf("repository sample not present: %v", err)
@@ -62,7 +62,7 @@ func TestDemoLandingAndConfig(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/office/demo/", nil))
 	body := rec.Body.String()
-	if rec.Code != http.StatusOK || !strings.Contains(body, "file-sample_100kB.doc") {
+	if rec.Code != http.StatusOK || !strings.Contains(body, "sample.doc") {
 		t.Fatalf("landing status=%d body=%q", rec.Code, body[:min(200, len(body))])
 	}
 	if !strings.Contains(body, "/office/demo/view?file=") {

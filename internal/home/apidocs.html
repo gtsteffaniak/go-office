@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>go-office — Document Server API</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, sans-serif;
+      background: #f4f4f4;
+      color: #222;
+      line-height: 1.5;
+    }
+    main {
+      max-width: 52rem;
+      margin: 0 auto;
+      padding: 2rem 1.25rem 3rem;
+    }
+    nav { margin-bottom: 1.5rem; font-size: 0.95rem; }
+    h1 { margin: 0 0 0.35rem; font-size: 1.6rem; }
+    .lede { color: #555; margin: 0 0 1.5rem; }
+    section {
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 1.1rem 1.25rem;
+      margin-bottom: 1rem;
+    }
+    h2 { margin: 0 0 0.65rem; font-size: 1.05rem; }
+    h3 { margin: 1rem 0 0.4rem; font-size: 0.95rem; color: #444; }
+  .endpoint {
+      border-top: 1px solid #eee;
+      padding: 0.85rem 0 0;
+      margin-top: 0.85rem;
+    }
+    .endpoint:first-of-type { border-top: 0; margin-top: 0; padding-top: 0; }
+    .method {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      background: #e8f0fe;
+      color: #0b57d0;
+      margin-right: 0.35rem;
+    }
+    .method.post { background: #e6f4ea; color: #137333; }
+    .path { font-family: ui-monospace, monospace; font-size: 0.92em; }
+    p, ul { margin: 0.4rem 0 0; }
+    ul { padding-left: 1.2rem; }
+    code { background: #eee; padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.92em; }
+    a { color: #0b57d0; }
+  </style>
+</head>
+<body>
+  <main>
+    <nav><a href="/">← Home</a></nav>
+    <h1>Document Server API</h1>
+    <p class="lede">
+      ONLYOFFICE-compatible HTTP surface served by go-office.
+      Protocol version <code>{{.Version}}</code>. Paths are relative to this host.
+    </p>
+
+    <section>
+      <h2>Health &amp; info</h2>
+      <div class="endpoint">
+        <span class="method">GET</span><span class="path"><a href="{{.HealthURL}}">{{.HealthURL}}</a></span>
+        <p>JSON status: <code>{"status":"ok","version":"…"}</code></p>
+      </div>
+      <div class="endpoint">
+        <span class="method">GET</span><span class="path"><a href="{{.HealthCheckURL}}">{{.HealthCheckURL}}</a></span>
+        <p>ONLYOFFICE-compatible healthcheck. Body: <code>true</code></p>
+      </div>
+      <div class="endpoint">
+        <span class="method">GET</span><span class="path">{{.InfoURL}}</span>
+        <p>Server info JSON (<code>info/info.json</code>).</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>Editor assets</h2>
+      <div class="endpoint">
+        <span class="method">GET</span><span class="path"><a href="{{.APIJSURL}}">{{.APIJSURL}}</a></span>
+        <p><code>api.js</code> — load this from integrator pages to embed the editor.</p>
+      </div>
+      <div class="endpoint">
+        <span class="method">GET</span><span class="path">{{.WebAppsPrefix}}/…</span>
+        <p>Editor shell (<code>web-apps/</code>), scripts (<code>sdkjs/</code>), fonts (<code>fonts/</code>).</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>Coauthoring</h2>
+      <div class="endpoint">
+        <span class="method">GET</span><span class="method post">POST</span><span class="path">{{.CoauthoringPrefix}}/…</span>
+        <p>Socket.IO polling transport for document open, save, and license handshake.</p>
+        <ul>
+          <li><code>GET …?transport=polling</code> — session open / long-poll receive</li>
+          <li><code>POST …?transport=polling&amp;sid=…</code> — send auth, saveChanges, etc.</li>
+        </ul>
+      </div>
+      <h3>Save flow (single-user)</h3>
+      <p>Client sends <code>isSaveLock</code> → <code>saveChanges</code> → server responds <code>unSaveLock</code>, then converts cache and POSTs to the integrator <code>callbackUrl</code> with status <code>2</code> or <code>6</code>.</p>
+    </section>
+
+    <section>
+      <h2>Document cache &amp; download</h2>
+      <div class="endpoint">
+        <span class="method">GET</span><span class="path">{{.CachePrefix}}/{documentKey}/…</span>
+        <p>Converted <code>Editor.bin</code>, <code>origin.pdf</code>, media, and saved output files.</p>
+      </div>
+      <div class="endpoint">
+        <span class="method">GET</span><span class="method post">POST</span><span class="path">{{.DownloadFilePrefix}}/{documentKey}</span>
+        <p>Original document bytes (PDF preview / Range requests). Optional JSON body <code>{"url":"…"}</code>.</p>
+      </div>
+    </section>
+
+    {{if .SamplesOn}}
+    <section>
+      <h2>Demo integrator API</h2>
+      <p>Example routes used by the bundled demo UI. Production integrators implement the same contract on their own paths.</p>
+      <div class="endpoint">
+        <span class="method">GET</span><span class="path"><a href="{{.DemoConfigURL}}">{{.DemoConfigURL}}</a>?file=…</span>
+        <p>Editor init JSON for <code>@onlyoffice/document-editor-vue</code>.</p>
+      </div>
+      <div class="endpoint">
+        <span class="method">GET</span><span class="path">{{.DemoFilePrefix}}/{path…}</span>
+        <p>Download sample document bytes for editor open.</p>
+      </div>
+      <div class="endpoint">
+        <span class="method post">POST</span><span class="path">{{.DemoCallbackURL}}</span>
+        <p>ONLYOFFICE callback handler. Status <code>2</code>/<code>6</code> triggers <code>Storage.Save</code>.</p>
+        <p>Request: <code>{"key":"…","status":2,"url":"…"}</code> — Response: <code>{"error":0}</code></p>
+      </div>
+    </section>
+    {{end}}
+  </main>
+</body>
+</html>

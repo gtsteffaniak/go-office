@@ -68,11 +68,12 @@
     <section>
       <h2>Document Server API</h2>
       <ul>
-        <li><code>{{.HealthURL}}</code> — JSON health</li>
-        <li><code>{{.HealthCheckURL}}</code> — ONLYOFFICE-compatible healthcheck (<code>true</code>)</li>
-        <li><code>{{.APIJSURL}}</code> — <code>api.js</code> for integrators</li>
-        <li><code>{{.OfficeBase}}/doc/…</code> — coauthoring (Socket.IO / polling)</li>
+        <li><a href="{{.HealthURL}}"><code>{{.HealthURL}}</code></a> — JSON health</li>
+        <li><a href="{{.HealthCheckURL}}"><code>{{.HealthCheckURL}}</code></a> — ONLYOFFICE-compatible healthcheck (<code>true</code>)</li>
+        <li><a href="{{.APIJSURL}}"><code>{{.APIJSURL}}</code></a> — <code>api.js</code> for integrators</li>
+        <li><code>{{.CoauthoringPrefix}}/…</code> — coauthoring (Socket.IO / polling)</li>
       </ul>
+      <p><a href="{{.APIDocsURL}}">Full API reference</a> — endpoints, methods, and callback flow</p>
     </section>
 
     {{if .SamplesOn}}

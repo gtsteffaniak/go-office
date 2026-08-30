@@ -106,16 +106,15 @@ func main() {
 		}
 	}
 
-	logoPath := "/web-apps/apps/common/main/resources/img/about/logo_s.svg"
+	logoPath := home.DefaultLogoPath
 	homeHandler, err := home.New(home.Options{
-		Origin:      origin,
-		OfficeBase:  srv.BasePath(),
-		APIBase:     cfg.APIBase,
-		SamplesDir:  cfg.SamplesDir,
-		Version:     cfg.Version,
-		LogoURL:     origin + logoPath,
-		SamplesOn:   cfg.samplesEnabled(),
-		GitHubURL:   "https://github.com/quantumx-apps/go-office",
+		OfficeBase: srv.BasePath(),
+		APIBase:    cfg.APIBase,
+		SamplesDir: cfg.SamplesDir,
+		Version:    cfg.Version,
+		LogoURL:    office.URLPath(srv.BasePath(), logoPath),
+		SamplesOn:  cfg.samplesEnabled(),
+		GitHubURL:  "https://github.com/quantumx-apps/go-office",
 	})
 	if err != nil {
 		log.Fatalf("home: %v", err)
@@ -123,6 +122,8 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /{$}", homeHandler)
+	mux.Handle("GET /docs/api", http.HandlerFunc(homeHandler.ServeAPIDocs))
+	mux.Handle("GET /docs/api/", http.RedirectHandler("/docs/api", http.StatusPermanentRedirect))
 	mux.Handle("/", srv.Handler())
 
 	officeBase := strings.TrimSuffix(origin, "/") + strings.TrimSuffix(srv.BasePath(), "/")

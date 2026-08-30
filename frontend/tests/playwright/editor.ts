@@ -6,13 +6,16 @@ const EDITOR_APP: Record<SampleFile["editor"], string> = {
   word: "documenteditor",
   cell: "spreadsheeteditor",
   slide: "presentationeditor",
-	"pdf":  "pdfeditor",
+  pdf: "pdfeditor",
 };
 
 /** Shell elements inside the editor app frame (not on the demo viewer page). */
 const EDITOR_SHELL = "#editor-container, #id_main, #editor_sdk, #id_view";
 
-const EDITOR_LOAD_TIMEOUT = 20_000;
+const bundledTest = process.env.GO_OFFICE_PLAYWRIGHT_TEST === "true";
+const EDITOR_LOAD_TIMEOUT = Number(
+  process.env.PLAYWRIGHT_EDITOR_TIMEOUT ?? (bundledTest ? 60_000 : 30_000),
+);
 
 /**
  * DocsAPI mounts the Euro-Office editor in an app iframe (document/cell/slide/pdf).

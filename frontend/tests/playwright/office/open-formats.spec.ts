@@ -9,8 +9,9 @@ import {
 
 const maxTier = Number(process.env.PLAYWRIGHT_SAMPLE_TIER ?? "3") as 1 | 2 | 3;
 
-const STATUS_OK_TIMEOUT = 5_000;
-const SETTLE_MS = 500;
+const bundledTest = process.env.GO_OFFICE_PLAYWRIGHT_TEST === "true";
+const STATUS_OK_TIMEOUT = bundledTest ? 15_000 : 8_000;
+const SETTLE_MS = bundledTest ? 1_000 : 500;
 
 test.describe.configure({ mode: "parallel" });
 

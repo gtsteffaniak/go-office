@@ -32,7 +32,6 @@ func TestHomePage(t *testing.T) {
 		"/office/demo/",
 		"/office/health",
 		"sample-files",
-		"ghcr.io/quantumx-apps/office-server",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("missing %q in home page", want)

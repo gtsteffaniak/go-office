@@ -69,14 +69,14 @@ Official Document Server uses many variables for PostgreSQL, Redis, RabbitMQ, an
 | `DB_*`, `REDIS_*`, `AMQP_*` | *(none)* | Not used — no Postgres/Redis/RabbitMQ. |
 | `WOPI_*` | *(none)* | WOPI not supported. |
 
-### Deprecated aliases (remove when convenient)
+### Early development aliases (no longer supported)
 
-These were used during early development. Prefer `OFFICE_*` in new deployments.
-
-| Deprecated | Use instead |
-| ---------- | ----------- |
+| Old name | Use instead |
+| -------- | ----------- |
 | `GO_OFFICE_ASSETS` | `OFFICE_ASSETS` |
 | `GO_OFFICE_DEBUG` | `OFFICE_DEBUG` |
+
+These are **not** read by current builds. Rename in compose, CI, and shell profiles before upgrading.
 
 ## URL and port compatibility
 

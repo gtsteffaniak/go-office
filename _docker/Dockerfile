@@ -76,11 +76,11 @@ RUN set -eux; \
     printf '%s\n' "$out" | head -3 || true; \
     ! printf '%s' "$out" | grep -qiE 'error (loading|relocating)|symbol not found'
 
-ENV GO_OFFICE_ASSETS=/app/assets
+ENV OFFICE_ASSETS=/app/assets
 EXPOSE 8080
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 \
-  CMD curl -sf http://127.0.0.1:8080/office/health || exit 1
+  CMD curl -sf http://127.0.0.1:8080/healthcheck || exit 1
 
 ENTRYPOINT ["./go-office"]
-CMD ["-assets", "/app/assets", "-addr", ":8080", "-data", "/app", "-samples", "sample-files", "-demo", "-public", "http://localhost:8080"]
+CMD ["-assets", "/app/assets", "-addr", ":8080", "-data", "/app", "-samples", "sample-files", "-public", "http://localhost:8080"]

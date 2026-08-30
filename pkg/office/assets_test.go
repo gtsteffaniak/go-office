@@ -28,8 +28,12 @@ func TestAssetDirFromEnv(t *testing.T) {
 		t.Fatalf("OFFICE_ASSETS got %q", got)
 	}
 	t.Setenv("OFFICE_ASSETS", "")
+	if got := office.AssetDirFromEnv("fallback"); got != "fallback" {
+		t.Fatalf("expected fallback, got %q", got)
+	}
+	// GO_OFFICE_ASSETS is not read — use OFFICE_ASSETS (see migration.md).
 	t.Setenv("GO_OFFICE_ASSETS", "/tmp/legacy")
-	if got := office.AssetDirFromEnv("fallback"); got != "/tmp/legacy" {
-		t.Fatalf("GO_OFFICE_ASSETS got %q", got)
+	if got := office.AssetDirFromEnv("fallback"); got != "fallback" {
+		t.Fatalf("GO_OFFICE_ASSETS must not be used, got %q", got)
 	}
 }

@@ -83,18 +83,6 @@
       </ul>
     </section>
     {{end}}
-
-    <section>
-      <h2>Drop-in for ONLYOFFICE Document Server</h2>
-      <p class="notice">Point <code>documentServerUrl</code> at this host (port 80 in Docker). Set <code>OFFICE_JWT_SECRET</code> to match your integrator.</p>
-      <pre style="margin:0;overflow:auto;font-size:0.85rem;background:#f8f8f8;padding:0.75rem;border-radius:6px"><code>onlyoffice:
-  image: ghcr.io/quantumx-apps/office-server:latest
-  environment:
-    OFFICE_JWT_SECRET: your-secret
-  ports:
-    - '9052:80'</code></pre>
-      <p class="notice">Migrating from <code>onlyoffice/documentserver</code>? See <a href="https://github.com/quantumx-apps/go-office/blob/main/migration.md">migration.md</a>.</p>
-    </section>
   </main>
 </body>
 </html>

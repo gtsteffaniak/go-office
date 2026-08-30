@@ -15,7 +15,7 @@ COPY sample-files/ ./sample-files/
 
 RUN chmod +x /app/go-office /app/assets/converter/bin/* 2>/dev/null || true
 
-ENV GO_OFFICE_ASSETS=/app/assets
+ENV OFFICE_ASSETS=/app/assets
 ENV OFFICE_PLAYWRIGHT_TEST=true
 
 EXPOSE 8080
@@ -25,5 +25,4 @@ ENTRYPOINT ["./go-office", \
   "-addr", ":8080", \
   "-data", "/app", \
   "-samples", "sample-files", \
-  "-demo", \
   "-public", "http://127.0.0.1:8080"]

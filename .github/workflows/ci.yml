@@ -31,7 +31,7 @@ jobs:
         id: assets-cache
         with:
           path: assets
-          key: euro-office-assets-v3-${{ hashFiles('scripts/euro-office.version') }}
+          key: euro-office-assets-v4-${{ hashFiles('scripts/euro-office.version') }}
       - name: Prepare assets
         run: make ensure-assets
       - name: Integration tests
@@ -53,7 +53,7 @@ jobs:
         id: assets-cache
         with:
           path: assets
-          key: euro-office-assets-v3-${{ hashFiles('scripts/euro-office.version') }}
+          key: euro-office-assets-v4-${{ hashFiles('scripts/euro-office.version') }}
       - name: Prepare assets
         run: make ensure-assets
       - name: Verify sample matrix

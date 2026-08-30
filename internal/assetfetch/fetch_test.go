@@ -49,6 +49,28 @@ func TestIsUpToDateRequiresFonts(t *testing.T) {
 	}
 }
 
+func TestFontGenerationPossibleRequiresImages(t *testing.T) {
+	dir := t.TempDir()
+	for _, sub := range []string{
+		"converter/bin",
+		"core-fonts",
+		"tools",
+	} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tools", "allfontsgen"), []byte{0}, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "converter", "bin", "x2t"), []byte{0}, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if assetfetch.FontGenerationPossible(dir) {
+		t.Fatal("expected false without sdkjs/common/Images")
+	}
+}
+
 func TestFindDocumentServerRoot(t *testing.T) {
 	root := t.TempDir()
 	ds := filepath.Join(root, "var", "www", "euro-office", "documentserver")

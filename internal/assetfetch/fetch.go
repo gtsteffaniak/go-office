@@ -39,28 +39,21 @@ func Fetch(opts Options) error {
 
 	marker := filepath.Join(opts.OutDir, ".extracted")
 	if !opts.Force && isUpToDate(marker, v.Release, opts.OutDir) {
-		if needsConverterBin(opts.OutDir) {
-			fmt.Println("Converter binaries missing — re-extracting assets...")
-		} else {
-			fmt.Printf("assets already present for %s (%s)\n", v.Release, opts.OutDir)
-			if err := ensureConverterExecutables(filepath.Join(opts.OutDir, "converter", "bin")); err != nil {
-				return err
-			}
-			if !FontsReady(opts.OutDir) {
-				fmt.Println("Font files incomplete — regenerating AllFonts.js...")
-				if err := ensureFontToolchain(opts, v); err != nil {
-					return err
-				}
-			}
-			return GenerateAllFonts(opts.OutDir)
-		}
-	}
-	if !opts.Force && needsFontGeneration(opts.OutDir) {
-		fmt.Println("Generating missing AllFonts.js for existing assets...")
-		if err := ensureFontToolchain(opts, v); err != nil {
+		fmt.Printf("assets already present for %s (%s)\n", v.Release, opts.OutDir)
+		if err := ensureConverterExecutables(filepath.Join(opts.OutDir, "converter", "bin")); err != nil {
 			return err
 		}
-		return GenerateAllFonts(opts.OutDir)
+		return nil
+	}
+	if needsConverterBin(opts.OutDir) {
+		fmt.Println("Converter binaries missing — re-extracting assets...")
+	}
+	if !opts.Force && needsFontGeneration(opts.OutDir) {
+		if fontGenerationPossible(opts.OutDir) {
+			fmt.Println("Generating missing AllFonts.js for existing assets...")
+			return GenerateAllFonts(opts.OutDir)
+		}
+		fmt.Println("Asset tree incomplete — re-extracting from package...")
 	}
 
 	tmpRoot, err := os.MkdirTemp("", "go-office-fetch-*")

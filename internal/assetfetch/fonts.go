@@ -125,6 +125,31 @@ func needsFontGeneration(outDir string) bool {
 	return !FontsReady(outDir)
 }
 
+// FontGenerationPossible reports whether the on-disk tree has enough to run allfontsgen
+// without a full package re-extract (needs sdkjs/common/Images, core-fonts, converter, tool).
+func FontGenerationPossible(outDir string) bool {
+	return fontGenerationPossible(outDir)
+}
+
+func fontGenerationPossible(outDir string) bool {
+	if needsConverterBin(outDir) {
+		return false
+	}
+	for _, p := range []string{
+		filepath.Join(outDir, "converter", "bin"),
+		filepath.Join(outDir, "core-fonts"),
+		filepath.Join(outDir, "sdkjs", "common", "Images"),
+	} {
+		st, err := os.Stat(p)
+		if err != nil || !st.IsDir() {
+			return false
+		}
+	}
+	gen := filepath.Join(outDir, "tools", "allfontsgen")
+	st, err := os.Stat(gen)
+	return err == nil && !st.IsDir()
+}
+
 func ensureFontToolchain(opts Options, v Version) error {
 	tmpRoot, err := os.MkdirTemp("", "go-office-fonts-*")
 	if err != nil {

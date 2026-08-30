@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	office "github.com/quantumx-apps/go-office"
+	office "github.com/quantumx-apps/go-office/pkg/office"
 )
 
 type nopStorage struct{}

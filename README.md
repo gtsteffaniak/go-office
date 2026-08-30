@@ -16,6 +16,8 @@ Embedded Go document server library compatible with ONLYOFFICE / Euro-Office bro
 
 **Phase 0 complete** — static assets, coauthoring polling handshake, x2t document open, demo UI, full sample matrix, Playwright E2E in CI.
 
+**Phase 0.5 in progress** — Document Server–compatible Docker image (`ghcr.io/quantumx-apps/office-server`), root URL layout, `OFFICE_*` configuration. See [migration.md](migration.md).
+
 **Phase 1 in progress** — save/force-save back to disk (`Storage.Save` + reverse x2t). Multi-user co-editing is Phase 3.
 
 ## Quick start (Makefile)
@@ -45,7 +47,7 @@ make test     # unit tests (no assets)
 | `make build-docker-image` | Build Docker image only |
 | `make clean` | Remove `bin/` and `assets/` |
 
-Useful variables: `ADDR=:8080`, `GO_OFFICE_ASSETS=./assets`, `SAMPLES_DIR=sample-files`.
+Useful variables: `OFFICE_ADDR`, `OFFICE_ASSETS`, `OFFICE_JWT_SECRET`, `OFFICE_DISABLE_SAMPLES`. See [migration.md](migration.md) when replacing `onlyoffice/documentserver`.
 
 ## Euro-Office assets (Linux developers & CI)
 
@@ -69,8 +71,8 @@ The release is pinned in `scripts/euro-office.version` (currently `v9.3.4-hotfix
 **Environment variable**
 
 ```bash
-export GO_OFFICE_ASSETS=./assets
-go run ./cmd/go-office -assets "$GO_OFFICE_ASSETS"
+export OFFICE_ASSETS=./assets
+go run ./cmd/go-office -assets "$OFFICE_ASSETS"
 ```
 
 **CI** (`.github/workflows/ci.yml`, `ubuntu-latest` only)

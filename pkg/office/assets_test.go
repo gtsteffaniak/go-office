@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	office "github.com/quantumx-apps/go-office"
+	office "github.com/quantumx-apps/go-office/pkg/office"
 )
 
 func TestReadAssetVersion(t *testing.T) {
@@ -23,8 +23,13 @@ func TestReadAssetVersion(t *testing.T) {
 }
 
 func TestAssetDirFromEnv(t *testing.T) {
-	t.Setenv("GO_OFFICE_ASSETS", "/tmp/assets")
-	if got := office.AssetDirFromEnv("fallback"); got != "/tmp/assets" {
-		t.Fatalf("got %q", got)
+	t.Setenv("OFFICE_ASSETS", "/tmp/office-assets")
+	if got := office.AssetDirFromEnv("fallback"); got != "/tmp/office-assets" {
+		t.Fatalf("OFFICE_ASSETS got %q", got)
+	}
+	t.Setenv("OFFICE_ASSETS", "")
+	t.Setenv("GO_OFFICE_ASSETS", "/tmp/legacy")
+	if got := office.AssetDirFromEnv("fallback"); got != "/tmp/legacy" {
+		t.Fatalf("GO_OFFICE_ASSETS got %q", got)
 	}
 }

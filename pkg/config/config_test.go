@@ -3,7 +3,7 @@ package config_test
 import (
 	"testing"
 
-	"github.com/quantumx-apps/go-office/config"
+	"github.com/quantumx-apps/go-office/pkg/config"
 )
 
 func TestBuildWordDocument(t *testing.T) {

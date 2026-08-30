@@ -3,15 +3,15 @@ package office_test
 import (
 	"testing"
 
-	office "github.com/quantumx-apps/go-office"
+	office "github.com/quantumx-apps/go-office/pkg/office"
 )
 
 func TestJoinBasePath(t *testing.T) {
 	cases := []struct {
 		app, mount, want string
 	}{
-		{"/", "", "/office"},
-		{"/myapp/", "", "/myapp/office"},
+		{"/", "", "/"},
+		{"/myapp/", "", "/myapp/"},
 		{"/myapp", "office", "/myapp/office"},
 		{"", "office", "/office"},
 		{"/fb/", "/office/", "/fb/office"},

@@ -28,7 +28,7 @@ RUN npm install \
 RUN chmod +x /app/go-office /app/assets/converter/bin/* 2>/dev/null || true
 
 ENV GO_OFFICE_ASSETS=/app/assets
-ENV GO_OFFICE_PLAYWRIGHT_TEST=true
+ENV OFFICE_PLAYWRIGHT_TEST=true
 ENV PLAYWRIGHT_BASE_URL=http://127.0.0.1:8080
 ENV PLAYWRIGHT_STRICT=1
 ENV PLAYWRIGHT_SAMPLE_TIER=3

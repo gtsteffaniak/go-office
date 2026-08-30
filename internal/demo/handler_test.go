@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	office "github.com/quantumx-apps/go-office"
+	office "github.com/quantumx-apps/go-office/pkg/office"
 	"github.com/quantumx-apps/go-office/internal/demo"
 	"github.com/quantumx-apps/go-office/internal/home"
 )

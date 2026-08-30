@@ -6,8 +6,12 @@ import (
 	"strings"
 )
 
-// AssetDirFromEnv returns the asset directory from GO_OFFICE_ASSETS, or fallback when set.
+// AssetDirFromEnv returns OFFICE_ASSETS, or the deprecated GO_OFFICE_ASSETS alias, then fallback.
 func AssetDirFromEnv(fallback string) string {
+	if v := strings.TrimSpace(os.Getenv("OFFICE_ASSETS")); v != "" {
+		return v
+	}
+	// Deprecated: use OFFICE_ASSETS (see migration.md).
 	if v := strings.TrimSpace(os.Getenv("GO_OFFICE_ASSETS")); v != "" {
 		return v
 	}

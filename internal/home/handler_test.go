@@ -15,6 +15,7 @@ func TestHomePage(t *testing.T) {
 		OfficeBase: "/office",
 		APIBase:    "/api/office",
 		SamplesDir: "sample-files",
+		SamplesOn:  true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -30,8 +31,8 @@ func TestHomePage(t *testing.T) {
 		"go-office",
 		"/office/demo/",
 		"/office/health",
-		"/api/office/demo/config",
 		"sample-files",
+		"ghcr.io/quantumx-apps/office-server",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("missing %q in home page", want)

@@ -5,6 +5,8 @@ import (
 	"html/template"
 	"net/http"
 	"strings"
+
+	office "github.com/quantumx-apps/go-office/pkg/office"
 )
 
 // DefaultAPIBasePath is where demo API routes (config, callback, file) are mounted.
@@ -12,10 +14,14 @@ const DefaultAPIBasePath = "/api/office"
 
 // Options configures the site root landing page.
 type Options struct {
-	Origin     string // e.g. http://localhost:8080
-	OfficeBase string // e.g. /office
-	APIBase    string // e.g. /api/office
-	SamplesDir string
+	Origin      string // e.g. http://localhost:8080
+	OfficeBase  string // e.g. /
+	APIBase     string // e.g. /api/office
+	SamplesDir  string
+	Version     string
+	LogoURL     string
+	GitHubURL   string
+	SamplesOn   bool
 }
 
 // Handler serves the about page at /.
@@ -32,6 +38,9 @@ func New(opts Options) (*Handler, error) {
 	if opts.SamplesDir == "" {
 		opts.SamplesDir = "sample-files"
 	}
+	if opts.GitHubURL == "" {
+		opts.GitHubURL = "https://github.com/quantumx-apps/go-office"
+	}
 	tmpl, err := template.New("home").Parse(pageHTML)
 	if err != nil {
 		return nil, err
@@ -46,12 +55,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	origin := strings.TrimSuffix(h.opts.Origin, "/")
-	data := map[string]string{
-		"DemoURL":    origin + h.opts.OfficeBase + "/demo/",
-		"HealthURL":  origin + h.opts.OfficeBase + "/health",
-		"OfficeBase": h.opts.OfficeBase,
-		"APIBase":    h.opts.APIBase,
-		"SamplesDir": h.opts.SamplesDir,
+	base := strings.TrimSuffix(h.opts.OfficeBase, "/")
+	if base == "" {
+		base = ""
+	}
+	healthBase := origin + base
+	data := map[string]any{
+		"DemoURL":         origin + office.URLPath(h.opts.OfficeBase, "demo") + "/",
+		"HealthURL":       healthBase + "/health",
+		"HealthCheckURL":  healthBase + "/healthcheck",
+		"APIJSURL":        healthBase + "/web-apps/apps/api/documents/api.js",
+		"OfficeBase":      h.opts.OfficeBase,
+		"APIBase":         h.opts.APIBase,
+		"SamplesDir":      h.opts.SamplesDir,
+		"Version":         h.opts.Version,
+		"LogoURL":         h.opts.LogoURL,
+		"GitHubURL":       h.opts.GitHubURL,
+		"SamplesOn":       h.opts.SamplesOn,
 	}
 	var buf bytes.Buffer
 	if err := h.tmpl.Execute(&buf, data); err != nil {

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	office "github.com/quantumx-apps/go-office"
-	"github.com/quantumx-apps/go-office/config"
+	office "github.com/quantumx-apps/go-office/pkg/office"
+	"github.com/quantumx-apps/go-office/pkg/config"
 )
 
 type nopStorage struct{}
@@ -23,12 +23,12 @@ func (nopStorage) Stat(context.Context, string) (office.FileInfo, error) {
 }
 
 func TestHealthEndpoint(t *testing.T) {
-	srv, err := office.New(nopStorage{}, office.Options{BasePath: "/office"})
+	srv, err := office.New(nopStorage{}, office.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/office/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 
@@ -37,6 +37,19 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"status":"ok"`) {
 		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+func TestHealthCheckEndpoint(t *testing.T) {
+	srv, err := office.New(nopStorage{}, office.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/healthcheck", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "true" {
+		t.Fatalf("healthcheck = %d %q", rec.Code, rec.Body.String())
 	}
 }
 

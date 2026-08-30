@@ -4,7 +4,7 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:8080";
 
 // Set in Dockerfile.playwright-* — x2t runs one conversion at a time, so Docker
 // tests must not hammer the server with parallel document opens.
-const bundledTest = process.env.GO_OFFICE_PLAYWRIGHT_TEST === "true";
+const bundledTest = process.env.OFFICE_PLAYWRIGHT_TEST === "true";
 
 export default defineConfig({
   timeout: bundledTest ? 120_000 : 90_000,

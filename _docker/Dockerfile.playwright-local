@@ -16,7 +16,7 @@ COPY sample-files/ ./sample-files/
 RUN chmod +x /app/go-office /app/assets/converter/bin/* 2>/dev/null || true
 
 ENV GO_OFFICE_ASSETS=/app/assets
-ENV GO_OFFICE_PLAYWRIGHT_TEST=true
+ENV OFFICE_PLAYWRIGHT_TEST=true
 
 EXPOSE 8080
 

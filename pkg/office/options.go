@@ -6,7 +6,8 @@ import (
 )
 
 // DefaultBasePath is the default URL prefix for the embedded document server.
-const DefaultBasePath = "/office"
+// Matches ONLYOFFICE Document Server (assets and coauthoring at the site root).
+const DefaultBasePath = "/"
 
 // Options configures a document server instance.
 type Options struct {
@@ -15,7 +16,7 @@ type Options struct {
 	AssetDir string
 
 	// BasePath is the full URL prefix where this server is mounted.
-	// Defaults to DefaultBasePath (/office). Use JoinBasePath to combine
+	// Defaults to DefaultBasePath (/). Use JoinBasePath to combine
 	// an application subpath (e.g. FileBrowser http.baseURL) with the office mount.
 	// Must not include a trailing slash.
 	BasePath string
@@ -40,8 +41,8 @@ type Options struct {
 // appBase is typically the host app's configured subpath (e.g. "/myapp/" or "/").
 // mount defaults to DefaultBasePath when empty.
 //
-//	JoinBasePath("/", "")           -> "/office"
-//	JoinBasePath("/myapp/", "")     -> "/myapp/office"
+//	JoinBasePath("/", "")           -> "/"
+//	JoinBasePath("/myapp/", "")     -> "/myapp/"
 //	JoinBasePath("/myapp", "office") -> "/myapp/office"
 func JoinBasePath(appBase, mount string) string {
 	if mount == "" {
@@ -73,10 +74,10 @@ func (o *Options) normalize() {
 
 func normalizePath(p string) string {
 	p = strings.TrimSpace(p)
-	p = strings.TrimSuffix(p, "/")
-	if p == "" {
-		return DefaultBasePath
+	if p == "" || p == "/" {
+		return "/"
 	}
+	p = strings.TrimSuffix(p, "/")
 	if !strings.HasPrefix(p, "/") {
 		p = "/" + p
 	}

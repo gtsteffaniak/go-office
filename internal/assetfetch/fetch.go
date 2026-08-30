@@ -127,7 +127,7 @@ func Fetch(opts Options) error {
 		return err
 	}
 
-	fmt.Printf("Done. Set GO_OFFICE_ASSETS=%s and ProtocolVersion=%s\n", opts.OutDir, v.Protocol)
+	fmt.Printf("Done. Set OFFICE_ASSETS=%s and ProtocolVersion=%s\n", opts.OutDir, v.Protocol)
 	return nil
 }
 

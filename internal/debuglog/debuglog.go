@@ -8,12 +8,12 @@ import (
 	"time"
 )
 
-// Enabled reports whether debug logging is on via flag or GO_OFFICE_DEBUG=1|true.
+// Enabled reports whether debug logging is on via flag or OFFICE_DEBUG.
 func Enabled(flag bool) bool {
 	if flag {
 		return true
 	}
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("GO_OFFICE_DEBUG")))
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("OFFICE_DEBUG")))
 	return v == "1" || v == "true" || v == "yes"
 }
 

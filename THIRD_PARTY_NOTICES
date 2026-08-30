@@ -5,6 +5,10 @@ go-office does not vendor ONLYOFFICE / Euro-Office editor assets or converter
 binaries. When you deploy go-office you must supply them separately and comply
 with their licenses.
 
+Source code for go-office itself: https://github.com/quantumx-apps/go-office
+(AGPL-3.0). Docker images built from this repository include OCI labels pointing
+to that source URL and license identifier.
+
 Euro-Office Document Server assets (pinned)
 --------------------------------------------
 - Release: v9.3.4-hotfix.1 (see scripts/euro-office.version)
@@ -12,6 +16,8 @@ Euro-Office Document Server assets (pinned)
 - Source: https://github.com/Euro-Office/DocumentServer
 - License: GNU Affero General Public License v3.0
 - Fetched via `go run ./cmd/fetch-assets` (downloads release .deb; not vendored in git)
+- Branding: editor UI attribution (logos, "Powered by" notices) must not be removed
+  or replaced when deployed; see NOTICE (AGPL Section 7)
 
 github.com/golang-jwt/jwt/v5
 ----------------------------

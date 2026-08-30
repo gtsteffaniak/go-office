@@ -60,6 +60,9 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl \
  && rm -rf /var/lib/apt/lists/*
 
+LABEL org.opencontainers.image.source="https://github.com/quantumx-apps/go-office" \
+      org.opencontainers.image.licenses="AGPL-3.0"
+
 WORKDIR /app
 
 COPY --from=gobuild /out/go-office ./go-office

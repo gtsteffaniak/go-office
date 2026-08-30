@@ -5,7 +5,9 @@ import (
 	"strings"
 )
 
-// handshakeOK is reported to sdkjs as a successful community handshake.
+// handshakeOK is the ONLYOFFICE/Euro-Office community license type reported
+// to sdkjs during coauthoring connect. This is editor protocol metadata, not
+// a user-facing EULA or click-through license acceptance step.
 const handshakeOK = 3
 
 // rightsEdit matches ONLYOFFICE RIGHTS.Edit.

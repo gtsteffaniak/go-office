@@ -4,7 +4,9 @@ Embedded Go document server library compatible with ONLYOFFICE / Euro-Office bro
 
 `go-office` lets host applications (such as [FileBrowser](https://github.com/filebrowser/filebrowser)) serve the ONLYOFFICE editor UI and coauthoring protocol without running a separate Document Server container. Host apps implement a `Storage` interface for direct VFS access.
 
-**License:** [GNU Affero General Public License v3.0](LICENSE)
+**License:** [GNU Affero General Public License v3.0](LICENSE) — rights are granted automatically; no click-through EULA is required to use, build, host, or run this software.
+
+**Source:** https://github.com/quantumx-apps/go-office
 
 **Platform:** Linux only (`linux/amd64`, `linux/arm64`). Euro-Office assets and x2t are Linux binaries. The Go library is portable and can be cross-compiled into a Windows/macOS host binary, but the document server must run on Linux with a Linux `AssetDir`.
 
@@ -98,6 +100,8 @@ DOCKER_PORT=9090 make run-docker
 
 The image bundles `go-office`, Euro-Office assets, and `sample-files/`. If `./assets` exists from `make build`, the Docker build reuses it instead of re-downloading.
 
+**Container users:** the image is AGPL-3.0 licensed. Corresponding source code is at **https://github.com/quantumx-apps/go-office** (OCI labels `org.opencontainers.image.source` and `org.opencontainers.image.licenses` are set in `_docker/Dockerfile`). No license acceptance step is required before pull or run.
+
 Variables:
 
 - `PLAYWRIGHT_SAMPLE_TIER=1|2|3` — which sample tiers to test (default `3`)
@@ -185,7 +189,7 @@ Set the Vue `documentServerUrl` to `srv.DocumentServerURL(publicOrigin)`.
 | `config/` | ONLYOFFICE-compatible editor JSON |
 | `session/` | In-memory document sessions |
 | `static/` | Asset file server with cache headers |
-| `internal/ws/` | Coauthoring Engine.IO polling (AGPL community handshake) |
+| `internal/ws/` | Coauthoring Engine.IO polling (sdkjs protocol handshake) |
 | `cmd/go-office/` | Local demo server with embedded test UI |
 
 ## Roadmap
@@ -195,6 +199,23 @@ Set the Vue `documentServerUrl` to `srv.DocumentServerURL(publicOrigin)`.
 - **Phase 2:** packaging, cache hardening, WS golden fixtures
 - **Phase 3:** multi-user co-editing
 
+## License and AGPL compliance
+
+go-office is licensed under [AGPL-3.0](LICENSE). You may download, build, host, and run it (including Docker images from GHCR or `make build-docker`) **without** clicking or signing a separate EULA — the license grants rights when you receive the software.
+
+To comply when you distribute go-office or a derived work:
+
+- Include the full [LICENSE](LICENSE) text (unaltered AGPL-3.0).
+- Make corresponding source available (this repository: https://github.com/quantumx-apps/go-office).
+- Preserve [NOTICE](NOTICE) and [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
+- Document modifications in [CHANGELOG.md](CHANGELOG.md) when you change go-office itself.
+
+The coauthoring WebSocket `license` message in `internal/ws/` is part of the ONLYOFFICE/Euro-Office **editor protocol** (so sdkjs can open documents). It is not a user-facing license acceptance gate.
+
+## Branding (AGPL Section 7)
+
+The ONLYOFFICE / Euro-Office editor UI includes logos and attribution that **must not be removed, obscured, or replaced** in production deployments unless you have separate permission from the rights holder. go-office does not implement branding enforcement yet; see [NOTICE](NOTICE) for the obligation. Do not use editor `customization` settings to strip required attribution.
+
 ## Third-party assets
 
-Editor JavaScript (`web-apps`, `sdkjs`) and converter binaries (`x2t`) come from Euro-Office / ONLYOFFICE builds and are **not** included in this repository. See `THIRD_PARTY_NOTICES`.
+Editor JavaScript (`web-apps`, `sdkjs`) and converter binaries (`x2t`) come from Euro-Office / ONLYOFFICE builds and are **not** included in this repository. They are fetched at build time, not modified in git. See [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) and [CHANGELOG.md](CHANGELOG.md).

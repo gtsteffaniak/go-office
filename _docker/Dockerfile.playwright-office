@@ -10,6 +10,9 @@ RUN npm init -y \
 FROM playwright-base
 WORKDIR /app
 
+LABEL org.opencontainers.image.source="https://github.com/quantumx-apps/go-office" \
+      org.opencontainers.image.licenses="AGPL-3.0"
+
 COPY bin/go-office ./go-office
 COPY assets/ ./assets/
 COPY sample-files/ ./sample-files/

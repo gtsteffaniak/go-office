@@ -4,8 +4,12 @@
 bin/*
 !bin/go-office
 
-# Not needed for the demo image build
-frontend/
+# Not needed for the demo image build (Playwright Dockerfiles copy selectively)
+frontend/*
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/playwright.config.ts
+!frontend/tests/
 integration/
 cache/
 doctor-report.txt

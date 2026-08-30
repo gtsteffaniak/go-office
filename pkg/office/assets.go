@@ -6,9 +6,9 @@ import (
 	"strings"
 )
 
-// AssetDirFromEnv returns the asset directory from GO_OFFICE_ASSETS, or fallback when set.
+// AssetDirFromEnv returns OFFICE_ASSETS, or fallback when unset.
 func AssetDirFromEnv(fallback string) string {
-	if v := strings.TrimSpace(os.Getenv("GO_OFFICE_ASSETS")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("OFFICE_ASSETS")); v != "" {
 		return v
 	}
 	return fallback

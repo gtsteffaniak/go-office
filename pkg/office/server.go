@@ -11,12 +11,12 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/quantumx-apps/go-office/config"
+	"github.com/quantumx-apps/go-office/pkg/config"
 	"github.com/quantumx-apps/go-office/internal/convert"
 	"github.com/quantumx-apps/go-office/internal/debuglog"
+	"github.com/quantumx-apps/go-office/internal/session"
+	"github.com/quantumx-apps/go-office/internal/static"
 	"github.com/quantumx-apps/go-office/internal/ws"
-	"github.com/quantumx-apps/go-office/session"
-	"github.com/quantumx-apps/go-office/static"
 )
 
 // Server is an embedded ONLYOFFICE-compatible document server.
@@ -75,9 +75,9 @@ func (s *Server) BasePath() string {
 // DocumentServerURL returns the public URL prefix with trailing slash for Vue documentServerUrl.
 func (s *Server) DocumentServerURL(publicOrigin string) string {
 	publicOrigin = strings.TrimSuffix(publicOrigin, "/")
-	base := s.opts.BasePath
-	if !strings.HasPrefix(base, "/") {
-		base = "/" + base
+	base := strings.TrimSuffix(s.opts.BasePath, "/")
+	if base == "" || base == "/" {
+		return publicOrigin + "/"
 	}
 	return publicOrigin + base + "/"
 }
@@ -109,27 +109,26 @@ func (s *Server) Close() error {
 
 func (s *Server) buildRoutes() {
 	prefix := s.opts.BasePath
-	if prefix == "" {
-		prefix = "/"
-	}
 
-	s.mux.HandleFunc(prefix+"/health", s.handleHealth)
-	s.mux.HandleFunc(prefix+"/healthz", s.handleHealth)
+	s.mux.HandleFunc(joinURLPath(prefix, "health"), s.handleHealth)
+	s.mux.HandleFunc(joinURLPath(prefix, "healthz"), s.handleHealth)
+	s.mux.HandleFunc(joinURLPath(prefix, "healthcheck"), s.handleHealthCheck)
+	s.mux.HandleFunc(joinURLPath(prefix, "info/info.json"), s.handleInfoJSON)
 
 	if s.opts.AssetDir != "" {
 		webApps := static.Dir(s.opts.AssetDir, "web-apps")
 		sdkjs := static.Dir(s.opts.AssetDir, "sdkjs")
 		fonts := static.Dir(s.opts.AssetDir, "fonts")
 		if webApps != nil {
-			s.mux.Handle(prefix+"/web-apps/", http.StripPrefix(prefix+"/web-apps/", webApps))
+			s.mux.Handle(joinURLPath(prefix, "web-apps/"), http.StripPrefix(joinURLPath(prefix, "web-apps"), webApps))
 		}
 		if sdkjs != nil {
-			s.mux.Handle(prefix+"/sdkjs/", http.StripPrefix(prefix+"/sdkjs/", sdkjs))
+			s.mux.Handle(joinURLPath(prefix, "sdkjs/"), http.StripPrefix(joinURLPath(prefix, "sdkjs"), sdkjs))
 		}
 		if fonts != nil {
-			s.mux.Handle(prefix+"/fonts/", http.StripPrefix(prefix+"/fonts/", fonts))
+			s.mux.Handle(joinURLPath(prefix, "fonts/"), http.StripPrefix(joinURLPath(prefix, "fonts"), fonts))
 		}
-		s.mux.HandleFunc(prefix+"/document_editor_service_worker.js", s.handleServiceWorker)
+		s.mux.HandleFunc(joinURLPath(prefix, "document_editor_service_worker.js"), s.handleServiceWorker)
 		if mirrorAssetsAtRoot(prefix) {
 			if webApps != nil {
 				s.mux.Handle("/web-apps/", http.StripPrefix("/web-apps/", webApps))
@@ -146,7 +145,8 @@ func (s *Server) buildRoutes() {
 
 	cacheDir := s.cacheDir()
 	_ = os.MkdirAll(cacheDir, 0o755)
-	s.mux.Handle(prefix+"/cache/files/", http.StripPrefix(prefix+"/cache/files/", http.FileServer(http.Dir(cacheDir))))
+	cachePrefix := joinURLPath(prefix, "cache/files")
+	s.mux.Handle(cachePrefix+"/", http.StripPrefix(cachePrefix, http.FileServer(http.Dir(cacheDir))))
 
 	s.mux.HandleFunc("/downloadfile/", s.handleDownloadFile)
 	if base := strings.Trim(strings.TrimSpace(prefix), "/"); base != "" && !mirrorAssetsAtRoot(prefix) {
@@ -156,9 +156,6 @@ func (s *Server) buildRoutes() {
 
 func (s *Server) registerCoauthoringFallback() {
 	prefix := s.opts.BasePath
-	if prefix == "" {
-		prefix = "/"
-	}
 	var opener *ws.Opener
 	if conv, err := convert.New(convert.Options{
 		AssetDir: s.opts.AssetDir,
@@ -179,12 +176,19 @@ func (s *Server) registerCoauthoringFallback() {
 		Debug:    s.opts.Debug,
 		Opener:   opener,
 	})
-	s.mux.Handle(prefix+"/doc/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rel := strings.TrimPrefix(r.URL.Path, prefix)
+	docPattern := joinURLPath(prefix, "doc") + "/"
+	s.mux.Handle(docPattern, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rel := stripMountPath(prefix, r.URL.Path)
 		co.ServePath(w, r, rel)
 	}))
-	s.mux.Handle(prefix+"/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rel := strings.TrimPrefix(r.URL.Path, prefix)
+
+	mount := strings.TrimSuffix(strings.TrimSpace(prefix), "/")
+	catch := "/"
+	if mount != "" {
+		catch = mount + "/"
+	}
+	s.mux.Handle(catch, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rel := stripMountPath(prefix, r.URL.Path)
 		if _, ok := ws.Match(strings.Trim(rel, "/")); ok {
 			co.ServePath(w, r, rel)
 			return
@@ -203,6 +207,16 @@ func (s *Server) cacheDir() string {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"status":"ok","version":` + strconvQuote(s.opts.ProtocolVersion) + `}`))
+}
+
+func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write([]byte("true"))
+}
+
+func (s *Server) handleInfoJSON(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"version":` + strconvQuote(s.opts.ProtocolVersion) + `}`))
 }
 
 func (s *Server) handleServiceWorker(w http.ResponseWriter, r *http.Request) {
@@ -227,4 +241,12 @@ func strconvQuote(s string) string {
 func mirrorAssetsAtRoot(basePath string) bool {
 	basePath = strings.TrimSuffix(strings.TrimSpace(basePath), "/")
 	return basePath != "" && basePath != "/"
+}
+
+func stripMountPath(prefix, urlPath string) string {
+	mount := strings.TrimSuffix(strings.TrimSpace(prefix), "/")
+	if mount == "" || mount == "/" {
+		return strings.TrimPrefix(urlPath, "/")
+	}
+	return strings.TrimPrefix(strings.TrimPrefix(urlPath, mount), "/")
 }

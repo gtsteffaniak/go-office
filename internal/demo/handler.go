@@ -20,8 +20,8 @@ import (
 	"strings"
 	"time"
 
-	office "github.com/quantumx-apps/go-office"
-	"github.com/quantumx-apps/go-office/config"
+	office "github.com/quantumx-apps/go-office/pkg/office"
+	"github.com/quantumx-apps/go-office/pkg/config"
 	"github.com/quantumx-apps/go-office/internal/home"
 )
 
@@ -99,7 +99,7 @@ func Attach(srv *office.Server, store office.Storage, opts Options) error {
 	if err != nil {
 		return err
 	}
-	uiBase := srv.BasePath() + "/demo"
+	uiBase := office.URLPath(srv.BasePath(), "demo")
 	srv.Mount(uiBase, http.RedirectHandler(uiBase+"/", http.StatusPermanentRedirect))
 	srv.Mount(uiBase+"/", http.StripPrefix(uiBase, http.HandlerFunc(h.serveUI)))
 

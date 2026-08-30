@@ -9,7 +9,7 @@ import {
 
 const maxTier = Number(process.env.PLAYWRIGHT_SAMPLE_TIER ?? "3") as 1 | 2 | 3;
 
-const bundledTest = process.env.GO_OFFICE_PLAYWRIGHT_TEST === "true";
+const bundledTest = process.env.OFFICE_PLAYWRIGHT_TEST === "true";
 const STATUS_OK_TIMEOUT = bundledTest ? 15_000 : 8_000;
 const SETTLE_MS = bundledTest ? 1_000 : 500;
 
@@ -19,12 +19,12 @@ async function assertEditorOpens(page: import("@playwright/test").Page, sample: 
   const font404s: string[] = [];
   page.on("response", (res) => {
     const url = res.url();
-    if (url.includes("/office/fonts/") && res.status() === 404) {
+    if (url.includes("/fonts/") && res.status() === 404) {
       font404s.push(url);
     }
   });
 
-  await page.goto(`/office/demo/view?file=${encodeURIComponent(sample.path)}`);
+  await page.goto(`/demo/view?file=${encodeURIComponent(sample.path)}`);
 
   await expect(page.locator("#sample-path")).toContainText(sample.path.split("/").pop()!);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {

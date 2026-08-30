@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>go-office</title>
+  <title>go-office — Document Server</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -15,11 +15,21 @@
       line-height: 1.5;
     }
     main {
-      max-width: 42rem;
+      max-width: 44rem;
       margin: 0 auto;
       padding: 2.5rem 1.25rem 3rem;
     }
-    h1 { margin: 0 0 0.5rem; font-size: 1.75rem; }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    .brand img {
+      height: 40px;
+      width: auto;
+    }
+    h1 { margin: 0; font-size: 1.75rem; }
     .lede { color: #555; margin: 0 0 1.75rem; }
     section {
       background: #fff;
@@ -33,40 +43,46 @@
     li + li { margin-top: 0.35rem; }
     a { color: #0b57d0; }
     code { background: #eee; padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.92em; }
+    .notice { font-size: 0.9rem; color: #666; }
   </style>
 </head>
 <body>
   <main>
-    <h1>go-office</h1>
-    <p class="lede">Embedded Go document server compatible with ONLYOFFICE / Euro-Office browser clients.</p>
+    <div class="brand">
+      <img src="{{.LogoURL}}" alt="ONLYOFFICE" width="120" height="40" />
+      <h1>go-office</h1>
+    </div>
+    <p class="lede">
+      Embedded AGPL document server compatible with ONLYOFFICE / Euro-Office browser clients.
+      Protocol version <code>{{.Version}}</code>.
+    </p>
 
     <section>
-      <h2>Quick links</h2>
+      <h2>Source</h2>
       <ul>
-        <li><a href="{{.DemoURL}}">Document demo</a> — open sample files in the editor</li>
-        <li><a href="{{.HealthURL}}">Health check</a> — <code>{{.HealthURL}}</code></li>
+        <li><a href="{{.GitHubURL}}">github.com/quantumx-apps/go-office</a> — AGPL-3.0 source and documentation</li>
       </ul>
+      <p class="notice">Editor UI assets are from Euro-Office / ONLYOFFICE (AGPL). Attribution via the logo above is required.</p>
     </section>
 
     <section>
-      <h2>What to do next</h2>
+      <h2>Document Server API</h2>
       <ul>
-        <li>Fetch Euro-Office assets if you have not already: <code>go run ./cmd/fetch-assets</code></li>
-        <li>Add documents under <code>{{.SamplesDir}}</code> — they appear on the demo landing page</li>
-        <li>Open the <a href="{{.DemoURL}}">demo</a> and pick a file to edit</li>
-        <li>Debug logging is enabled automatically in demo mode (<code>-debug</code> or <code>GO_OFFICE_DEBUG=1</code> otherwise)</li>
+        <li><code>{{.HealthURL}}</code> — JSON health</li>
+        <li><code>{{.HealthCheckURL}}</code> — ONLYOFFICE-compatible healthcheck (<code>true</code>)</li>
+        <li><code>{{.APIJSURL}}</code> — <code>api.js</code> for integrators</li>
+        <li><code>{{.OfficeBase}}/doc/…</code> — coauthoring (Socket.IO / polling)</li>
       </ul>
     </section>
 
+    {{if .SamplesOn}}
     <section>
-      <h2>Routes</h2>
+      <h2>Demo</h2>
       <ul>
-        <li><code>/</code> — this page</li>
-        <li><code>{{.OfficeBase}}/</code> — editor assets and coauthoring</li>
-        <li><code>{{.APIBase}}/demo/config</code> — editor init JSON (API)</li>
-        <li><code>{{.APIBase}}/demo/callback</code> — save callback stub (API)</li>
+        <li><a href="{{.DemoURL}}">Sample documents</a> — open files from <code>{{.SamplesDir}}</code></li>
       </ul>
     </section>
+    {{end}}
   </main>
 </body>
 </html>

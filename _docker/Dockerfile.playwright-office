@@ -27,8 +27,8 @@ RUN npm install \
 
 RUN chmod +x /app/go-office /app/assets/converter/bin/* 2>/dev/null || true
 
-ENV GO_OFFICE_ASSETS=/app/assets
-ENV GO_OFFICE_PLAYWRIGHT_TEST=true
+ENV OFFICE_ASSETS=/app/assets
+ENV OFFICE_PLAYWRIGHT_TEST=true
 ENV PLAYWRIGHT_BASE_URL=http://127.0.0.1:8080
 ENV PLAYWRIGHT_STRICT=1
 ENV PLAYWRIGHT_SAMPLE_TIER=3
@@ -38,11 +38,10 @@ RUN timeout 10m sh -c 'cd /app && ./go-office \
       -addr :8080 \
       -data /app \
       -samples sample-files \
-      -demo \
       -public http://127.0.0.1:8080 & \
     for i in $(seq 1 90); do \
-      curl -sf http://127.0.0.1:8080/office/health >/dev/null && break; \
+      curl -sf http://127.0.0.1:8080/health >/dev/null && break; \
       sleep 2; \
     done && \
-    curl -sf http://127.0.0.1:8080/office/health >/dev/null && \
+    curl -sf http://127.0.0.1:8080/health >/dev/null && \
     cd /app/frontend && npx playwright test'

@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	office "github.com/quantumx-apps/go-office"
+	office "github.com/quantumx-apps/go-office/pkg/office"
 )
 
 type nopStorage struct{}
@@ -75,7 +75,7 @@ func TestHealthWithAssets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodGet, "/office/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

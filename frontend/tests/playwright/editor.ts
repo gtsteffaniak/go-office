@@ -12,7 +12,7 @@ const EDITOR_APP: Record<SampleFile["editor"], string> = {
 /** Shell elements inside the editor app frame (not on the demo viewer page). */
 const EDITOR_SHELL = "#editor-container, #id_main, #editor_sdk, #id_view";
 
-const bundledTest = process.env.GO_OFFICE_PLAYWRIGHT_TEST === "true";
+const bundledTest = process.env.OFFICE_PLAYWRIGHT_TEST === "true";
 const EDITOR_LOAD_TIMEOUT = Number(
   process.env.PLAYWRIGHT_EDITOR_TIMEOUT ?? (bundledTest ? 60_000 : 30_000),
 );

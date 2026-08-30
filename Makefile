@@ -2,15 +2,15 @@
 #
 #   make setup    # once: install Go module dependencies
 #   make build    # fetch Euro-Office assets + compile binaries
-#   make demo     # build (if needed) and run the demo server
+#   make serve    # build (if needed) and run the document server
 #   make test     # unit tests (no assets required)
 #
-# Targets stack: setup → build → demo
+# Targets stack: setup → build → serve
 
 .DEFAULT_GOAL := help
 
 GO ?= go
-GO_OFFICE_ASSETS ?= $(CURDIR)/assets
+OFFICE_ASSETS ?= $(CURDIR)/assets
 ADDR ?= :8080
 BIN_DIR ?= bin
 UNAME_S := $(shell uname -s 2>/dev/null || echo unknown)
@@ -18,17 +18,17 @@ UNAME_S := $(shell uname -s 2>/dev/null || echo unknown)
 GO_OFFICE_BIN := $(BIN_DIR)/go-office
 FETCH_ASSETS_BIN := $(BIN_DIR)/fetch-assets
 
-API_JS := $(GO_OFFICE_ASSETS)/web-apps/apps/api/documents/api.js
-API_JS_TPL := $(GO_OFFICE_ASSETS)/web-apps/apps/api/documents/api.js.tpl
-ALL_FONTS := $(GO_OFFICE_ASSETS)/sdkjs/common/AllFonts.js
-FONT_SELECTION := $(GO_OFFICE_ASSETS)/converter/bin/font_selection.bin
-X2T_BIN := $(GO_OFFICE_ASSETS)/converter/bin/x2t
+API_JS := $(OFFICE_ASSETS)/web-apps/apps/api/documents/api.js
+API_JS_TPL := $(OFFICE_ASSETS)/web-apps/apps/api/documents/api.js.tpl
+ALL_FONTS := $(OFFICE_ASSETS)/sdkjs/common/AllFonts.js
+FONT_SELECTION := $(OFFICE_ASSETS)/converter/bin/font_selection.bin
+X2T_BIN := $(OFFICE_ASSETS)/converter/bin/x2t
 SAMPLES_DIR ?= sample-files
 SAMPLE_DOC ?= $(SAMPLES_DIR)/sample.doc
 DOCKER_BUILD_TIMEOUT ?= 10m
 DOCKER_BUILD = timeout $(DOCKER_BUILD_TIMEOUT) docker build
 
-.PHONY: help setup build demo doctor fonts test test-integration clean \
+.PHONY: help setup build serve doctor fonts test test-integration clean \
         check-linux check-go mod-download fetch-assets compile check-assets check-samples test-x2t \
         playwright-base playwright-npm test-playwright test-playwright-ui check-sample-matrix \
         build-docker build-docker-image build-docker-builder run-docker stop-docker ensure-assets
@@ -38,7 +38,7 @@ help:
 	@echo ""
 	@echo "  make setup   Verify Go 1.25+, install dependencies (Go modules)"
 	@echo "  make build   Fetch Euro-Office assets and compile bin/go-office"
-	@echo "  make demo    Build (if needed) and run the demo server on $(ADDR)"
+	@echo "  make serve   Build (if needed) and run the document server on $(ADDR)"
 	@echo "  make test    Run unit tests (no assets required)"
 	@echo "  make test-x2t  Run x2t conversion on the sample .doc (needs assets)"
 	@echo "  make doctor    Diagnose x2t permissions, libs, and sample conversion"
@@ -48,35 +48,35 @@ help:
 	@echo "  make check-sample-matrix  Verify all Playwright sample files exist (git-tracked under sample-files/)"
 	@echo "  make test-playwright    E2E Playwright tests in Docker (runs build first)"
 	@echo "  make test-playwright-ui Local Playwright UI (server in Docker, tests on host)"
-	@echo "  make build-docker       Build Docker image and run demo server (sample-files/)"
+	@echo "  make build-docker       Build Docker image and run server (sample-files/)"
 	@echo "  make build-docker-image Build Docker image only (debian-slim runtime for x2t)"
 	@echo "  make build-docker-builder  Build reusable Alpine Go builder image"
-	@echo "  make run-docker         Run demo from existing Docker image"
+	@echo "  make run-docker         Run server from existing Docker image"
 	@echo "  make clean              Remove bin/ and downloaded assets/"
 	@echo ""
-	@echo "Variables: ADDR=$(ADDR)  GO_OFFICE_ASSETS=$(GO_OFFICE_ASSETS)  SAMPLES_DIR=$(SAMPLES_DIR)"
+	@echo "Variables: ADDR=$(ADDR)  OFFICE_ASSETS=$(OFFICE_ASSETS)  SAMPLES_DIR=$(SAMPLES_DIR)"
 	@echo "           DOCKER_IMAGE=$(DOCKER_IMAGE)  DOCKER_PORT=$(DOCKER_PORT)"
 	@echo ""
 	@echo "Typical flow:"
-	@echo "  make setup && make demo"
+	@echo "  make setup && make serve"
 	@echo ""
-	@echo "Then open http://localhost:8080/ and http://localhost:8080/office/demo/"
+	@echo "Then open http://localhost:8080/ and http://localhost:8080/demo/"
 
 setup: check-linux check-go mod-download
 	@chmod +x scripts/fix-x2t-perms.sh 2>/dev/null || true
 	@echo ""
-	@echo "Setup complete. Next: make build  (or make demo to build and run)"
+	@echo "Setup complete. Next: make build  (or make serve to build and run)"
 
 build: setup fetch-assets compile check-assets
 	@scripts/fix-x2t-perms.sh 2>/dev/null || true
 	@echo ""
 	@echo "Build complete: $(GO_OFFICE_BIN)"
-	@echo "  make demo   — run the demo server"
+	@echo "  make serve  — run the document server"
 
-demo: build check-samples
+serve: build check-samples
 	@echo ""
-	@echo "Demo server on http://localhost:8080/ (debug logging enabled, Ctrl+C to stop)"
-	GO_OFFICE_ASSETS="$(GO_OFFICE_ASSETS)" $(GO_OFFICE_BIN) -assets "$(GO_OFFICE_ASSETS)" -addr "$(ADDR)" -samples "$(SAMPLES_DIR)" -demo
+	@echo "Document server on http://localhost:8080/ (debug logging enabled, Ctrl+C to stop)"
+	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO_OFFICE_BIN) -assets "$(OFFICE_ASSETS)" -addr "$(ADDR)" -data "." -samples "$(SAMPLES_DIR)" -debug
 
 check-linux:
 	@if [ "$(UNAME_S)" != "Linux" ]; then \
@@ -110,10 +110,10 @@ check-sample-matrix: check-samples
 	@scripts/check-sample-matrix.sh "$(SAMPLES_DIR)"
 
 fetch-assets: check-linux
-	@echo "==> Euro-Office assets → $(GO_OFFICE_ASSETS)/"
-	@mkdir -p "$(BIN_DIR)" "$(GO_OFFICE_ASSETS)"
+	@echo "==> Euro-Office assets → $(OFFICE_ASSETS)/"
+	@mkdir -p "$(BIN_DIR)" "$(OFFICE_ASSETS)"
 	$(GO) build -o "$(FETCH_ASSETS_BIN)" ./cmd/fetch-assets
-	$(FETCH_ASSETS_BIN) -out "$(GO_OFFICE_ASSETS)"
+	$(FETCH_ASSETS_BIN) -out "$(OFFICE_ASSETS)"
 	@test -f "$(ALL_FONTS)" || (echo "error: fetch-assets did not create $(ALL_FONTS)" && exit 1)
 	@test -s "$(FONT_SELECTION)" || (echo "error: fetch-assets did not create $(FONT_SELECTION)" && exit 1)
 
@@ -128,7 +128,7 @@ $(GO_OFFICE_BIN): check-linux
 
 check-assets:
 	@if [ ! -f "$(API_JS)" ] && [ ! -f "$(API_JS_TPL)" ]; then \
-		echo "error: Euro-Office assets missing in $(GO_OFFICE_ASSETS)/"; \
+		echo "error: Euro-Office assets missing in $(OFFICE_ASSETS)/"; \
 		echo "       Run: make build"; \
 		exit 1; \
 	fi
@@ -144,24 +144,24 @@ check-assets:
 		echo "error: x2t converter missing — run: make build (re-fetches converter binaries)"; \
 		exit 1; \
 	fi
-	@chmod +x "$(GO_OFFICE_ASSETS)/converter/bin/"* 2>/dev/null || true
+	@chmod +x "$(OFFICE_ASSETS)/converter/bin/"* 2>/dev/null || true
 	@chmod +x "$(X2T_BIN)" || (echo "error: chmod +x failed for $(X2T_BIN)" && exit 1)
 	@test -x "$(X2T_BIN)" || (echo "error: x2t is not executable: $(X2T_BIN)" && ls -la "$(X2T_BIN)" && exit 1)
 	@ls -la "$(X2T_BIN)"
 
 test-x2t: build check-samples
 	@echo "==> x2t conversion test"
-	GO_OFFICE_ASSETS="$(GO_OFFICE_ASSETS)" $(GO) run ./cmd/test-x2t -assets "$(GO_OFFICE_ASSETS)" -sample "$(SAMPLE_DOC)"
+	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) run ./cmd/test-x2t -assets "$(OFFICE_ASSETS)" -sample "$(SAMPLE_DOC)"
 
 doctor: build check-samples
 	@echo "==> go-office doctor"
-	GO_OFFICE_ASSETS="$(GO_OFFICE_ASSETS)" $(GO) run ./cmd/doctor -assets "$(GO_OFFICE_ASSETS)" -sample "$(SAMPLE_DOC)" -report "$(CURDIR)/doctor-report.txt"
+	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) run ./cmd/doctor -assets "$(OFFICE_ASSETS)" -sample "$(SAMPLE_DOC)" -report "$(CURDIR)/doctor-report.txt"
 
 fonts: check-linux
 	@echo "==> Regenerating font files"
 	@mkdir -p "$(BIN_DIR)"
 	$(GO) build -o "$(FETCH_ASSETS_BIN)" ./cmd/fetch-assets
-	$(FETCH_ASSETS_BIN) -fonts -out "$(GO_OFFICE_ASSETS)"
+	$(FETCH_ASSETS_BIN) -fonts -out "$(OFFICE_ASSETS)"
 
 test:
 	$(GO) test ./...
@@ -170,9 +170,9 @@ PLAYWRIGHT_BASE_IMAGE ?= go-office-playwright-base
 PLAYWRIGHT_TEST_IMAGE ?= go-office-playwright-tests
 PLAYWRIGHT_LOCAL_CONTAINER ?= go-office-playwright-local
 
-DOCKER_IMAGE ?= go-office:demo
+DOCKER_IMAGE ?= ghcr.io/quantumx-apps/office-server:local
 DOCKER_BUILDER_IMAGE ?= go-office:builder
-DOCKER_CONTAINER ?= go-office-demo
+DOCKER_CONTAINER ?= go-office-serve
 DOCKER_PORT ?= 8080
 DOCKER_PUBLIC ?= http://localhost:$(DOCKER_PORT)
 
@@ -189,18 +189,18 @@ build-docker-builder:
 
 run-docker: stop-docker
 	@echo ""
-	@echo "Demo server (Docker) on $(DOCKER_PUBLIC)/"
-	@echo "  site:  $(DOCKER_PUBLIC)/"
-	@echo "  demo:  $(DOCKER_PUBLIC)/office/demo/"
+	@echo "Document server (Docker) on $(DOCKER_PUBLIC)/"
+	@echo "  site:    $(DOCKER_PUBLIC)/"
+	@echo "  samples: $(DOCKER_PUBLIC)/demo/"
 	@echo "Press Ctrl+C to stop"
-	docker run --rm -p "$(DOCKER_PORT):8080" --name "$(DOCKER_CONTAINER)" "$(DOCKER_IMAGE)" \
-		-assets /app/assets -addr :8080 -data /app -samples sample-files -demo -public "$(DOCKER_PUBLIC)"
+	docker run --rm -p "$(DOCKER_PORT):80" --name "$(DOCKER_CONTAINER)" "$(DOCKER_IMAGE)" \
+		-public "$(DOCKER_PUBLIC)"
 
 stop-docker:
 	@docker rm -f "$(DOCKER_CONTAINER)" 2>/dev/null || true
 
 test-integration: build
-	GO_OFFICE_ASSETS="$(GO_OFFICE_ASSETS)" $(GO) test -tags=integration ./...
+	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test -tags=integration ./...
 
 playwright-base:
 	@echo "==> Playwright base image"
@@ -226,5 +226,5 @@ test-playwright-ui: build check-sample-matrix
 	cd frontend && npx playwright test --ui
 
 clean:
-	rm -rf "$(BIN_DIR)" "$(GO_OFFICE_ASSETS)"
+	rm -rf "$(BIN_DIR)" "$(OFFICE_ASSETS)"
 	$(GO) clean -testcache

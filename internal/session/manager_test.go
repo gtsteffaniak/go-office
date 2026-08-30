@@ -3,7 +3,7 @@ package session_test
 import (
 	"testing"
 
-	"github.com/quantumx-apps/go-office/session"
+	"github.com/quantumx-apps/go-office/internal/session"
 )
 
 func TestManagerUpsertAndGet(t *testing.T) {

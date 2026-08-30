@@ -2,18 +2,15 @@ package main
 
 import (
 	"context"
-	"flag"
-	"fmt"
 	"io"
 	"log"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
-	office "github.com/quantumx-apps/go-office"
+	office "github.com/quantumx-apps/go-office/pkg/office"
 	"github.com/quantumx-apps/go-office/internal/debuglog"
 	"github.com/quantumx-apps/go-office/internal/demo"
 	"github.com/quantumx-apps/go-office/internal/home"
@@ -56,46 +53,37 @@ func (s *localStorage) Stat(_ context.Context, path string) (office.FileInfo, er
 }
 
 func main() {
-	assetDir := flag.String("assets", office.AssetDirFromEnv(""), "path to Euro-Office assets (web-apps/, sdkjs/)")
-	dataDir := flag.String("data", ".", "document root (repo root; contains sample-files/)")
-	samplesDir := flag.String("samples", demo.DefaultSamplesDir, "directory of sample documents relative to -data")
-	addr := flag.String("addr", ":8080", "listen address")
-	basePath := flag.String("base", office.DefaultBasePath, "document server URL prefix (editor assets)")
-	apiBase := flag.String("api-base", home.DefaultAPIBasePath, "API URL prefix (config, callback, file)")
-	jwtSecret := flag.String("jwt", "", "JWT secret for editor config signing")
-	version := flag.String("version", "", "protocol version (default: read from assets/VERSION)")
-	demoUI := flag.Bool("demo", true, "serve local demo editor UI at {base}/demo/")
-	debugFlag := flag.Bool("debug", false, "enable verbose logging (on by default with -demo)")
-	publicOrigin := flag.String("public", "", "public origin for document URLs (default: http://{addr})")
-	flag.Parse()
+	cfg := parseRunConfig()
 
-	if *assetDir == "" {
-		log.Fatal("assets required: run `make build`")
+	if cfg.AssetDir == "" {
+		log.Fatal("assets required: set OFFICE_ASSETS or run `make build`")
 	}
-	if v, err := office.ReadAssetVersion(*assetDir); err == nil && *version == "" {
-		*version = v
+	if cfg.Version == "" {
+		if v, err := office.ReadAssetVersion(cfg.AssetDir); err == nil {
+			cfg.Version = v
+		}
 	}
-	if *version == "" {
-		*version = "0.0.0-dev"
+	if cfg.Version == "" {
+		cfg.Version = "0.0.0-dev"
 	}
 
-	samplesPath := filepath.Join(*dataDir, filepath.FromSlash(*samplesDir))
-	if *demoUI {
+	samplesPath := filepath.Join(cfg.DataDir, filepath.FromSlash(cfg.SamplesDir))
+	if cfg.samplesEnabled() {
 		if fi, err := os.Stat(samplesPath); err != nil || !fi.IsDir() {
-			log.Fatalf("samples directory not found: %s (%v)", samplesPath, err)
+			log.Fatalf("samples directory not found: %s (%v) — use OFFICE_DISABLE_SAMPLES=1 to run without demo", samplesPath, err)
 		}
 	}
 
-	debug := debuglog.Enabled(*debugFlag) || *demoUI
+	debug := debuglog.Enabled(cfg.Debug) || cfg.samplesEnabled()
 	logger := debuglog.NewLogger(debug)
 	slog.SetDefault(logger)
 
-	store := &localStorage{root: *dataDir}
+	store := &localStorage{root: cfg.DataDir}
 	srv, err := office.New(store, office.Options{
-		AssetDir:        *assetDir,
-		BasePath:        *basePath,
-		JWTSecret:       []byte(*jwtSecret),
-		ProtocolVersion: *version,
+		AssetDir:        cfg.AssetDir,
+		BasePath:        cfg.BasePath,
+		JWTSecret:       []byte(cfg.JWTSecret),
+		ProtocolVersion: cfg.Version,
 		Debug:           debug,
 		Logger:          logger,
 	})
@@ -104,35 +92,30 @@ func main() {
 	}
 	defer srv.Close()
 
-	origin := *publicOrigin
-	if origin == "" {
-		host, port, _ := net.SplitHostPort(*addr)
-		if host == "" || host == "0.0.0.0" || host == "::" {
-			host = "localhost"
-		}
-		if port == "" {
-			port = "8080"
-		}
-		origin = fmt.Sprintf("http://%s", net.JoinHostPort(host, port))
-	}
+	origin := cfg.publicOrigin()
 
-	if *demoUI {
+	if cfg.samplesEnabled() {
 		if err := demo.Attach(srv, store, demo.Options{
 			PublicOrigin: origin,
-			DataRoot:     *dataDir,
-			SamplesDir:   *samplesDir,
-			APIBasePath:  *apiBase,
+			DataRoot:     cfg.DataDir,
+			SamplesDir:   cfg.SamplesDir,
+			APIBasePath:  cfg.APIBase,
 			Logger:       logger,
 		}); err != nil {
 			log.Fatalf("demo: %v", err)
 		}
 	}
 
+	logoPath := "/web-apps/apps/common/main/resources/img/about/logo_s.svg"
 	homeHandler, err := home.New(home.Options{
-		Origin:     origin,
-		OfficeBase: srv.BasePath(),
-		APIBase:    *apiBase,
-		SamplesDir: *samplesDir,
+		Origin:      origin,
+		OfficeBase:  srv.BasePath(),
+		APIBase:     cfg.APIBase,
+		SamplesDir:  cfg.SamplesDir,
+		Version:     cfg.Version,
+		LogoURL:     origin + logoPath,
+		SamplesOn:   cfg.samplesEnabled(),
+		GitHubURL:   "https://github.com/quantumx-apps/go-office",
 	})
 	if err != nil {
 		log.Fatalf("home: %v", err)
@@ -142,21 +125,27 @@ func main() {
 	mux.Handle("GET /{$}", homeHandler)
 	mux.Handle("/", srv.Handler())
 
-	officeBase := strings.TrimSuffix(origin, "/") + srv.BasePath()
-	apiBasePath := strings.TrimSuffix(*apiBase, "/")
-	log.Printf("go-office listening on %s", *addr)
+	officeBase := strings.TrimSuffix(origin, "/") + strings.TrimSuffix(srv.BasePath(), "/")
+	if officeBase == origin {
+		officeBase = origin
+	}
+	log.Printf("go-office listening on %s", cfg.Addr)
 	if debug {
 		log.Printf("  debug:   enabled")
 	}
 	log.Printf("  site:    %s/", strings.TrimSuffix(origin, "/"))
 	log.Printf("  health:  %s/health", officeBase)
-	if *demoUI {
+	log.Printf("  api.js:  %s/web-apps/apps/api/documents/api.js", officeBase)
+	if cfg.samplesEnabled() {
 		log.Printf("  demo:    %s/demo/", officeBase)
-		log.Printf("  api:     %s/demo/config", strings.TrimSuffix(origin, "/")+apiBasePath)
+		log.Printf("  api:     %s/demo/config", strings.TrimSuffix(origin, "/")+strings.TrimSuffix(cfg.APIBase, "/"))
 		log.Printf("  samples: %s", samplesPath)
 	}
-	log.Printf("  assets:  %s", *assetDir)
-	log.Fatal(http.ListenAndServe(*addr, mux))
+	if cfg.JWTSecret != "" {
+		log.Printf("  jwt:     enabled (OFFICE_JWT_SECRET)")
+	}
+	log.Printf("  assets:  %s", cfg.AssetDir)
+	log.Fatal(http.ListenAndServe(cfg.Addr, mux))
 }
 
 var _ office.Storage = (*localStorage)(nil)

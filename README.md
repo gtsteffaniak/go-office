@@ -16,19 +16,21 @@ Embedded Go document server library compatible with ONLYOFFICE / Euro-Office bro
 
 **Phase 0 complete** — static assets, coauthoring polling handshake, x2t document open, demo UI, full sample matrix, Playwright E2E in CI.
 
-**Phase 1 in progress** — save/force-save back to disk (`Storage.Save` + reverse x2t). Multi-user co-editing is Phase 3.
+**Phase 0.5 complete** — Document Server–compatible Docker image (`ghcr.io/quantumx-apps/office-server`), site-root URL layout, `OFFICE_*` configuration, [migration.md](migration.md).
+
+**Phase 1 next** — save/force-save back to disk (`Storage.Save` + reverse x2t). Multi-user co-editing is Phase 3.
 
 ## Quick start (Makefile)
 
 **Develop in WSL** — use the Linux clone at `~/git/go-office` (not the Windows path under `/mnt/c/`).
 
-Linux or WSL only. Requires **Go 1.25+**. Targets stack: **setup → build → demo**.
+Linux or WSL only. Requires **Go 1.25+**. Targets stack: **setup → build → serve**.
 
 ```bash
 cd ~/git/go-office
 make setup    # once: Go module dependencies
 make build    # fetch Euro-Office assets (~600MB) + compile bin/go-office
-make demo     # build (if needed) and start server
+make serve    # build (if needed) and start server on :8080
 make test     # unit tests (no assets)
 ```
 
@@ -36,16 +38,16 @@ make test     # unit tests (no assets)
 |--------|----------------|
 | `make setup` | Verify Go 1.25+, `go mod download`, verify Linux |
 | `make build` | Download Euro-Office assets into `./assets/`, compile `bin/go-office` |
-| `make demo` | Runs `build` then starts the server on `:8080` |
+| `make serve` | Runs `build` then starts the server on `:8080` |
 | `make test` | `go test ./...` (no assets) |
 | `make test-integration` | `build` then integration tests |
 | `make test-playwright` | `build` then Playwright E2E in Docker |
 | `make test-playwright-ui` | Demo server in Docker + Playwright UI on host |
-| `make build-docker` | Build Docker image and run demo (`sample-files/`) |
+| `make build-docker` | Build `office-server` image and run on host port 8080 → container 80 |
 | `make build-docker-image` | Build Docker image only |
 | `make clean` | Remove `bin/` and `assets/` |
 
-Useful variables: `ADDR=:8080`, `GO_OFFICE_ASSETS=./assets`, `SAMPLES_DIR=sample-files`.
+Useful variables: `OFFICE_ADDR`, `OFFICE_ASSETS`, `OFFICE_JWT_SECRET`, `OFFICE_DISABLE_SAMPLES`. See [migration.md](migration.md) when replacing `onlyoffice/documentserver`.
 
 ## Euro-Office assets (Linux developers & CI)
 
@@ -69,8 +71,8 @@ The release is pinned in `scripts/euro-office.version` (currently `v9.3.4-hotfix
 **Environment variable**
 
 ```bash
-export GO_OFFICE_ASSETS=./assets
-go run ./cmd/go-office -assets "$GO_OFFICE_ASSETS"
+export OFFICE_ASSETS=./assets
+go run ./cmd/go-office -assets "$OFFICE_ASSETS"
 ```
 
 **CI** (`.github/workflows/ci.yml`, `ubuntu-latest` only)
@@ -90,15 +92,22 @@ make test-playwright    # full CI-style run in Docker
 make test-playwright-ui # server in Docker, Playwright --ui on host
 ```
 
-### Docker demo
+### Docker image (Document Server replacement)
 
 ```bash
-make build-docker          # build image + run on http://localhost:8080/
-make build-docker-image    # image only (reuses ./assets if present)
-DOCKER_PORT=9090 make run-docker
+make build-docker-image     # tags ghcr.io/quantumx-apps/office-server:local
+make build-docker           # build + run on http://localhost:8080/ (maps host 8080 → container 80)
+DOCKER_PORT=9052 make run-docker
 ```
 
-The image bundles `go-office`, Euro-Office assets, and `sample-files/`. If `./assets` exists from `make build`, the Docker build reuses it instead of re-downloading.
+Pull from GHCR (published on push to `main`):
+
+```bash
+docker pull ghcr.io/quantumx-apps/office-server:latest
+# or pin: ghcr.io/quantumx-apps/office-server:9.3.4-hotfix.1
+```
+
+The image bundles `go-office`, Euro-Office assets, and `sample-files/`. Container listens on **port 80**; map your host port as needed (`9052:80` for a drop-in ONLYOFFICE replacement). See [migration.md](migration.md).
 
 **Container users:** the image is AGPL-3.0 licensed. Corresponding source code is at **https://github.com/quantumx-apps/go-office** (OCI labels `org.opencontainers.image.source` and `org.opencontainers.image.licenses` are set in `_docker/Dockerfile`). No license acceptance step is required before pull or run.
 
@@ -113,27 +122,29 @@ Variables:
 
 You do **not** need to clone [Euro-Office/DocumentServer](https://github.com/Euro-Office/DocumentServer) unless you are hacking sdkjs. The fetch tool downloads the official GitHub release `.deb`.
 
-## Local demo (no FileBrowser)
+## Local server (no FileBrowser)
 
 Linux only. After setup:
 
 ```bash
-make demo
+make serve
 ```
 
-Open **http://localhost:8080/** for the site home page, then **http://localhost:8080/office/demo/** to pick a sample document.
+Open **http://localhost:8080/** for the site home page, then **http://localhost:8080/demo/** to pick a sample document.
 
 | URL | Purpose |
 |-----|---------|
-| `/` | Site home (about, links, next steps) |
-| `/office/demo/` | Landing page with links to sample documents |
-| `/office/demo/view?file=sample-files/sample.docx` | Editor viewer |
+| `/` | Site home (about, links) |
+| `/demo/` | Landing page with links to sample documents |
+| `/demo/view?file=sample-files/sample.docx` | Editor viewer |
 | `/api/office/demo/config?file=sample-files/sample.docx` | Editor init JSON (API) |
 | `/api/office/demo/file/sample-files/sample.docx` | Serves a sample document (API) |
 | `/api/office/demo/callback` | Save callback stub (API) |
-| `/office/health` | Health check |
+| `/health` | Health check (JSON) |
+| `/healthcheck` | ONLYOFFICE-compatible health (`true`) |
+| `/web-apps/apps/api/documents/api.js` | Integrator `api.js` |
 
-Flags: `-data .`, `-samples sample-files`, `-base /office`, `-api-base /api/office`, `-assets`, `-addr`, `-public`.
+Environment: `OFFICE_ASSETS`, `OFFICE_ADDR`, `OFFICE_JWT_SECRET`, `OFFICE_DISABLE_SAMPLES`. CLI flags override when set (`-assets`, `-addr`, `-jwt`, `-disable-samples`, …).
 
 ## Quick start (library only)
 
@@ -152,21 +163,26 @@ go run ./cmd/go-office -assets /path/to/assets -base /myapp/office
 3. Verify static assets (FileBrowser OfficeDebug check):
 
 ```
-http://localhost:8080/office/web-apps/apps/api/documents/api.js
+http://localhost:8080/web-apps/apps/api/documents/api.js
 ```
 
 4. Health:
 
 ```
-http://localhost:8080/office/health
+http://localhost:8080/health
 ```
 
 ## Integration
 
 ```go
+import (
+    office "github.com/quantumx-apps/go-office/pkg/office"
+    "github.com/quantumx-apps/go-office/pkg/config"
+)
+
 srv, err := office.New(myStorage, office.Options{
     AssetDir:        "/var/office-assets",
-    BasePath:        office.JoinBasePath(appBaseURL, ""), // e.g. "/myapp/office"
+    BasePath:        office.JoinBasePath(appBaseURL, ""), // default mount is site root "/"
     JWTSecret:       []byte("shared-secret"),
     ProtocolVersion: protocol, // office.ReadAssetVersion(assetDir) after fetch
 })
@@ -176,7 +192,7 @@ cfg, err := srv.BuildEditorConfig(ctx, config.EditorRequest{...})
 ```
 
 `appBaseURL` is the host application's configured subpath (FileBrowser `http.baseURL`, e.g. `"/myapp/"`).
-Host API routes like `/api/office/config` remain on the application mux; this library serves editor assets and coauthoring under `BasePath` (default `/office`).
+Host API routes like `/api/office/config` remain on the application mux; this library serves editor assets and coauthoring under `BasePath` (default `/`, site root — same as ONLYOFFICE Document Server).
 
 Set the Vue `documentServerUrl` to `srv.DocumentServerURL(publicOrigin)`.
 
@@ -184,17 +200,17 @@ Set the Vue `documentServerUrl` to `srv.DocumentServerURL(publicOrigin)`.
 
 | Path | Purpose |
 |------|---------|
-| `storage.go` | Host `Storage` interface |
-| `server.go` | HTTP routes and editor config |
-| `config/` | ONLYOFFICE-compatible editor JSON |
-| `session/` | In-memory document sessions |
-| `static/` | Asset file server with cache headers |
+| `pkg/office/` | Public library API (`Server`, `Storage`, routes) |
+| `pkg/config/` | ONLYOFFICE-compatible editor JSON |
 | `internal/ws/` | Coauthoring Engine.IO polling (sdkjs protocol handshake) |
-| `cmd/go-office/` | Local demo server with embedded test UI |
+| `internal/demo/` | Sample document UI (`/demo/`) |
+| `internal/home/` | Site home page (`/`) |
+| `cmd/go-office/` | Standalone `office-server` binary |
+| `migration.md` | Replacing `onlyoffice/documentserver` |
 
 ## Roadmap
 
-- **Phase 0:** ✅ static assets, coauthoring handshake, x2t open, demo, Playwright E2E (16 sample formats)
+- **Phase 0.5:** ✅ Document Server Docker image, root URLs, `OFFICE_*` env, migration guide
 - **Phase 1:** single-user edit + save, reverse x2t, `Storage` save path
 - **Phase 2:** packaging, cache hardening, WS golden fixtures
 - **Phase 3:** multi-user co-editing

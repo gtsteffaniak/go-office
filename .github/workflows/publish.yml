@@ -1,0 +1,46 @@
+name: Publish
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    name: GHCR office-server
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read Euro-Office version tag
+        id: version
+        run: |
+          set -a
+          # shellcheck disable=SC1091
+          . ./scripts/euro-office.version
+          set +a
+          echo "protocol=$EURO_OFFICE_PROTOCOL" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: _docker/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/quantumx-apps/office-server:latest
+            ghcr.io/quantumx-apps/office-server:${{ steps.version.outputs.protocol }}

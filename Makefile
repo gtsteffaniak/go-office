@@ -170,7 +170,7 @@ PLAYWRIGHT_BASE_IMAGE ?= go-office-playwright-base
 PLAYWRIGHT_TEST_IMAGE ?= go-office-playwright-tests
 PLAYWRIGHT_LOCAL_CONTAINER ?= go-office-playwright-local
 
-DOCKER_IMAGE ?= go-office:local
+DOCKER_IMAGE ?= ghcr.io/quantumx-apps/office-server:local
 DOCKER_BUILDER_IMAGE ?= go-office:builder
 DOCKER_CONTAINER ?= go-office-serve
 DOCKER_PORT ?= 8080
@@ -193,8 +193,8 @@ run-docker: stop-docker
 	@echo "  site:    $(DOCKER_PUBLIC)/"
 	@echo "  samples: $(DOCKER_PUBLIC)/demo/"
 	@echo "Press Ctrl+C to stop"
-	docker run --rm -p "$(DOCKER_PORT):8080" --name "$(DOCKER_CONTAINER)" "$(DOCKER_IMAGE)" \
-		-assets /app/assets -addr :8080 -data /app -samples sample-files -public "$(DOCKER_PUBLIC)"
+	docker run --rm -p "$(DOCKER_PORT):80" --name "$(DOCKER_CONTAINER)" "$(DOCKER_IMAGE)" \
+		-public "$(DOCKER_PUBLIC)"
 
 stop-docker:
 	@docker rm -f "$(DOCKER_CONTAINER)" 2>/dev/null || true

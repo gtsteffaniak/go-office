@@ -19,12 +19,12 @@ async function assertEditorOpens(page: import("@playwright/test").Page, sample: 
   const font404s: string[] = [];
   page.on("response", (res) => {
     const url = res.url();
-    if (url.includes("/office/fonts/") && res.status() === 404) {
+    if (url.includes("/fonts/") && res.status() === 404) {
       font404s.push(url);
     }
   });
 
-  await page.goto(`/office/demo/view?file=${encodeURIComponent(sample.path)}`);
+  await page.goto(`/demo/view?file=${encodeURIComponent(sample.path)}`);
 
   await expect(page.locator("#sample-path")).toContainText(sample.path.split("/").pop()!);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {

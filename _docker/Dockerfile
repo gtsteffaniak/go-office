@@ -1,7 +1,9 @@
-# Demo server image: go-office + Euro-Office assets + sample-files.
+# office-server image: go-office + Euro-Office assets + sample-files.
 #
 #   make build-docker-image   # build only
-#   make build-docker         # build image and run demo (default)
+#   make build-docker         # build image and run (default)
+#
+# Published as ghcr.io/quantumx-apps/office-server (see .github/workflows/publish.yml).
 #
 # Stages:
 #   gobuild  — Alpine + Go: static go-office + fetch-assets binaries
@@ -18,12 +20,8 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY assets.go doc.go options.go server.go storage.go ./
-COPY cmd/go-office ./cmd/go-office
-COPY cmd/fetch-assets ./cmd/fetch-assets
-COPY config ./config
-COPY session ./session
-COPY static ./static
+COPY cmd ./cmd
+COPY pkg ./pkg
 COPY internal ./internal
 COPY scripts/euro-office.version ./scripts/euro-office.version
 
@@ -61,7 +59,8 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 LABEL org.opencontainers.image.source="https://github.com/quantumx-apps/go-office" \
-      org.opencontainers.image.licenses="AGPL-3.0"
+      org.opencontainers.image.licenses="AGPL-3.0" \
+      org.opencontainers.image.title="office-server"
 
 WORKDIR /app
 
@@ -76,11 +75,14 @@ RUN set -eux; \
     printf '%s\n' "$out" | head -3 || true; \
     ! printf '%s' "$out" | grep -qiE 'error (loading|relocating)|symbol not found'
 
-ENV OFFICE_ASSETS=/app/assets
-EXPOSE 8080
+ENV OFFICE_ASSETS=/app/assets \
+    OFFICE_DATA_DIR=/app \
+    OFFICE_ADDR=:80
+
+EXPOSE 80
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 \
-  CMD curl -sf http://127.0.0.1:8080/healthcheck || exit 1
+  CMD curl -sf http://127.0.0.1:80/healthcheck || exit 1
 
 ENTRYPOINT ["./go-office"]
-CMD ["-assets", "/app/assets", "-addr", ":8080", "-data", "/app", "-samples", "sample-files", "-public", "http://localhost:8080"]
+CMD ["-assets", "/app/assets", "-addr", ":80", "-data", "/app", "-samples", "sample-files", "-public", "http://localhost"]

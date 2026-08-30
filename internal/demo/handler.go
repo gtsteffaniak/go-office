@@ -105,7 +105,18 @@ func Attach(srv *office.Server, store office.Storage, opts Options) error {
 
 	apiBase := normalizePath(opts.APIBasePath) + "/demo"
 	srv.Mount(apiBase, http.RedirectHandler(apiBase+"/", http.StatusPermanentRedirect))
-	srv.Mount(apiBase+"/", http.StripPrefix(apiBase, http.HandlerFunc(h.serveAPI)))
+
+	api := http.NewServeMux()
+	api.HandleFunc("GET /config", func(w http.ResponseWriter, r *http.Request) {
+		h.serveConfig(w, r)
+	})
+	api.HandleFunc("GET /file/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		h.serveFile(w, r)
+	})
+	api.HandleFunc("POST /callback", func(w http.ResponseWriter, r *http.Request) {
+		h.serveCallback(w, r)
+	})
+	srv.Mount(apiBase+"/", http.StripPrefix(apiBase, api))
 	return nil
 }
 
@@ -120,37 +131,61 @@ func (h *Handler) serveUI(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *Handler) serveAPI(w http.ResponseWriter, r *http.Request) {
-	switch {
-	case r.Method == http.MethodGet && r.URL.Path == "/config":
-		h.serveConfig(w, r)
-	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/file/"):
-		h.serveFile(w, r)
-	case r.Method == http.MethodPost && r.URL.Path == "/callback":
-		h.serveCallback(w, r)
-	default:
-		http.NotFound(w, r)
+func (h *Handler) serveConfig(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	file := strings.TrimSpace(r.URL.Query().Get("file"))
+	if file == "" {
+		http.Error(w, "file query parameter is required", http.StatusBadRequest)
+		return
 	}
-}
+	if !h.isAllowedSample(file) {
+		http.Error(w, "file not found", http.StatusNotFound)
+		return
+	}
 
-func (h *Handler) serveLanding(w http.ResponseWriter, _ *http.Request) {
-	files, err := h.listSampleFiles()
+	info, err := h.store.Stat(ctx, file)
+	if err != nil {
+		http.Error(w, "sample file not found: "+file, http.StatusNotFound)
+		return
+	}
+
+	origin := strings.TrimSuffix(h.opts.PublicOrigin, "/")
+	apiBase := h.opts.APIBasePath
+	fileURL := origin + apiBase + "/demo/file/" + strings.TrimPrefix(file, "/")
+	callbackURL := origin + apiBase + "/demo/callback"
+	key := documentKey(file, info.ModTime)
+	ext := strings.TrimPrefix(strings.ToLower(path.Ext(info.Name)), ".")
+
+	cfg, err := h.office.BuildEditorConfig(ctx, config.EditorRequest{
+		DocumentKey: key,
+		Title:       info.Name,
+		FileType:    ext,
+		DocumentURL: fileURL,
+		StoragePath: file,
+		CallbackURL: callbackURL,
+		UserID:      "demo-user",
+		UserName:    "Demo User",
+		Mode:        "edit",
+		Lang:        "en",
+		Theme:       "light",
+		Permissions: config.Permissions{Edit: "edit", Download: true, Print: true},
+	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	data := landingData{
-		SamplesDir: h.opts.SamplesDir,
-		Files:      files,
+	if h.office.Debug() {
+		h.opts.Logger.Debug("demo config",
+			"file", file,
+			"key", key,
+			"documentURL", fileURL,
+			"callbackURL", callbackURL,
+		)
 	}
-	var buf bytes.Buffer
-	if err := h.landingTmpl.Execute(&buf, data); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(buf.Bytes())
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(cfg)
 }
 
 func (h *Handler) serveViewer(w http.ResponseWriter, r *http.Request) {
@@ -185,65 +220,8 @@ func (h *Handler) serveViewer(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(buf.Bytes())
 }
 
-func (h *Handler) serveConfig(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	file := strings.TrimSpace(r.URL.Query().Get("file"))
-	if file == "" {
-		http.Error(w, "file query parameter is required", http.StatusBadRequest)
-		return
-	}
-	if !h.isAllowedSample(file) {
-		http.Error(w, "file not found", http.StatusNotFound)
-		return
-	}
-
-	info, err := h.store.Stat(ctx, file)
-	if err != nil {
-		http.Error(w, "sample file not found: "+file, http.StatusNotFound)
-		return
-	}
-
-	origin := strings.TrimSuffix(h.opts.PublicOrigin, "/")
-	apiBase := h.opts.APIBasePath
-	fileURL := origin + apiBase + "/demo/file/" + strings.TrimPrefix(file, "/")
-	callbackURL := origin + apiBase + "/demo/callback"
-	key := documentKey(file, info.ModTime)
-	ext := strings.TrimPrefix(strings.ToLower(path.Ext(info.Name)), ".")
-
-	cfg, err := h.office.BuildEditorConfig(ctx, config.EditorRequest{
-		DocumentKey: key,
-		Title:       info.Name,
-		FileType:    ext,
-		DocumentURL: fileURL,
-		CallbackURL: callbackURL,
-		UserID:      "demo-user",
-		UserName:    "Demo User",
-		Mode:        "edit",
-		Lang:        "en",
-		Theme:       "light",
-		Permissions: config.Permissions{Edit: "edit", Download: true, Print: true},
-	})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if h.office.Debug() {
-		h.opts.Logger.Debug("demo config",
-			"file", file,
-			"key", key,
-			"documentURL", fileURL,
-			"callbackURL", callbackURL,
-		)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(cfg)
-}
-
 func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request) {
-	rel := strings.TrimPrefix(r.URL.Path, "/file/")
-	rel = strings.TrimPrefix(rel, "/")
+	rel := strings.TrimPrefix(r.PathValue("path"), "/")
 	if rel == "" || !h.isAllowedSample(rel) {
 		http.NotFound(w, r)
 		return
@@ -271,14 +249,27 @@ func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) serveCallback(w http.ResponseWriter, r *http.Request) {
-	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
-	if h.office.Debug() {
-		h.opts.Logger.Debug("demo callback", "method", r.Method, "body", string(body))
-	} else {
-		h.opts.Logger.Info("demo callback", "method", r.Method, "body", string(body))
+	h.office.HandleCallback(w, r)
+}
+
+func (h *Handler) serveLanding(w http.ResponseWriter, _ *http.Request) {
+	files, err := h.listSampleFiles()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte(`{"error":0}`))
+
+	data := landingData{
+		SamplesDir: h.opts.SamplesDir,
+		Files:      files,
+	}
+	var buf bytes.Buffer
+	if err := h.landingTmpl.Execute(&buf, data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(buf.Bytes())
 }
 
 func (h *Handler) listSampleFiles() ([]landingFile, error) {

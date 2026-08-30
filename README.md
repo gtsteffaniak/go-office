@@ -18,7 +18,7 @@ Embedded Go document server library compatible with ONLYOFFICE / Euro-Office bro
 
 **Phase 0.5 complete** — Document Server–compatible Docker image (`ghcr.io/quantumx-apps/office-server`), site-root URL layout, `OFFICE_*` configuration, [migration.md](migration.md).
 
-**Phase 1 next** — save/force-save back to disk (`Storage.Save` + reverse x2t). Multi-user co-editing is Phase 3.
+**Phase 1 complete** — single-user edit + save via reverse x2t, `Storage.Save`, and callback handler. Multi-user co-editing is Phase 3.
 
 ## Quick start (Makefile)
 
@@ -139,7 +139,7 @@ Open **http://localhost:8080/** for the site home page, then **http://localhost:
 | `/demo/view?file=sample-files/sample.docx` | Editor viewer |
 | `/api/office/demo/config?file=sample-files/sample.docx` | Editor init JSON (API) |
 | `/api/office/demo/file/sample-files/sample.docx` | Serves a sample document (API) |
-| `/api/office/demo/callback` | Save callback stub (API) |
+| `/api/office/demo/callback` | Save callback (status 2/6 → `Storage.Save`) |
 | `/health` | Health check (JSON) |
 | `/healthcheck` | ONLYOFFICE-compatible health (`true`) |
 | `/web-apps/apps/api/documents/api.js` | Integrator `api.js` |
@@ -211,7 +211,7 @@ Set the Vue `documentServerUrl` to `srv.DocumentServerURL(publicOrigin)`.
 ## Roadmap
 
 - **Phase 0.5:** ✅ Document Server Docker image, root URLs, `OFFICE_*` env, migration guide
-- **Phase 1:** single-user edit + save, reverse x2t, `Storage` save path
+- **Phase 1:** single-user edit + save, reverse x2t, `Storage` save path — **done**
 - **Phase 2:** packaging, cache hardening, WS golden fixtures
 - **Phase 3:** multi-user co-editing
 

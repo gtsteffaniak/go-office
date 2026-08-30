@@ -7,10 +7,13 @@ import (
 
 // Document holds server-side state for one open document key.
 type Document struct {
-	Key       string
-	Path      string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Key         string
+	Path        string // host storage path (VFS-relative)
+	URL         string // document download URL used on open
+	FileType    string // extension without dot, e.g. docx
+	CallbackURL string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // Manager tracks in-memory document sessions (single-process; no Redis).
@@ -30,18 +33,38 @@ func (m *Manager) Get(key string) (*Document, bool) {
 	return d, ok
 }
 
-func (m *Manager) Upsert(key, path string) *Document {
+// Upsert records document URL for a key (legacy helper).
+func (m *Manager) Upsert(key, docURL string) *Document {
+	return m.UpsertDoc(Document{Key: key, URL: docURL})
+}
+
+// UpsertDoc stores or updates document metadata.
+func (m *Manager) UpsertDoc(doc Document) *Document {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := time.Now().UTC()
-	if d, ok := m.docs[key]; ok {
-		d.Path = path
+	if d, ok := m.docs[doc.Key]; ok {
+		if doc.Path != "" {
+			d.Path = doc.Path
+		}
+		if doc.URL != "" {
+			d.URL = doc.URL
+		}
+		if doc.FileType != "" {
+			d.FileType = doc.FileType
+		}
+		if doc.CallbackURL != "" {
+			d.CallbackURL = doc.CallbackURL
+		}
 		d.UpdatedAt = now
 		return d
 	}
-	d := &Document{Key: key, Path: path, CreatedAt: now, UpdatedAt: now}
-	m.docs[key] = d
-	return d
+	if doc.CreatedAt.IsZero() {
+		doc.CreatedAt = now
+	}
+	doc.UpdatedAt = now
+	m.docs[doc.Key] = &doc
+	return m.docs[doc.Key]
 }
 
 func (m *Manager) Delete(key string) {

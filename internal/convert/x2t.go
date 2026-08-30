@@ -97,6 +97,68 @@ func (c *Converter) ToEditorBin(ctx context.Context, sourcePath, outDir string) 
 	return nil
 }
 
+// FromEditorBin converts cacheDir/Editor.bin to destPath (e.g. saved.docx).
+func (c *Converter) FromEditorBin(ctx context.Context, cacheDir, destPath, targetExt string) error {
+	editorBin := filepath.Join(cacheDir, "Editor.bin")
+	if st, err := os.Stat(editorBin); err != nil || st.Size() == 0 {
+		return fmt.Errorf("convert: Editor.bin missing in %s", cacheDir)
+	}
+	return c.fromEditor(ctx, editorBin, destPath, targetExt, false)
+}
+
+// SaveChanges applies cacheDir/changes/*.json on top of Editor.bin and writes destPath.
+func (c *Converter) SaveChanges(ctx context.Context, cacheDir, destPath, targetExt string) error {
+	editorBin := filepath.Join(cacheDir, "Editor.bin")
+	if st, err := os.Stat(editorBin); err != nil || st.Size() == 0 {
+		return fmt.Errorf("convert: Editor.bin missing in %s", cacheDir)
+	}
+	changesDir := filepath.Join(cacheDir, "changes")
+	entries, err := os.ReadDir(changesDir)
+	if err != nil || len(entries) == 0 {
+		return c.FromEditorBin(ctx, cacheDir, destPath, targetExt)
+	}
+	return c.fromEditor(ctx, editorBin, destPath, targetExt, true)
+}
+
+func (c *Converter) fromEditor(ctx context.Context, editorBin, destPath, targetExt string, fromChanges bool) error {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+		return err
+	}
+
+	select {
+	case c.limit <- struct{}{}:
+		defer func() { <-c.limit }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	taskFile, err := os.CreateTemp("", "go-office-x2t-save-*.xml")
+	if err != nil {
+		return err
+	}
+	taskPath := taskFile.Name()
+	defer os.Remove(taskPath)
+
+	ext := strings.TrimPrefix(strings.ToLower(targetExt), ".")
+	xml := buildReverseTaskXML(editorBin, destPath, c.fontDir, c.themeDir, ext, fromChanges)
+	if _, err := taskFile.WriteString(xml); err != nil {
+		taskFile.Close()
+		return err
+	}
+	if err := taskFile.Close(); err != nil {
+		return err
+	}
+
+	out, err := c.runX2t(ctx, taskPath)
+	if err != nil {
+		return fmt.Errorf("convert: reverse x2t: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	if st, err := os.Stat(destPath); err != nil || st.Size() == 0 {
+		return fmt.Errorf("convert: reverse x2t produced no output")
+	}
+	return nil
+}
+
 // runX2t executes x2t via /bin/sh so chmod and LD_LIBRARY_PATH match Nextcloud's approach.
 func (c *Converter) runX2t(ctx context.Context, taskPath string) ([]byte, error) {
 	script := fmt.Sprintf("chmod +x ./x2t 2>/dev/null; LD_LIBRARY_PATH=. exec ./x2t %s", shellQuote(taskPath))
@@ -158,6 +220,33 @@ func buildTaskXML(from, to, fontDir, themeDir, sourceExt string) string {
 <m_oTimestamp>%s</m_oTimestamp>
 </TaskQueueDataConvert>
 `, escapeXML(from), escapeXML(to), formatTo, extra.String(), escapeXML(fontDir), escapeXML(themeDir), now)
+}
+
+func buildReverseTaskXML(from, to, fontDir, themeDir, targetExt string, fromChanges bool) string {
+	formatFrom := FormatCanvasTo(targetExt)
+	formatTo := FormatFromExtension(targetExt)
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	var extra strings.Builder
+	if formatFrom > 0 {
+		fmt.Fprintf(&extra, "<m_nFormatFrom>%d</m_nFormatFrom>\n", formatFrom)
+	}
+	if formatTo > 0 {
+		fmt.Fprintf(&extra, "<m_nFormatTo>%d</m_nFormatTo>\n", formatTo)
+	}
+	if fromChanges {
+		extra.WriteString("<m_bFromChanges>true</m_bFromChanges>\n")
+	}
+
+	return fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
+<TaskQueueDataConvert xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+<m_sFileFrom>%s</m_sFileFrom>
+<m_sFileTo>%s</m_sFileTo>
+%s<m_sFontDir>%s</m_sFontDir>
+<m_sThemeDir>%s</m_sThemeDir>
+<m_oTimestamp>%s</m_oTimestamp>
+</TaskQueueDataConvert>
+`, escapeXML(from), escapeXML(to), extra.String(), escapeXML(fontDir), escapeXML(themeDir), now)
 }
 
 func escapeXML(s string) string {

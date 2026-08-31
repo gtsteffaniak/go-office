@@ -1,4 +1,9 @@
-import { expect, type FrameLocator, type Page } from "@playwright/test";
+import {
+  expect,
+  type APIRequestContext,
+  type FrameLocator,
+  type Page,
+} from "@playwright/test";
 import type { SampleFile } from "./samples";
 import type { SampleManifestEntry } from "./fixtures/sample-manifest";
 
@@ -15,10 +20,16 @@ const EDITOR_SHELL = "#editor-container, #id_main, #editor_sdk, #id_view";
 
 const bundledTest = process.env.OFFICE_PLAYWRIGHT_TEST === "true";
 const EDITOR_LOAD_TIMEOUT = Number(
-  process.env.PLAYWRIGHT_EDITOR_TIMEOUT ?? (bundledTest ? 60_000 : 30_000),
+  process.env.PLAYWRIGHT_EDITOR_TIMEOUT ?? (bundledTest ? 25_000 : 30_000),
 );
 const DOCUMENT_READY_TIMEOUT = Number(
-  process.env.PLAYWRIGHT_DOCUMENT_READY_TIMEOUT ?? (bundledTest ? 90_000 : 45_000),
+  process.env.PLAYWRIGHT_DOCUMENT_READY_TIMEOUT ?? (bundledTest ? 35_000 : 45_000),
+);
+const CONTENT_FIND_TIMEOUT = Number(
+  process.env.PLAYWRIGHT_CONTENT_FIND_TIMEOUT ?? (bundledTest ? 8_000 : 15_000),
+);
+const SAVE_DONE_TIMEOUT = Number(
+  process.env.PLAYWRIGHT_SAVE_DONE_TIMEOUT ?? (bundledTest ? 25_000 : 30_000),
 );
 
 export function getEditorFrame(page: Page, editor: SampleFile["editor"]): FrameLocator {
@@ -40,11 +51,88 @@ export async function waitForEditorShell(
   });
 }
 
-/** Wait until the demo viewer reports document ready (see internal/demo/viewer.html). */
-export async function waitForDocumentReady(page: Page): Promise<void> {
-  await expect(page.locator("body")).toHaveAttribute("data-document-ready", "true", {
-    timeout: DOCUMENT_READY_TIMEOUT,
-  });
+async function waitForEditorDocumentLoaded(
+  frame: FrameLocator,
+  editor: SampleFile["editor"],
+  timeoutMs: number,
+): Promise<void> {
+  await expect
+    .poll(
+      async () =>
+        frame.evaluate((kind) => {
+          function isLoadMaskVisible(): boolean {
+            const masks = document.querySelectorAll(
+              ".asc-loadmask, .asc-loader-mask, .asc-plugin-loader, .loader",
+            );
+            for (const mask of masks) {
+              const el = mask as HTMLElement;
+              if (el.offsetParent !== null && el.offsetWidth > 0 && el.offsetHeight > 0) {
+                return true;
+              }
+            }
+            return false;
+          }
+
+          if (isLoadMaskVisible()) {
+            return false;
+          }
+
+          const ascEditor = (
+            window as {
+              Asc?: {
+                editor?: {
+                  asc_isDocumentCanSave?: () => boolean;
+                };
+              };
+            }
+          ).Asc?.editor;
+
+          if (kind === "cell") {
+            const cellInput = document.querySelector("#ce-cell-name") as HTMLInputElement | null;
+            if (cellInput && !cellInput.disabled) {
+              return true;
+            }
+            return ascEditor?.asc_isDocumentCanSave?.() ?? false;
+          }
+
+          if (kind === "pdf") {
+            const view = document.querySelector("#id_view, #id_main") as HTMLElement | null;
+            return view !== null && view.offsetHeight > 50;
+          }
+
+          if (ascEditor?.asc_isDocumentCanSave?.()) {
+            return true;
+          }
+
+          const main = document.querySelector(
+            "#id_main, #editor_sdk, #editor-container",
+          ) as HTMLElement | null;
+          return main !== null && main.offsetWidth > 50 && main.offsetHeight > 50;
+        }, editor),
+      { timeout: timeoutMs },
+    )
+    .toBe(true);
+}
+
+/** Wait for editor shell plus in-frame document load signals (not viewer body attributes). */
+export async function waitForEditorReady(
+  page: Page,
+  editor: SampleFile["editor"],
+): Promise<void> {
+  await waitForEditorShell(page, editor);
+  await waitForEditorDocumentLoaded(
+    getEditorFrame(page, editor),
+    editor,
+    DOCUMENT_READY_TIMEOUT,
+  );
+}
+
+/** @deprecated Use waitForEditorReady — body data-document-ready is unreliable under load. */
+export async function waitForDocumentReady(
+  page: Page,
+  editor: SampleFile["editor"],
+): Promise<void> {
+  await waitForEditorReady(page, editor);
 }
 
 const FORMULA_BAR_SELECTORS = [
@@ -89,6 +177,7 @@ async function selectCell(frame: FrameLocator, ref: string): Promise<void> {
     if ((await loc.count()) === 0) {
       continue;
     }
+    await expect(loc).toBeEnabled({ timeout: EDITOR_LOAD_TIMEOUT });
     await loc.click();
     await loc.fill(ref);
     await loc.press("Enter");
@@ -128,8 +217,9 @@ export async function assertDocumentContains(
   await page.keyboard.press("Control+KeyF");
   const findInput = frame.locator('input[type="search"], input[placeholder*="Find" i]').first();
   if ((await findInput.count()) > 0) {
+    await expect(findInput).toBeVisible({ timeout: CONTENT_FIND_TIMEOUT });
     await findInput.fill(text);
-    await expect(frame.getByText(text).first()).toBeVisible({ timeout: 15_000 });
+    await expect(frame.getByText(text).first()).toBeVisible({ timeout: CONTENT_FIND_TIMEOUT });
     await page.keyboard.press("Escape");
     return;
   }
@@ -151,6 +241,7 @@ export async function setCellContent(
     if ((await loc.count()) === 0) {
       continue;
     }
+    await expect(loc).toBeEnabled({ timeout: EDITOR_LOAD_TIMEOUT });
     await loc.click();
     await loc.fill(value);
     await loc.press("Enter");
@@ -159,10 +250,42 @@ export async function setCellContent(
   throw new Error("formula bar input not found for cell edit");
 }
 
-export async function waitForSaveDone(page: Page, timeoutMs = 30_000): Promise<void> {
+export type SaveDoneOptions = {
+  timeoutMs?: number;
+  request?: APIRequestContext;
+  filePath?: string;
+  marker?: string;
+};
+
+export async function waitForSaveDone(
+  page: Page,
+  opts?: SaveDoneOptions | number,
+): Promise<void> {
+  const options: SaveDoneOptions =
+    typeof opts === "number" ? { timeoutMs: opts } : (opts ?? {});
+  const timeoutMs = options.timeoutMs ?? SAVE_DONE_TIMEOUT;
+
   await expect
-    .poll(async () => page.locator("body").getAttribute("data-save-done"), { timeout: timeoutMs })
-    .not.toBeNull();
+    .poll(
+      async () => {
+        if (options.marker && options.filePath && options.request) {
+          const res = await options.request.get(
+            `/api/office/demo/file/${encodeURIComponent(options.filePath)}`,
+          );
+          if (res.ok()) {
+            const body = await res.body();
+            const text = new TextDecoder().decode(body);
+            if (text.includes(options.marker)) {
+              return true;
+            }
+          }
+        }
+        const attr = await page.locator("body").getAttribute("data-save-done");
+        return attr !== null && attr !== "";
+      },
+      { timeout: timeoutMs },
+    )
+    .toBe(true);
 }
 
 export async function assertSampleContent(

@@ -17,6 +17,7 @@ RUN chmod +x /app/go-office /app/assets/converter/bin/* 2>/dev/null || true
 
 ENV OFFICE_ASSETS=/app/assets
 ENV OFFICE_PLAYWRIGHT_TEST=true
+ENV OFFICE_DEBUG_LOGGING=1
 ENV OFFICE_POLL_HOLD=0
 ENV OFFICE_CONVERT_LIMIT=6
 ENV PLAYWRIGHT_WORKERS=10

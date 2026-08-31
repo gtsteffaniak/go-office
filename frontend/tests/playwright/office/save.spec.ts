@@ -1,16 +1,10 @@
 import { test, expect } from "../test-setup";
-import {
-  waitForEditorShell,
-  waitForDocumentReady,
-  setCellContent,
-  waitForSaveDone,
-} from "../editor";
+import { waitForEditorReady, setCellContent, waitForSaveDone } from "../editor";
 
 const bundledTest = process.env.OFFICE_PLAYWRIGHT_TEST === "true";
-const STATUS_OK_TIMEOUT = bundledTest ? 15_000 : 8_000;
+const STATUS_OK_TIMEOUT = 8_000;
 const MARKER = `PLAYWRIGHT_EDIT_${Date.now()}`;
 
-test.describe.configure({ retries: bundledTest ? 2 : 2 });
 test.use({ trace: bundledTest ? "retain-on-failure" : "on-first-retry" });
 
 test("csv save round-trip via demo file API", async ({ page, request }) => {
@@ -19,11 +13,10 @@ test("csv save round-trip via demo file API", async ({ page, request }) => {
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
   });
-  await waitForEditorShell(page, "cell");
-  await waitForDocumentReady(page);
+  await waitForEditorReady(page, "cell");
 
   await setCellContent(page, "cell", "B2", MARKER);
-  await waitForSaveDone(page, bundledTest ? 45_000 : 30_000);
+  await waitForSaveDone(page, { request, filePath: file, marker: MARKER });
 
   const res = await request.get(`/api/office/demo/file/${encodeURIComponent(file)}`);
   expect(res.ok()).toBeTruthy();
@@ -38,13 +31,12 @@ test("docx save round-trip via demo file API", async ({ page, request }) => {
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
   });
-  await waitForEditorShell(page, "word");
-  await waitForDocumentReady(page);
+  await waitForEditorReady(page, "word");
 
   const frame = page.frameLocator('iframe[src*="/documenteditor/"]').first();
   await frame.locator("#id_main, #editor_sdk").first().click();
   await page.keyboard.type(marker);
-  await waitForSaveDone(page, bundledTest ? 45_000 : 30_000);
+  await waitForSaveDone(page, { request, filePath: file, marker });
 
   const res = await request.get(`/api/office/demo/file/${encodeURIComponent(file)}`);
   expect(res.ok()).toBeTruthy();

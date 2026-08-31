@@ -1,5 +1,5 @@
 import { test, expect } from "../test-setup";
-import { waitForEditorShell, waitForDocumentReady, assertSampleContent } from "../editor";
+import { waitForEditorReady, assertSampleContent } from "../editor";
 import {
   REPO_ROOT,
   sampleExists,
@@ -14,9 +14,9 @@ import {
 const maxTier = Number(process.env.PLAYWRIGHT_SAMPLE_TIER ?? "3") as 1 | 2 | 3;
 
 const bundledTest = process.env.OFFICE_PLAYWRIGHT_TEST === "true";
-const STATUS_OK_TIMEOUT = bundledTest ? 15_000 : 8_000;
+const STATUS_OK_TIMEOUT = 8_000;
 
-test.describe.configure({ mode: "parallel", retries: bundledTest ? 2 : 2 });
+test.describe.configure({ mode: "parallel" });
 test.use({ trace: bundledTest ? "retain-on-failure" : "on-first-retry" });
 
 const coauthoringFailures: string[] = [];
@@ -40,8 +40,7 @@ async function openSample(page: import("@playwright/test").Page, sample: SampleF
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
   });
-  await waitForEditorShell(page, sample.editor);
-  await waitForDocumentReady(page);
+  await waitForEditorReady(page, sample.editor);
 
   expect(coauthoringFailures, `coauthoring POST failures: ${coauthoringFailures.join(", ")}`).toHaveLength(0);
 }

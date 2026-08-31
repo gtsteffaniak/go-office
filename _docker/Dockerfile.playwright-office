@@ -30,11 +30,11 @@ RUN chmod +x /app/go-office /app/assets/converter/bin/* 2>/dev/null || true
 ENV OFFICE_ASSETS=/app/assets
 ENV OFFICE_PLAYWRIGHT_TEST=true
 ENV OFFICE_POLL_HOLD=0
-ENV OFFICE_CONVERT_LIMIT=4
+ENV OFFICE_CONVERT_LIMIT=6
 ENV PLAYWRIGHT_BASE_URL=http://127.0.0.1:8080
 ENV PLAYWRIGHT_STRICT=1
 ENV PLAYWRIGHT_SAMPLE_TIER=1
-ENV PLAYWRIGHT_WORKERS=6
+ENV PLAYWRIGHT_WORKERS=10
 
 RUN timeout 10m sh -c 'cd /app && ./go-office \
       -assets /app/assets \

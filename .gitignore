@@ -6,6 +6,8 @@
 
 # Test / dev artifacts
 /cache/
+testdata/.work/
+.test-cache/
 *.test
 coverage.out
 

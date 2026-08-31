@@ -20,6 +20,7 @@ type Opener struct {
 	Converter *convert.Converter
 	CacheDir  string
 	Logger    *slog.Logger
+	Saver     DocumentSaver
 }
 
 func documentOpenPacket(cmdType, status string, data any) (string, error) {
@@ -56,6 +57,10 @@ func (o *Opener) Open(ctx context.Context, origin, basePath, docKey string, cmd 
 	}
 	if ext == "" {
 		ext = "doc"
+	}
+
+	if err := o.flushPending(ctx, docKey, origin); err != nil && o.Logger != nil {
+		o.Logger.Error("flush pending changes before open", "key", docKey, "err", err)
 	}
 
 	tmp, err := os.CreateTemp("", "go-office-src-*."+ext)
@@ -134,6 +139,16 @@ func (o *Opener) openBrowserDocument(cmd openCmd, origin, basePath, docKey, ext,
 		}
 	}
 	return []string{pkt}, nil
+}
+
+func (o *Opener) flushPending(ctx context.Context, docKey, origin string) error {
+	if o == nil || o.Saver == nil || o.CacheDir == "" || docKey == "" {
+		return nil
+	}
+	if !hasPendingChanges(filepath.Join(o.CacheDir, docKey)) {
+		return nil
+	}
+	return o.Saver.FlushDocument(ctx, docKey, origin, true)
 }
 
 func copyFile(src, dest string) error {

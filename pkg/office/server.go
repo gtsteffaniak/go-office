@@ -11,12 +11,12 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/quantumx-apps/go-office/pkg/config"
 	"github.com/quantumx-apps/go-office/internal/convert"
 	"github.com/quantumx-apps/go-office/internal/debuglog"
 	"github.com/quantumx-apps/go-office/internal/session"
 	"github.com/quantumx-apps/go-office/internal/static"
 	"github.com/quantumx-apps/go-office/internal/ws"
+	"github.com/quantumx-apps/go-office/pkg/config"
 )
 
 // Server is an embedded ONLYOFFICE-compatible document server.
@@ -28,6 +28,9 @@ type Server struct {
 	mux          *http.ServeMux
 	coauthoring  *ws.Handler
 	cacheJanitor *cacheJanitor
+	conv         *convert.Converter
+	convOnce     sync.Once
+	convErr      error
 
 	finishOnce sync.Once
 	closeOnce  sync.Once
@@ -175,7 +178,7 @@ func (s *Server) buildRoutes() {
 	cacheDir := s.cacheDir()
 	_ = os.MkdirAll(cacheDir, 0o755)
 	cachePrefix := joinURLPath(prefix, "cache/files")
-	s.mux.Handle(cachePrefix+"/", http.StripPrefix(cachePrefix, http.FileServer(http.Dir(cacheDir))))
+	s.mux.Handle(cachePrefix+"/", http.StripPrefix(cachePrefix, noStoreEditorBin(http.FileServer(http.Dir(cacheDir)))))
 
 	s.mux.HandleFunc("/downloadfile/", s.handleDownloadFile)
 	if base := strings.Trim(strings.TrimSpace(prefix), "/"); base != "" && !mirrorAssetsAtRoot(prefix) {
@@ -186,14 +189,12 @@ func (s *Server) buildRoutes() {
 func (s *Server) registerCoauthoringFallback() {
 	prefix := s.opts.BasePath
 	var opener *ws.Opener
-	if conv, err := convert.New(convert.Options{
-		AssetDir: s.opts.AssetDir,
-		Limit:    s.opts.ConvertLimit,
-	}); err == nil {
+	if conv, err := s.converter(); err == nil {
 		opener = &ws.Opener{
 			Converter: conv,
 			CacheDir:  s.cacheDir(),
 			Logger:    s.opts.Logger,
+			Saver:     s,
 		}
 	} else if s.opts.Debug {
 		s.opts.Logger.Debug("coauthoring converter unavailable", "err", err)
@@ -208,6 +209,7 @@ func (s *Server) registerCoauthoringFallback() {
 		Opener:       opener,
 		CacheDir:     s.cacheDir(),
 		Saver:        s,
+		SaveDelay:    s.opts.SaveDelay,
 	})
 	s.coauthoring = co
 	docPattern := joinURLPath(prefix, "doc") + "/"
@@ -236,6 +238,20 @@ func (s *Server) cacheDir() string {
 		return os.TempDir()
 	}
 	return s.opts.AssetDir + string(os.PathSeparator) + "cache"
+}
+
+func (s *Server) converter() (*convert.Converter, error) {
+	s.convOnce.Do(func() {
+		if s.opts.AssetDir == "" {
+			s.convErr = errors.New("office: asset dir is required for conversion")
+			return
+		}
+		s.conv, s.convErr = convert.New(convert.Options{
+			AssetDir: s.opts.AssetDir,
+			Limit:    s.opts.ConvertLimit,
+		})
+	})
+	return s.conv, s.convErr
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -297,4 +313,13 @@ func stripMountPath(prefix, urlPath string) string {
 		return strings.TrimPrefix(urlPath, "/")
 	}
 	return strings.TrimPrefix(strings.TrimPrefix(urlPath, mount), "/")
+}
+
+func noStoreEditorBin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "Editor.bin") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		next.ServeHTTP(w, r)
+	})
 }

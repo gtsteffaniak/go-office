@@ -208,6 +208,9 @@ stop-docker:
 test-integration: build
 	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test -tags=integration ./...
 
+test-save-integration: build
+	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test -tags=integration ./integration/... -race -count=1
+
 playwright-base:
 	@echo "==> Playwright base image"
 	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_BASE_IMAGE)" -f _docker/Dockerfile.playwright-base .

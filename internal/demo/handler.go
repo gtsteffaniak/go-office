@@ -2,6 +2,7 @@ package demo
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -18,11 +19,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
-	office "github.com/quantumx-apps/go-office/pkg/office"
-	"github.com/quantumx-apps/go-office/pkg/config"
 	"github.com/quantumx-apps/go-office/internal/home"
+	"github.com/quantumx-apps/go-office/pkg/config"
+	office "github.com/quantumx-apps/go-office/pkg/office"
 )
 
 // Options configures the local demo UI and API stubs.
@@ -153,7 +153,7 @@ func (h *Handler) serveConfig(w http.ResponseWriter, r *http.Request) {
 	apiBase := h.opts.APIBasePath
 	fileURL := origin + apiBase + "/demo/file/" + strings.TrimPrefix(file, "/")
 	callbackURL := origin + apiBase + "/demo/callback"
-	key := documentKey(file, info.ModTime)
+	key := documentKey(file, info, h.fileFingerprint(r.Context(), file, info))
 	ext := strings.TrimPrefix(strings.ToLower(path.Ext(info.Name)), ".")
 
 	cfg, err := h.office.BuildEditorConfig(ctx, config.EditorRequest{
@@ -345,9 +345,25 @@ func isSupportedDocument(name string) bool {
 	}
 }
 
-func documentKey(file string, mod time.Time) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d", file, mod.UnixNano())))
+func documentKey(file string, info office.FileInfo, contentSum string) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%d:%s", file, info.Size, info.ModTime.UnixNano(), contentSum)))
 	return hex.EncodeToString(sum[:])
+}
+
+func (h *Handler) fileFingerprint(ctx context.Context, file string, info office.FileInfo) string {
+	if h == nil || h.store == nil {
+		return fmt.Sprintf("%d:%d", info.Size, info.ModTime.UnixNano())
+	}
+	rc, err := h.store.Open(ctx, file)
+	if err != nil {
+		return fmt.Sprintf("%d:%d", info.Size, info.ModTime.UnixNano())
+	}
+	defer rc.Close()
+	sum := sha256.New()
+	if _, err := io.Copy(sum, io.LimitReader(rc, 32<<20)); err != nil {
+		return fmt.Sprintf("%d:%d", info.Size, info.ModTime.UnixNano())
+	}
+	return hex.EncodeToString(sum.Sum(nil))
 }
 
 func formatSize(size int64) string {

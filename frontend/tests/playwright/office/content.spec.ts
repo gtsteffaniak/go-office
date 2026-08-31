@@ -16,7 +16,7 @@ const maxTier = Number(process.env.PLAYWRIGHT_SAMPLE_TIER ?? "3") as 1 | 2 | 3;
 const bundledTest = process.env.OFFICE_PLAYWRIGHT_TEST === "true";
 const STATUS_OK_TIMEOUT = 8_000;
 
-test.describe.configure({ mode: "parallel" });
+test.describe.configure({ mode: "serial" });
 test.use({ trace: bundledTest ? "retain-on-failure" : "on-first-retry" });
 
 const coauthoringFailures: string[] = [];

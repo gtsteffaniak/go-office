@@ -28,6 +28,7 @@ type runConfig struct {
 	DisableSamples bool
 	Debug          bool
 	PollHold       *time.Duration
+	SaveDelay      *time.Duration
 	ConvertLimit   int
 }
 
@@ -45,6 +46,7 @@ func parseRunConfig() runConfig {
 		DisableSamples: envBool("OFFICE_DISABLE_SAMPLES"),
 		Debug:          debugFromEnv(),
 		PollHold:       pollHoldFromEnv(),
+		SaveDelay:      saveDelayFromEnv(),
 		ConvertLimit:   convertLimitFromEnv(),
 	}
 
@@ -133,4 +135,15 @@ func convertLimitFromEnv() int {
 		return 0
 	}
 	return n
+}
+
+func saveDelayFromEnv() *time.Duration {
+	v := strings.TrimSpace(os.Getenv("OFFICE_SAVE_DELAY"))
+	if v == "" {
+		return nil
+	}
+	if d, err := time.ParseDuration(v); err == nil && d >= 0 {
+		return &d
+	}
+	return nil
 }

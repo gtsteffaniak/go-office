@@ -37,7 +37,7 @@ func Build(req EditorRequest, token string) map[string]any {
 		mode = req.Permissions.Edit
 	}
 	out := map[string]any{
-		"document": buildDocument(req),
+		"document":     buildDocument(req),
 		"documentType": docType,
 		"editorConfig": map[string]any{
 			"callbackUrl": req.CallbackURL,
@@ -49,6 +49,10 @@ func Build(req EditorRequest, token string) map[string]any {
 				"autosave":  true,
 				"forcesave": true,
 				"uiTheme":   req.Theme,
+			},
+			"coEditing": map[string]any{
+				"mode":   "fast",
+				"change": false,
 			},
 			"lang": req.Lang,
 			"mode": mode,
@@ -67,7 +71,7 @@ func buildDocument(req EditorRequest) map[string]any {
 		"title":    req.Title,
 		"url":      req.DocumentURL,
 		"permissions": map[string]any{
-			"edit":     req.Permissions.Edit,
+			"edit":     permissionEdit(req),
 			"download": req.Permissions.Download,
 			"print":    req.Permissions.Print,
 		},
@@ -90,4 +94,11 @@ func inferDocumentType(fileType string) string {
 	default:
 		return "word"
 	}
+}
+
+func permissionEdit(req EditorRequest) bool {
+	if strings.EqualFold(req.Mode, "view") || strings.EqualFold(req.Permissions.Edit, "view") {
+		return false
+	}
+	return true
 }

@@ -71,6 +71,8 @@ func TestAPIDocsPage(t *testing.T) {
 		`href="/health"`,
 		`href="/api/office/demo/config"`,
 		"saveChanges",
+		"getLock",
+		"forceSaveStart",
 		"/doc/{key}/c/",
 		"id=\"compatibility\"",
 		"Coauthoring WebSocket",

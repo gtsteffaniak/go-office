@@ -150,7 +150,7 @@
         <p><strong>WebSocket upgrade:</strong> <span class="no">not implemented</span> (HTTP 501). Polling transport is used.</p>
       </div>
       <h3>Save flow (single-user)</h3>
-      <p>Client sends <code>isSaveLock</code> → <code>saveChanges</code> → server responds <code>unSaveLock</code>, then converts cache and POSTs to the integrator <code>callbackUrl</code> with status <code>2</code> or <code>6</code>.</p>
+      <p>Cell edits send <code>getLock</code> (server replies with granted <code>locks</code>) then <code>saveChanges</code> → <code>unSaveLock</code>. With <code>customization.forcesave</code>, the Save button sends <code>forceSaveStart</code>; the server replies and then <code>forceSave</code> after converting cache. Without forcesave: <code>isSaveLock</code> → <code>saveChanges</code> → <code>unSaveLock</code>, then callback status <code>2</code> or <code>6</code>.</p>
     </section>
 
     <section>
@@ -390,6 +390,18 @@
             <td>Save protocol</td>
             <td class="yes">✓</td><td class="yes">✓</td>
             <td class="notes">5s debounced flush → reverse x2t → callback.</td>
+          </tr>
+          <tr>
+            <td><code>getLock</code> → <code>getLock</code> locks</td>
+            <td>Save protocol</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Spreadsheet cell edits wait for this before <code>saveChanges</code>.</td>
+          </tr>
+          <tr>
+            <td><code>forceSaveStart</code> → <code>forceSave</code></td>
+            <td>Save protocol</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Save button when <code>customization.forcesave</code> is true.</td>
           </tr>
           <tr>
             <td>Multi-user concurrent editing</td>

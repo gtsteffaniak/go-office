@@ -63,6 +63,17 @@
                 baseEvents.onDocumentReady();
               }
             },
+            onDocumentStateChange: function (event) {
+              if (event && event.data === true) {
+                document.body.setAttribute("data-dirty", "true");
+              }
+              if (event && event.data === false && document.body.getAttribute("data-dirty") === "true") {
+                document.body.setAttribute("data-save-done", String(Date.now()));
+              }
+              if (typeof baseEvents.onDocumentStateChange === "function") {
+                baseEvents.onDocumentStateChange(event);
+              }
+            },
             onRequestSaveResult: function (event) {
               if (event && event.data) {
                 document.body.setAttribute("data-save-done", String(Date.now()));
@@ -80,6 +91,35 @@
           console.error(err);
         });
     };
+
+    function destroyDemoEditor() {
+      var editor = window.docEditor;
+      if (!editor) {
+        return;
+      }
+      try {
+        if (typeof editor.destroyEditor === "function") {
+          editor.destroyEditor();
+        }
+      } catch (err) {
+        console.warn("destroyEditor failed", err);
+      }
+      window.docEditor = null;
+    }
+
+    window.addEventListener("pagehide", destroyDemoEditor);
+    window.addEventListener("beforeunload", destroyDemoEditor);
+    document.addEventListener("click", function (event) {
+      var link = event.target && event.target.closest ? event.target.closest("a[href]") : null;
+      if (!link) {
+        return;
+      }
+      var href = link.getAttribute("href") || "";
+      if (href === "" || href.charAt(0) === "#") {
+        return;
+      }
+      destroyDemoEditor();
+    });
     apiScript.onerror = function () {
       setStatus("Failed to load api.js — fetch Euro-Office assets first (see README)");
     };

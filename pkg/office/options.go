@@ -29,13 +29,17 @@ type Options struct {
 	// Must match the pinned Euro-Office asset build.
 	ProtocolVersion string
 
-	// ConvertLimit caps concurrent x2t subprocess conversions (default 1).
+	// ConvertLimit caps concurrent x2t subprocess conversions (default 2).
 	ConvertLimit int
 
 	// PollHold is how long coauthoring long-poll GETs block waiting for packets.
 	// When set (including zero), overrides the 20s production default. Use 0 in CI
 	// so idle polls return immediately instead of holding connections.
 	PollHold *time.Duration
+
+	// SaveDelay is the coauthoring save debounce before FlushDocument runs.
+	// When nil, the 5s production default applies.
+	SaveDelay *time.Duration
 
 	// PublicOrigin is the browser-visible document server URL (scheme + host, no path).
 	// Used for cache/files links in coauthoring responses when set; otherwise inferred
@@ -79,7 +83,7 @@ func (o *Options) normalize() {
 		o.ProtocolVersion = "0.0.0-dev"
 	}
 	if o.ConvertLimit <= 0 {
-		o.ConvertLimit = 1
+		o.ConvertLimit = 2
 	}
 	if o.Logger == nil {
 		o.Logger = slog.Default()

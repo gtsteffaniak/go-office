@@ -110,4 +110,36 @@ func TestPollingAuthResponse(t *testing.T) {
 	if !strings.Contains(body, `"buildVersion":"9.3.4"`) {
 		t.Fatalf("auth buildVersion missing: %q", body)
 	}
+	if !strings.Contains(body, `"binaryChanges":false`) {
+		t.Fatalf("auth should disable binaryChanges: %q", body)
+	}
+}
+
+func TestPollingReloadSameCSVResendsAuth(t *testing.T) {
+	h := testHandler(t)
+	csvKey := "0c799d3dbda398a50f7077f6f3c3de7cb9110610d27e9318951de50ec9788e47"
+	connectAuth := `40{"data":{"type":"auth","docid":"` + csvKey + `","user":{"id":"demo-user","username":"Demo User"},"openCmd":{"c":"open","id":"` + csvKey + `","format":"csv","url":"http://localhost/sample.csv"}}}`
+
+	poll := func() string {
+		get := httptest.NewRequest(http.MethodGet, "/?EIO=4&transport=polling&sid=go-office&t=1", nil)
+		rec := httptest.NewRecorder()
+		h.ServePath(rec, get, "/doc/"+csvKey+"/c")
+		return rec.Body.String()
+	}
+
+	h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(connectAuth)), "/doc/"+csvKey+"/c")
+	first := poll()
+	if !strings.Contains(first, `"type":"auth"`) {
+		t.Fatalf("first open missing auth: %q", first)
+	}
+
+	// Same hardcoded sid + document key, as the browser does on reload.
+	h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(connectAuth)), "/doc/"+csvKey+"/c")
+	second := poll()
+	if !strings.Contains(second, `"type":"auth"`) {
+		t.Fatalf("reload must resend auth for the same csv key, got %q", second)
+	}
+	if !strings.Contains(second, `"result":1`) {
+		t.Fatalf("reload auth result missing: %q", second)
+	}
 }

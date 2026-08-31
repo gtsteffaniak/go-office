@@ -90,6 +90,7 @@ func main() {
 		PublicOrigin:    cfg.publicOrigin(),
 		ConvertLimit:    cfg.ConvertLimit,
 		PollHold:        cfg.PollHold,
+		SaveDelay:       cfg.SaveDelay,
 		Debug:           debug,
 		Logger:          logger,
 	})

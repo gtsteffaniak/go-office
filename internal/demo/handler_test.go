@@ -78,6 +78,12 @@ func TestDemoLandingAndConfig(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(body, "DocsAPI.DocEditor") {
 		t.Fatalf("viewer status=%d body=%q", rec.Code, body[:min(200, len(body))])
 	}
+	if !strings.Contains(body, "destroyEditor") {
+		t.Fatal("viewer must destroy the editor on navigation so CSV dialogs cannot trap the page")
+	}
+	if !strings.Contains(body, "pagehide") || !strings.Contains(body, "beforeunload") {
+		t.Fatal("expected pagehide/beforeunload teardown hooks")
+	}
 	if !strings.Contains(body, "/api/office") || !strings.Contains(body, "/demo/config") {
 		t.Fatal("expected API config URL in viewer page")
 	}

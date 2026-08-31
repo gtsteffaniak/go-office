@@ -27,6 +27,9 @@ func copyConverterBin(dsRoot, outDir string) error {
 	if err := copyTree(src, dst); err != nil {
 		return err
 	}
+	if err := fixDoctRendererConfig(dst); err != nil {
+		return err
+	}
 	return ensureConverterExecutables(dst)
 }
 

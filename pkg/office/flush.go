@@ -34,7 +34,19 @@ func hasPendingChanges(cacheDir string) bool {
 
 func (s *Server) convertDocument(ctx context.Context, conv *convert.Converter, cacheDir, outPath, ext string) error {
 	if hasPendingChanges(cacheDir) {
-		return conv.SaveChanges(ctx, cacheDir, outPath, ext)
+		if s.opts.Logger != nil {
+			s.opts.Logger.Debug("convert from changes", "cache", cacheDir, "ext", ext, "out", outPath)
+		}
+		if err := conv.SaveChanges(ctx, cacheDir, outPath, ext); err != nil {
+			if s.opts.Logger != nil {
+				s.opts.Logger.Warn("save changes conversion failed", "path", outPath, "err", err)
+			}
+			return err
+		}
+		return nil
+	}
+	if s.opts.Logger != nil {
+		s.opts.Logger.Debug("convert from Editor.bin only", "cache", cacheDir, "ext", ext)
 	}
 	return conv.FromEditorBin(ctx, cacheDir, outPath, ext)
 }

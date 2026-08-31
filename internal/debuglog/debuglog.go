@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/quantumx-apps/go-office/internal/ws"
 )
 
 // Enabled reports whether debug logging is on via -debug flag or environment.
@@ -61,6 +63,9 @@ func Middleware(logger *slog.Logger, next http.Handler) http.Handler {
 		start := time.Now()
 		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rw, r)
+		if ws.IsCoauthoringPollingCheck(r) {
+			return
+		}
 		logger.Debug("http",
 			"method", r.Method,
 			"path", r.URL.Path,
@@ -68,9 +73,6 @@ func Middleware(logger *slog.Logger, next http.Handler) http.Handler {
 			"status", rw.status,
 			"bytes", rw.bytes,
 			"duration", time.Since(start).String(),
-			"remote", r.RemoteAddr,
-			"referer", r.Referer(),
-			"ua", r.UserAgent(),
 		)
 		if rw.status >= 400 && !isExpectedHTTPError(r, rw.status) {
 			logger.Warn("http error response",

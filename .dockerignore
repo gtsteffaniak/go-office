@@ -12,6 +12,8 @@ frontend/*
 !frontend/tests/
 integration/
 cache/
+testdata/.work/
+.test-cache/
 doctor-report.txt
 debug-*.log
 **/*.md

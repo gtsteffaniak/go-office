@@ -6,6 +6,35 @@ Euro-Office / ONLYOFFICE editor assets (`web-apps/`, `sdkjs/`, `x2t`) are **not*
 
 ## [Unreleased]
 
+### Phase 2 — Hardening + robust Playwright
+
+#### Server hardening
+- **Cache lifecycle** (`pkg/office/cache.go`): configurable TTL (default 24h) and max cache dirs (default 256); periodic janitor; cache eviction on sweep.
+- **`Server.Close()`** stops coauthoring save timers and the cache janitor (no longer a no-op).
+- **Graceful shutdown** in `cmd/go-office/main.go`: SIGINT/SIGTERM → `http.Server.Shutdown` → `srv.Close()`.
+- **`/health`** extended with `sessions`, `cacheDirs`, and `cacheBytes`.
+- **Callback JWT** (`pkg/callback/jwt.go`): sign outbound callback bodies as `{"token":"…"}` when `OFFICE_JWT_SECRET` is set; verify inbound JWT-wrapped callbacks in `HandleCallback`.
+- **WS golden fixtures** (`internal/ws/fixtures/coauthoring.json`) and tests; `ResetSessionsForTest()` for isolated handler tests; `scripts/record-ws-fixtures.sh`.
+- **Coauthoring `PollHold` fix**: `PollHold=0` disables long-poll wait in tests (was incorrectly falling back to 20s).
+
+#### Playwright (content-aware E2E)
+- **Sample manifest** (`scripts/extract-sample-expectations.go`, `frontend/tests/playwright/fixtures/sample-manifest.json|.ts`) — expected cell/text per sample file.
+- **Editor helpers** (`frontend/tests/playwright/editor.ts`): `waitForDocumentReady`, `assertCellContent` (formula bar), `assertDocumentContains`, `setCellContent`, `waitForSaveDone`.
+- **`content.spec.ts`** — tier-1 content assertions; `sample.csv` B2 via formula bar (not canvas `getByText`).
+- **`save.spec.ts`** — CSV + DOCX save round-trip verified via `/api/office/demo/file/…`.
+- **Demo viewer hooks** (`internal/demo/viewer.html`): `data-document-ready` and `data-save-done` via DocsAPI `onDocumentReady` / `onRequestSaveResult`.
+- **`open-formats.spec.ts`** uses `waitForDocumentReady` instead of fixed sleeps.
+- **CI**: Docker Playwright uses `PLAYWRIGHT_SAMPLE_TIER=1`; content/save specs use extra retries and `retain-on-failure` traces.
+- **`make extract-sample-manifest`** target.
+
+#### Docs, demo UX, API reference
+- **`migration.md`**: JWT_IN_BODY mapping; save support accurate; FileBrowser `/converter` preview gap; expanded limitations.
+- **`api.md`**: full ONLYOFFICE ↔ go-office compatibility audit (conversion, command, WOPI, spellchecker, callback payload gaps, legacy `.ashx` paths).
+- **`GET /docs/api#compatibility`**: expanded side-by-side matrix on the live API docs page.
+- **Demo landing links** use relative paths (`/demo/view?file=…`) instead of `http://localhost/…` URLs.
+- **Homepage / API docs**: coauthoring paths document both `/{version}/doc/{key}/c/` and `/doc/{key}/c/`.
+- **README** roadmap marks Phase 2 done.
+
 ### Licensing and compliance
 
 - Clarified that users do **not** need to click or sign a EULA to download, host, or run go-office or its Docker images. Rights under [AGPL-3.0](LICENSE) are granted automatically.

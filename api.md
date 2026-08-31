@@ -8,9 +8,9 @@ Audit of go-office against the official [ONLYOFFICE Docs API](https://api.onlyof
 
 | Symbol | Meaning |
 | ------ | ------- |
-| ✓ | Compatible — same path/contract; covered by tests or production use |
-| ~ | Partial — works with documented limits or reduced payload |
-| ✗ | Not implemented — request fails or feature absent |
+| ✅ | Compatible — same path/contract; covered by tests or production use |
+| ⚠️ | Partial — works with documented limits or reduced payload |
+| ❌ | Not implemented — request fails or feature absent |
 | — | N/A — not part of Docs API embed path |
 
 ---
@@ -33,7 +33,7 @@ This document compares:
 
 ## Executive summary
 
-| Category | ✓ | ~ | ✗ |
+| Category | ✅ | ⚠️ | ❌ |
 | -------- | - | - | - |
 | Core editor embed (api.js, assets, coauthoring polling, cache, save) | 14 | 3 | 2 |
 | Integrator callback (inbound to your app) | 4 | 2 | 0 |
@@ -55,33 +55,33 @@ Paths are relative to `documentServerUrl` (default site root). `OFFICE_BASE_PATH
 
 | Endpoint | Method | ONLYOFFICE | go-office | Notes |
 | -------- | ------ | :--------: | :---------: | ----- |
-| `/web-apps/apps/api/documents/api.js` | GET | ✓ | ✓ | [Basic concepts](https://api.onlyoffice.com/docs/docs-api/get-started/basic-concepts/) |
-| `/web-apps/**` | GET | ✓ | ✓ | Editor shells, `plugins.json` if present in asset bundle |
-| `/sdkjs/**` | GET | ✓ | ✓ | Editor runtime |
-| `/fonts/**` | GET | ✓ | ✓ | Font files (`AllFonts.js` lives under converter bin, loaded via sdkjs) |
-| `/document_editor_service_worker.js` | GET | ✓ | ✓ | sdkjs service worker |
-| `/{version}/doc/{key}/c/` | GET, POST | ✓ | ✓ | Primary coauthoring URL (7.3+). Query: `EIO=4`, `transport=polling`, optional `sid`, `t` |
-| `/doc/{key}/c/` | GET, POST | ✓ | ✓ | Unversioned coauthoring path (also accepted) |
-| `?shardkey={key}` on coauthoring | — | ✓ | ~ | ONLYOFFICE 8.1+ load-balancing hint; **ignored** by go-office (harmless) |
-| Coauthoring `transport=websocket` | GET | ✓ | ✗ | HTTP **501**; sdkjs falls back to polling |
-| `/cache/files/{key}/**` | GET | ✓ | ✓ | `Editor.bin`, `origin.pdf`, `media/`, `changes/`, `saved.{ext}` |
-| `/downloadfile/{key}` | GET, POST | ✓ | ~ | [Server config](https://api.onlyoffice.com/docs/docs-api/get-started/configuration/server-config/) `downloadFileAllowExt`. go-office: Range requests ✓; POST body `{"url":"…"}` ✓; `token` in body **not parsed** |
-| `/healthcheck` | GET | ✓ | ~ | Body `true`. ONLYOFFICE also probes DB/Redis/broker; go-office returns `true` without those dependencies |
-| `/health` | GET | ~ | ✓ | go-office JSON: `status`, `version`, `sessions`, `cacheDirs`, `cacheBytes` |
-| `/healthz` | GET | — | ✓ | Alias of `/health` (k8s convention; not ONLYOFFICE-specific) |
-| `/info/info.json` | GET | ✓ | ✓ | `{"version":"…"}` |
+| `/web-apps/apps/api/documents/api.js` | GET | ✅ | ✅ | [Basic concepts](https://api.onlyoffice.com/docs/docs-api/get-started/basic-concepts/) |
+| `/web-apps/**` | GET | ✅ | ✅ | Editor shells, `plugins.json` if present in asset bundle |
+| `/sdkjs/**` | GET | ✅ | ✅ | Editor runtime |
+| `/fonts/**` | GET | ✅ | ✅ | Font files (`AllFonts.js` lives under converter bin, loaded via sdkjs) |
+| `/document_editor_service_worker.js` | GET | ✅ | ✅ | sdkjs service worker |
+| `/{version}/doc/{key}/c/` | GET, POST | ✅ | ✅ | Primary coauthoring URL (7.3+). Query: `EIO=4`, `transport=polling`, optional `sid`, `t` |
+| `/doc/{key}/c/` | GET, POST | ✅ | ✅ | Unversioned coauthoring path (also accepted) |
+| `?shardkey={key}` on coauthoring | — | ✅ | ⚠️ | ONLYOFFICE 8.1+ load-balancing hint; **ignored** by go-office (harmless) |
+| Coauthoring `transport=websocket` | GET | ✅ | ❌ | HTTP **501**; sdkjs falls back to polling |
+| `/cache/files/{key}/**` | GET | ✅ | ✅ | `Editor.bin`, `origin.pdf`, `media/`, `changes/`, `saved.{ext}` |
+| `/downloadfile/{key}` | GET, POST | ✅ | ⚠️ | [Server config](https://api.onlyoffice.com/docs/docs-api/get-started/configuration/server-config/) `downloadFileAllowExt`. go-office: Range requests ✅; POST body `{"url":"…"}` ✅; `token` in body **not parsed** |
+| `/healthcheck` | GET | ✅ | ⚠️ | Body `true`. ONLYOFFICE also probes DB/Redis/broker; go-office returns `true` without those dependencies |
+| `/health` | GET | ⚠️ | ✅ | go-office JSON: `status`, `version`, `sessions`, `cacheDirs`, `cacheBytes` |
+| `/healthz` | GET | — | ✅ | Alias of `/health` (k8s convention; not ONLYOFFICE-specific) |
+| `/info/info.json` | GET | ✅ | ✅ | `{"version":"…"}` |
 
 ### 1.2 Conversion API (FileBrowser previews, print/export pipelines)
 
 | Endpoint | Method | ONLYOFFICE | go-office | Notes |
 | -------- | ------ | :--------: | :---------: | ----- |
-| **`/converter`** | **POST** | **✓** | **✗** | [Conversion API](https://api.onlyoffice.com/docs/docs-api/additional-api/conversion-api/). JSON body: `filetype`, `key`, `outputtype`, `url`, optional `thumbnail`, `async`, … |
-| `/converter?shardkey={key}` | POST | ✓ | ✗ | Load-balancing query param (8.1+) |
-| `Accept: application/json` on `/converter` | — | ✓ | ✗ | ONLYOFFICE can return JSON; default response is XML |
-| **`/ConvertService.ashx`** | POST | ✓ (legacy) | ✗ | Pre-5.5 path; same role as `/converter` |
-| JWT: `Authorization: Bearer` on converter | — | ✓ | ✗ | FileBrowser signs body claims, sends Bearer header |
-| JWT: `{"token":"…"}` in converter body | — | ✓ | ✗ | Alternative ONLYOFFICE style |
-| Internal x2t on editor open/save | — | ✓ | ✓ | Same binary; **not exposed as HTTP** |
+| **`/converter`** | **POST** | **✅** | **❌** | [Conversion API](https://api.onlyoffice.com/docs/docs-api/additional-api/conversion-api/). JSON body: `filetype`, `key`, `outputtype`, `url`, optional `thumbnail`, `async`, … |
+| `/converter?shardkey={key}` | POST | ✅ | ❌ | Load-balancing query param (8.1+) |
+| `Accept: application/json` on `/converter` | — | ✅ | ❌ | ONLYOFFICE can return JSON; default response is XML |
+| **`/ConvertService.ashx`** | POST | ✅ (legacy) | ❌ | Pre-5.5 path; same role as `/converter` |
+| JWT: `Authorization: Bearer` on converter | — | ✅ | ❌ | FileBrowser signs body claims, sends Bearer header |
+| JWT: `{"token":"…"}` in converter body | — | ✅ | ❌ | Alternative ONLYOFFICE style |
+| Internal x2t on editor open/save | — | ✅ | ✅ | Same binary; **not exposed as HTTP** |
 
 **FileBrowser `GenerateOfficePreview`:** `POST {onlyOfficeUrl}/converter` with `outputType: "jpg"` → **will not work** against go-office today.
 
@@ -89,36 +89,36 @@ Paths are relative to `documentServerUrl` (default site root). `OFFICE_BASE_PATH
 
 | Endpoint | Method | ONLYOFFICE | go-office | Notes |
 | -------- | ------ | :--------: | :---------: | ----- |
-| **`/command`** | POST | ✓ | ✗ | [Command service](https://api.onlyoffice.com/docs/docs-api/additional-api/command-service/) |
-| `/command?shardkey={key}` | POST | ✓ | ✗ | 8.1+ |
-| **`/coauthoring/CommandService.ashx`** | POST | ✓ (legacy) | ✗ | Pre-8.2 path |
-| Command `info` | — | ✓ | ✗ | Who is editing |
-| Command `drop` | — | ✓ | ✗ | Disconnect users |
-| Command `forcesave` | — | ✓ | ~ | Editor `customization.forcesave` + coauthoring save works; **HTTP command** does not |
-| Command `meta` | — | ✓ | ✗ | Update doc meta for all editors |
-| Command `version` | — | ✓ | ✗ | Server version |
-| Command `license` | — | ✓ | ✗ | License/quota info |
-| Command `getForgotten` / `getForgottenList` / `deleteForgotten` | — | ✓ | ✗ | Forgotten-file recovery |
+| **`/command`** | POST | ✅ | ❌ | [Command service](https://api.onlyoffice.com/docs/docs-api/additional-api/command-service/) |
+| `/command?shardkey={key}` | POST | ✅ | ❌ | 8.1+ |
+| **`/coauthoring/CommandService.ashx`** | POST | ✅ (legacy) | ❌ | Pre-8.2 path |
+| Command `info` | — | ✅ | ❌ | Who is editing |
+| Command `drop` | — | ✅ | ❌ | Disconnect users |
+| Command `forcesave` | — | ✅ | ⚠️ | Editor `customization.forcesave` + coauthoring save works; **HTTP command** does not |
+| Command `meta` | — | ✅ | ❌ | Update doc meta for all editors |
+| Command `version` | — | ✅ | ❌ | Server version |
+| Command `license` | — | ✅ | ❌ | License/quota info |
+| Command `getForgotten` / `getForgottenList` / `deleteForgotten` | — | ✅ | ❌ | Forgotten-file recovery |
 
 ### 1.4 WOPI (alternative integration protocol)
 
 | Endpoint | Method | ONLYOFFICE | go-office | Notes |
 | -------- | ------ | :--------: | :---------: | ----- |
-| **`/hosting/discovery`** | GET | ✓ | ✗ | [WOPI discovery](https://api.onlyoffice.com/docs/docs-api/using-wopi/wopi-discovery/) XML |
-| WOPI file operations (`/wopi/files/…`) | * | ✓ | ✗ | [WOPI overview](https://api.onlyoffice.com/docs/docs-api/using-wopi/overview/) |
-| WOPI proof keys / PostMessage | — | ✓ | ✗ | |
+| **`/hosting/discovery`** | GET | ✅ | ❌ | [WOPI discovery](https://api.onlyoffice.com/docs/docs-api/using-wopi/wopi-discovery/) XML |
+| WOPI file operations (`/wopi/files/…`) | * | ✅ | ❌ | [WOPI overview](https://api.onlyoffice.com/docs/docs-api/using-wopi/overview/) |
+| WOPI proof keys / PostMessage | — | ✅ | ❌ | |
 | Docs API vs WOPI | — | Both | **Docs API only** | Use `document.url` + `callbackUrl`, not `wopisrc` |
 
 ### 1.5 Ancillary / deployment-specific routes
 
 | Endpoint | Method | ONLYOFFICE | go-office | Notes |
 | -------- | ------ | :--------: | :---------: | ----- |
-| **`/spellchecker/`** | * | ✓ | ✗ | Separate Node service; nginx proxies to port 8080. Editor works; spell-check calls fail silently or error in console |
-| `/example/` (bundled test apps) | GET | ✓ | ✗ | go-office provides `/demo/` instead (not ONLYOFFICE-compatible path) |
-| Admin panel | GET | ✓ | ✗ | Port 9000 in full install |
-| `/plugins.json` (root) | GET | ~ | ~ | Often under `/web-apps/…` in assets; served if file exists in bundle |
-| `document-formats/onlyoffice-docs-formats.json` | GET | ~ | ~ | Referenced in server config; served only if present in asset tree |
-| Welcome / example nginx default page | GET | ✓ | — | go-office serves AGPL **home page** at `/` instead |
+| **`/spellchecker/`** | * | ✅ | ❌ | Separate Node service; nginx proxies to port 8080. Editor works; spell-check calls fail silently or error in console |
+| `/example/` (bundled test apps) | GET | ✅ | ❌ | go-office provides `/demo/` instead (not ONLYOFFICE-compatible path) |
+| Admin panel | GET | ✅ | ❌ | Port 9000 in full install |
+| `/plugins.json` (root) | GET | ⚠️ | ⚠️ | Often under `/web-apps/…` in assets; served if file exists in bundle |
+| `document-formats/onlyoffice-docs-formats.json` | GET | ⚠️ | ⚠️ | Referenced in server config; served only if present in asset tree |
+| Welcome / example nginx default page | GET | ✅ | — | go-office serves AGPL **home page** at `/` instead |
 
 ---
 
@@ -128,15 +128,15 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 
 | Packet / message | ONLYOFFICE | go-office | Notes |
 | ---------------- | :--------: | :---------: | ----- |
-| `0{"sid":…}` open | ✓ | ✓ | Session start |
-| `40{"sid":…}` namespace | ✓ | ✓ | Golden fixture |
-| `42["message",{"type":"license",…}]` | ✓ | ✓ | Handshake type `3`, `buildVersion` from assets |
-| `auth` + `authChanges` | ✓ | ✓ | `openCmd` → download + x2t or PDF path |
-| `documentOpen` ok/error | ✓ | ✓ | Cache file list |
-| `isSaveLock` → `saveLock` | ✓ | ✓ | Golden fixture |
-| `saveChanges` → `unSaveLock` | ✓ | ✓ | Changes appended; debounced flush |
-| Other coauthoring messages (cursor, chat, presence, …) | ✓ | ✗ | Ignored (POST returns `ok`, no reply) |
-| Multi-user on same `key` | ✓ | ✗ | Single session; Phase 3 |
+| `0{"sid":…}` open | ✅ | ✅ | Session start |
+| `40{"sid":…}` namespace | ✅ | ✅ | Golden fixture |
+| `42["message",{"type":"license",…}]` | ✅ | ✅ | Handshake type `3`, `buildVersion` from assets |
+| `auth` + `authChanges` | ✅ | ✅ | `openCmd` → download + x2t or PDF path |
+| `documentOpen` ok/error | ✅ | ✅ | Cache file list |
+| `isSaveLock` → `saveLock` | ✅ | ✅ | Golden fixture |
+| `saveChanges` → `unSaveLock` | ✅ | ✅ | Changes appended; debounced flush |
+| Other coauthoring messages (cursor, chat, presence, …) | ✅ | ❌ | Ignored (POST returns `ok`, no reply) |
+| Multi-user on same `key` | ✅ | ❌ | Single session; Phase 3 |
 
 ---
 
@@ -146,16 +146,16 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 
 | Field / API | ONLYOFFICE | go-office | Notes |
 | ----------- | :--------: | :---------: | ----- |
-| `DocsAPI.DocEditor(id, config)` | ✓ | ✓ | [Config](https://api.onlyoffice.com/docs/docs-api/usage-api/config/) |
-| `document.key`, `.url`, `.fileType`, `.title` | ✓ | ✓ | `pkg/config.Build` |
-| `document.permissions` (edit/download/print) | ✓ | ✓ | |
-| `editorConfig.callbackUrl` | ✓ | ✓ | |
-| `editorConfig.mode` (edit/view) | ✓ | ✓ | |
-| `editorConfig.lang`, `customization`, `user` | ✓ | ✓ | Passed through when set by host |
-| `editorConfig.coEditing` | ✓ | ~ | Accepted; no multi-user semantics |
-| `editorConfig.plugins`, `templates`, `embedded`, … | ✓ | ~ | Passed if host supplies; not validated server-side |
-| Config JWT (`token` top-level field) | ✓ | ✓ | Signed with `OFFICE_JWT_SECRET` when set |
-| Server-side JWT verify on coauthoring `auth` | ✓ | ✗ | go-office does not validate editor JWT on coauthoring packets |
+| `DocsAPI.DocEditor(id, config)` | ✅ | ✅ | [Config](https://api.onlyoffice.com/docs/docs-api/usage-api/config/) |
+| `document.key`, `.url`, `.fileType`, `.title` | ✅ | ✅ | `pkg/config.Build` |
+| `document.permissions` (edit/download/print) | ✅ | ✅ | |
+| `editorConfig.callbackUrl` | ✅ | ✅ | |
+| `editorConfig.mode` (edit/view) | ✅ | ✅ | |
+| `editorConfig.lang`, `customization`, `user` | ✅ | ✅ | Passed through when set by host |
+| `editorConfig.coEditing` | ✅ | ⚠️ | Accepted; no multi-user semantics |
+| `editorConfig.plugins`, `templates`, `embedded`, … | ✅ | ⚠️ | Passed if host supplies; not validated server-side |
+| Config JWT (`token` top-level field) | ✅ | ✅ | Signed with `OFFICE_JWT_SECRET` when set |
+| Server-side JWT verify on coauthoring `auth` | ✅ | ❌ | go-office does not validate editor JWT on coauthoring packets |
 
 ### 3.2 Callback — integrator receives POSTs (Document Server → your app)
 
@@ -163,20 +163,20 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 
 | Callback aspect | ONLYOFFICE Document Server | go-office |
 | --------------- | :------------------------: | :-------: |
-| POST to `editorConfig.callbackUrl` | ✓ | ✓ | 
-| Response must be `{"error":0}` | ✓ | ✓ | `callback.WriteOK` |
-| Status **2** (must save) | ✓ | ✓ | Outbound via `NotifyCallback`; inbound persist in `HandleCallback` |
-| Status **6** (force saved) | ✓ | ✓ | Same |
-| Status **1** (editing / user join) | ✓ | ✗ | **Not emitted** by go-office |
-| Status **3** (save error) | ✓ | ✗ | Not emitted |
-| Status **4** (closed, no changes) | ✓ | ✗ | Not emitted |
-| Status **7** (force save error) | ✓ | ✗ | Not emitted |
-| Payload fields: `users`, `actions` | ✓ | ✗ | Not in outbound `NotifyCallback` |
-| Payload fields: `changesurl`, `history`, `filetype` | ✓ | ✗ | Not in outbound payload |
-| Payload fields: `forcesavetype`, `userdata` | ✓ | ✗ | Not in outbound payload |
-| Inbound: accept status 1/4 and return `error:0` | ✓ | ✓ | `HandleCallback` — no persist, OK response |
-| Callback JWT `{"token":"…"}` (JWT_IN_BODY) | ✓ | ✓ | Sign outbound; verify inbound when secret set |
-| Callback JWT in `Authorization` header only | ✓ | ~ | `TrimToken` helper exists; **not wired** in `HandleCallback` |
+| POST to `editorConfig.callbackUrl` | ✅ | ✅ | 
+| Response must be `{"error":0}` | ✅ | ✅ | `callback.WriteOK` |
+| Status **2** (must save) | ✅ | ✅ | Outbound via `NotifyCallback`; inbound persist in `HandleCallback` |
+| Status **6** (force saved) | ✅ | ✅ | Same |
+| Status **1** (editing / user join) | ✅ | ❌ | **Not emitted** by go-office |
+| Status **3** (save error) | ✅ | ❌ | Not emitted |
+| Status **4** (closed, no changes) | ✅ | ❌ | Not emitted |
+| Status **7** (force save error) | ✅ | ❌ | Not emitted |
+| Payload fields: `users`, `actions` | ✅ | ❌ | Not in outbound `NotifyCallback` |
+| Payload fields: `changesurl`, `history`, `filetype` | ✅ | ❌ | Not in outbound payload |
+| Payload fields: `forcesavetype`, `userdata` | ✅ | ❌ | Not in outbound payload |
+| Inbound: accept status 1/4 and return `error:0` | ✅ | ✅ | `HandleCallback` — no persist, OK response |
+| Callback JWT `{"token":"…"}` (JWT_IN_BODY) | ✅ | ✅ | Sign outbound; verify inbound when secret set |
+| Callback JWT in `Authorization` header only | ✅ | ⚠️ | `TrimToken` helper exists; **not wired** in `HandleCallback` |
 
 **Important:** Integrators that only implement status **2** and **6** (typical save path) work. Integrators that track **status 1** “who is editing” or **status 4** “closed without save” from the document server will not receive those events from go-office.
 
@@ -184,12 +184,12 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 
 | JWT usage | ONLYOFFICE | go-office |
 | --------- | :--------: | :-------: |
-| `OFFICE_JWT_SECRET` / `JWT_SECRET` | ✓ | ✓ (renamed env) |
-| Sign editor config `token` | ✓ | ✓ |
-| Verify config token on server | ✓ | ✗ |
-| Callback body `{"token":"…"}` | ✓ | ✓ |
-| Converter `Authorization: Bearer` | ✓ | ✗ (no `/converter`) |
-| Command service `{"token":"…"}` | ✓ | ✗ (no `/command`) |
+| `OFFICE_JWT_SECRET` / `JWT_SECRET` | ✅ | ✅ (renamed env) |
+| Sign editor config `token` | ✅ | ✅ |
+| Verify config token on server | ✅ | ❌ |
+| Callback body `{"token":"…"}` | ✅ | ✅ |
+| Converter `Authorization: Bearer` | ✅ | ❌ (no `/converter`) |
+| Command service `{"token":"…"}` | ✅ | ❌ (no `/command`) |
 
 ---
 
@@ -197,11 +197,11 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 
 | FileBrowser feature | ONLYOFFICE URL / API | go-office |
 | ------------------- | -------------------- | --------- |
-| In-browser editor | `{url}/web-apps/…/api.js` + config | ✓ |
-| Config JWT (`integrations.onlyOffice.secret`) | Same as `OFFICE_JWT_SECRET` | ✓ |
-| **Grid preview thumbnails** | `POST {url}/converter` | **✗** |
-| Document download URL in config | Your app’s download route | ✓ (host responsibility) |
-| Callback save | Your app’s callback route | ✓ |
+| In-browser editor | `{url}/web-apps/…/api.js` + config | ✅ |
+| Config JWT (`integrations.onlyOffice.secret`) | Same as `OFFICE_JWT_SECRET` | ✅ |
+| **Grid preview thumbnails** | `POST {url}/converter` | **❌** |
+| Document download URL in config | Your app’s download route | ✅ (host responsibility) |
+| Callback save | Your app’s callback route | ✅ |
 
 ---
 

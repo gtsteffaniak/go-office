@@ -80,16 +80,18 @@ These are **not** read by current builds. Rename in compose, CI, and shell profi
 
 ## URL and port compatibility
 
+**Legend:** ✅ supported · ⚠️ partial · ❌ not supported
+
 | Endpoint | ONLYOFFICE Document Server | go-office |
 | -------- | -------------------------- | --------- |
-| Editor `api.js` | `/web-apps/apps/api/documents/api.js` | Same |
-| Coauthoring | `/{version}/doc/{key}/c/` (primary) or `/doc/{key}/c/` | Same — Engine.IO polling; WebSocket returns 501 |
-| Document cache | `/cache/files/{key}/…` | Same |
-| Health (JSON) | varies | `/health` |
-| Health (compat) | `/healthcheck` → `true` | Same |
-| Info | `/info/info.json` | Same (version field) |
-| Site home | welcome page / nginx default | `/` (go-office about page + AGPL attribution) |
-| Demo samples | not included | `/demo/` (disable with `OFFICE_DISABLE_SAMPLES`) |
+| Editor `api.js` | `/web-apps/apps/api/documents/api.js` | ✅ |
+| Coauthoring | `/{version}/doc/{key}/c/` (primary) or `/doc/{key}/c/` | ✅ polling; ❌ WebSocket (501) |
+| Document cache | `/cache/files/{key}/…` | ✅ |
+| Health (JSON) | varies | ✅ (`/health` extended JSON) |
+| Health (compat) | `/healthcheck` → `true` | ✅ |
+| Info | `/info/info.json` | ✅ |
+| Site home | welcome page / nginx default | ✅ (`/` AGPL home page) |
+| Demo samples | not included | ✅ `/demo/` (disable with `OFFICE_DISABLE_SAMPLES`) |
 
 **Default listen port:** `80` inside the `office-server` image (map host port as you did before, e.g. `9052:80`).
 
@@ -116,20 +118,22 @@ These are **not** read by current builds. Rename in compose, CI, and shell profi
 
 Plan accordingly before migrating production **edit-and-save** workflows:
 
+**Legend:** ✅ supported · ⚠️ partial · ❌ not supported
+
 | Feature | ONLYOFFICE Document Server | go-office (current) |
 | ------- | -------------------------- | ------------------- |
-| Save / force-save to integrator | Yes | **Yes** (coauthoring save → reverse x2t → callback → `Storage.Save`) |
-| Multi-user co-editing | Yes | **No** — Phase 3 |
-| WebSocket coauthoring | Yes | Polling only (501 on WS upgrade) |
-| PostgreSQL / Redis / clustering | Yes | **No** (single process) |
-| WOPI | Yes | **No** |
-| `POST /converter` (conversion API / thumbnails) | Yes | **No** — see [api.md](api.md#filebrowser-office-previews) |
-| Callback status 1 / 4 (editing telemetry) | Yes | **No** — not emitted outbound (see [api.md](api.md#32-callback--integrator-receives-posts-document-server--your-app)) |
-| `POST /coauthoring/CommandService.ashx` | Yes | **No** |
-| `GET /hosting/discovery` (WOPI) | Yes | **No** |
-| `/spellchecker/` | Yes | **No** |
-| Spell checker service | Optional | **No** |
-| Admin panel | Port 9000 | **No** |
+| Save / force-save to integrator | ✅ | ✅ (coauthoring save → reverse x2t → callback → `Storage.Save`) |
+| Multi-user co-editing | ✅ | ❌ — Phase 3 |
+| WebSocket coauthoring | ✅ | ⚠️ Polling only (501 on WS upgrade) |
+| PostgreSQL / Redis / clustering | ✅ | ❌ (single process) |
+| WOPI | ✅ | ❌ |
+| `POST /converter` (conversion API / thumbnails) | ✅ | ❌ — see [api.md](api.md#filebrowser-office-previews) |
+| Callback status 1 / 4 (editing telemetry) | ✅ | ❌ — not emitted outbound (see [api.md](api.md#32-callback--integrator-receives-posts-document-server--your-app)) |
+| `POST /coauthoring/CommandService.ashx` | ✅ | ❌ |
+| `GET /hosting/discovery` (WOPI) | ✅ | ❌ |
+| `/spellchecker/` | ✅ | ❌ |
+| Spell checker service | ⚠️ Optional | ❌ |
+| Admin panel | ✅ | ❌ (port 9000 in full install) |
 
 Opening and viewing documents in the editor works; **saving edits back to storage** is supported via coauthoring flush, reverse x2t, and the integrator callback. Validate your use case against [README.md](README.md) roadmap before cutover.
 

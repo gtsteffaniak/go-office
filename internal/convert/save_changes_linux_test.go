@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -597,6 +598,58 @@ func TestToEditorBinReconvertsWhenSourceChanges(t *testing.T) {
 	}
 	if string(first) == string(second) {
 		t.Fatal("Editor.bin must be rebuilt when the CSV bytes change under the same cache key")
+	}
+}
+
+func TestConcurrentToEditorBinSameDir(t *testing.T) {
+	repo := testutil.RepoRoot(t)
+	assets := filepath.Join(repo, "assets")
+	x2t := filepath.Join(assets, "converter", "bin", "x2t")
+	if st, err := os.Stat(x2t); err != nil || st.IsDir() {
+		t.Skip("x2t not available")
+	}
+	if !testutil.SampleExists(repo, "sample-files/sample.docx") {
+		t.Skip("sample docx missing")
+	}
+
+	work := testutil.NewWorkspace(t)
+	docxPath := filepath.Join(work.Root, filepath.FromSlash(work.CopySample("sample-files/sample.docx")))
+	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: 6})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cacheDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	const workers = 12
+	errCh := make(chan error, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errCh <- conv.ToEditorBin(ctx, docxPath, cacheDir)
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	st, err := os.Stat(filepath.Join(cacheDir, "Editor.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Size() == 0 {
+		t.Fatal("Editor.bin is empty")
+	}
+	if _, err := os.Stat(filepath.Join(cacheDir, "source.sha256")); err != nil {
+		t.Fatalf("source.sha256 missing after concurrent convert: %v", err)
 	}
 }
 

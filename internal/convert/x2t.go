@@ -82,7 +82,14 @@ func (c *Converter) ToEditorBin(ctx context.Context, sourcePath, outDir string) 
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
+	return withCacheDirLock(outDir, func() error {
+		return c.toEditorBin(ctx, sourcePath, outDir)
+	})
+}
+
+func (c *Converter) toEditorBin(ctx context.Context, sourcePath, outDir string) error {
 	outFile := filepath.Join(outDir, "Editor.bin")
+	partFile := filepath.Join(outDir, "Editor.bin.part")
 	convertPath := sourcePath
 	srcHash, err := fileSHA256(sourcePath)
 	if err != nil {
@@ -118,6 +125,7 @@ func (c *Converter) ToEditorBin(ctx context.Context, sourcePath, outDir string) 
 		return ensureDocumentFonts(c, outDir)
 	}
 	_ = os.Remove(outFile)
+	_ = os.Remove(partFile)
 	_ = os.Remove(sourceHashPath(outDir))
 
 	select {
@@ -145,7 +153,7 @@ func (c *Converter) ToEditorBin(ctx context.Context, sourcePath, outDir string) 
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return err
 	}
-	xml := buildTaskXML(convertPath, outFile, c.fontDir, c.themeDir, filepath.Ext(sourcePath), allFontsPath, workDir)
+	xml := buildTaskXML(convertPath, partFile, c.fontDir, c.themeDir, filepath.Ext(sourcePath), allFontsPath, workDir)
 	if _, err := taskFile.WriteString(xml); err != nil {
 		taskFile.Close()
 		return err
@@ -158,8 +166,13 @@ func (c *Converter) ToEditorBin(ctx context.Context, sourcePath, outDir string) 
 	if err != nil {
 		return fmt.Errorf("convert: x2t: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	if st, err := os.Stat(outFile); err != nil || st.Size() == 0 {
+	if st, err := os.Stat(partFile); err != nil || st.Size() == 0 {
+		_ = os.Remove(partFile)
 		return fmt.Errorf("convert: x2t produced no output")
+	}
+	if err := os.Rename(partFile, outFile); err != nil {
+		_ = os.Remove(partFile)
+		return err
 	}
 	if err := snapshotFontArtifacts(runDir, outDir); err != nil {
 		return err
@@ -175,15 +188,23 @@ func (c *Converter) ToEditorBin(ctx context.Context, sourcePath, outDir string) 
 
 // FromEditorBin converts cacheDir/Editor.bin to destPath (e.g. saved.docx).
 func (c *Converter) FromEditorBin(ctx context.Context, cacheDir, destPath, targetExt string) error {
-	editorBin := filepath.Join(cacheDir, "Editor.bin")
-	if st, err := os.Stat(editorBin); err != nil || st.Size() == 0 {
-		return fmt.Errorf("convert: Editor.bin missing in %s", cacheDir)
-	}
-	return c.fromEditor(ctx, editorBin, destPath, targetExt, false)
+	return withCacheDirLock(cacheDir, func() error {
+		editorBin := filepath.Join(cacheDir, "Editor.bin")
+		if st, err := os.Stat(editorBin); err != nil || st.Size() == 0 {
+			return fmt.Errorf("convert: Editor.bin missing in %s", cacheDir)
+		}
+		return c.fromEditor(ctx, editorBin, destPath, targetExt, false)
+	})
 }
 
 // SaveChanges applies cacheDir/changes/*.json on top of Editor.bin and writes destPath.
 func (c *Converter) SaveChanges(ctx context.Context, cacheDir, destPath, targetExt string) error {
+	return withCacheDirLock(cacheDir, func() error {
+		return c.saveChanges(ctx, cacheDir, destPath, targetExt)
+	})
+}
+
+func (c *Converter) saveChanges(ctx context.Context, cacheDir, destPath, targetExt string) error {
 	editorBin := filepath.Join(cacheDir, "Editor.bin")
 	if st, err := os.Stat(editorBin); err != nil || st.Size() == 0 {
 		return fmt.Errorf("convert: Editor.bin missing in %s", cacheDir)
@@ -191,7 +212,7 @@ func (c *Converter) SaveChanges(ctx context.Context, cacheDir, destPath, targetE
 	changesDir := filepath.Join(cacheDir, "changes")
 	entries, err := os.ReadDir(changesDir)
 	if err != nil || len(entries) == 0 {
-		return c.FromEditorBin(ctx, cacheDir, destPath, targetExt)
+		return c.fromEditor(ctx, editorBin, destPath, targetExt, false)
 	}
 	ext := strings.TrimPrefix(strings.ToLower(targetExt), ".")
 	slog.Debug("save changes",

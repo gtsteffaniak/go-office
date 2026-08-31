@@ -25,7 +25,7 @@ export default defineConfig({
   testDir: "./tests/playwright/office",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: ciTest ? 1 : 1,
+  retries: 1,
   workers,
   reporter: "line",
   grep: process.env.PLAYWRIGHT_GREP ? new RegExp(process.env.PLAYWRIGHT_GREP) : undefined,

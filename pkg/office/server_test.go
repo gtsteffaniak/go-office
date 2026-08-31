@@ -46,6 +46,19 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 }
 
+func TestPluginsJSONEndpoint(t *testing.T) {
+	srv, err := office.New(nopStorage{}, office.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/plugins.json", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "[]" {
+		t.Fatalf("plugins.json = %d %q", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHealthCheckEndpoint(t *testing.T) {
 	srv, err := office.New(nopStorage{}, office.Options{})
 	if err != nil {

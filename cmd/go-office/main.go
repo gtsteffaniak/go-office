@@ -77,7 +77,7 @@ func main() {
 		}
 	}
 
-	debug := debuglog.Enabled(cfg.Debug) || cfg.samplesEnabled()
+	debug := debuglog.Enabled(cfg.Debug)
 	logger := debuglog.NewLogger(debug)
 	slog.SetDefault(logger)
 
@@ -87,6 +87,9 @@ func main() {
 		BasePath:        cfg.BasePath,
 		JWTSecret:       []byte(cfg.JWTSecret),
 		ProtocolVersion: cfg.Version,
+		PublicOrigin:    cfg.publicOrigin(),
+		ConvertLimit:    cfg.ConvertLimit,
+		PollHold:        cfg.PollHold,
 		Debug:           debug,
 		Logger:          logger,
 	})

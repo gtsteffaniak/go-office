@@ -12,14 +12,15 @@ const defaultPollHold = 20 * time.Second
 
 // Handler serves ONLYOFFICE coauthoring endpoints at /doc/{key}/c/.
 type Handler struct {
-	Version   string
-	Build     BuildInfo
-	BasePath  string
-	Logger    *slog.Logger
-	Debug     bool
-	PollHold  time.Duration
-	Opener    *Opener
-	Scheduler *saveScheduler
+	Version      string
+	Build        BuildInfo
+	BasePath     string
+	Logger       *slog.Logger
+	Debug        bool
+	PollHold     time.Duration
+	PublicOrigin string
+	Opener       *Opener
+	Scheduler    *saveScheduler
 }
 
 // HandlerOptions configures a coauthoring handler.
@@ -28,6 +29,8 @@ type HandlerOptions struct {
 	BasePath  string
 	Logger    *slog.Logger
 	Debug     bool
+	PollHold  *time.Duration
+	PublicOrigin string
 	Opener    *Opener
 	CacheDir  string
 	Saver     DocumentSaver
@@ -50,6 +53,10 @@ func NewWithOptions(opts HandlerOptions) *Handler {
 	h := New(opts.Version, opts.Logger)
 	h.Debug = opts.Debug
 	h.BasePath = opts.BasePath
+	if opts.PollHold != nil {
+		h.PollHold = *opts.PollHold
+	}
+	h.PublicOrigin = opts.PublicOrigin
 	h.Opener = opts.Opener
 	if opts.Saver != nil && opts.CacheDir != "" {
 		h.Scheduler = newSaveScheduler(opts.CacheDir, opts.Saver, opts.Logger)
@@ -129,12 +136,12 @@ func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey st
 			case strings.HasPrefix(packet, "40"):
 				sess.onConnect(connectAuthData(packet))
 				if req, ok := parseAuthPacket(packet); ok {
-					sess.startOpen(r, h.Opener, req)
+					sess.startOpen(h.Opener, req, CoauthoringOrigin(h.PublicOrigin, r))
 				}
 			case strings.HasPrefix(packet, "42"):
 				if req, ok := parseAuthPacket(packet); ok {
 					sess.onAuth(req)
-					sess.startOpen(r, h.Opener, req)
+					sess.startOpen(h.Opener, req, CoauthoringOrigin(h.PublicOrigin, r))
 					continue
 				}
 				if msg, ok := parseSocketMessage(packet); ok {

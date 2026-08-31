@@ -52,7 +52,7 @@ All go-office configuration uses the **`OFFICE_` prefix**. This is intentional: 
 | `OFFICE_BASE_PATH` | Mount prefix for editor routes | `/` (site root) |
 | `OFFICE_API_BASE` | Demo API prefix (`/demo/config`, etc.) | `/api/office` |
 | `OFFICE_VERSION` | Protocol version string (coauthoring) | read from `assets/VERSION` |
-| `OFFICE_DEBUG` | Verbose logging (`1` / `true`) | unset |
+| `OFFICE_DEBUG_LOGGING` | Verbose logging (`1` / `true`) | unset |
 
 CLI flags (`-assets`, `-addr`, `-jwt`, `-disable-samples`, …) override environment when passed explicitly.
 
@@ -74,7 +74,7 @@ Official Document Server uses many variables for PostgreSQL, Redis, RabbitMQ, an
 | Old name | Use instead |
 | -------- | ----------- |
 | `GO_OFFICE_ASSETS` | `OFFICE_ASSETS` |
-| `GO_OFFICE_DEBUG` | `OFFICE_DEBUG` |
+| `GO_OFFICE_DEBUG` | `OFFICE_DEBUG_LOGGING` (legacy: `OFFICE_DEBUG`) |
 
 These are **not** read by current builds. Rename in compose, CI, and shell profiles before upgrading.
 
@@ -150,7 +150,11 @@ FileBrowser today expects an external `onlyOfficeUrl` and signs config with `int
 
 | Symptom | Likely cause |
 | ------- | ------------ |
-| Editor loads but document never opens | x2t/conversion error — check server logs (`OFFICE_DEBUG=1`). |
+| Editor loads but document never opens | x2t/conversion error — check server logs (`OFFICE_DEBUG_LOGGING=1` or `-debug`). go-office must **reach** the `document.url` from inside its container (not just the browser). |
+| `document open failed` / download errors | FileBrowser `document.url` uses an internal hostname (e.g. `http://beta-large/...`) that the go-office container cannot resolve. Put both on the same Docker network or use a URL reachable from go-office. |
+| Wrong `cache/files` URLs / mixed content | Set `OFFICE_PUBLIC_ORIGIN=https://your-public-host` (or ensure reverse proxy sends `X-Forwarded-Proto` / `X-Forwarded-Host`). |
+| `plugins.json` 404 | Fixed in current go-office (`[]` stub). Harmless on older builds. |
+| WebSocket `501` on `/doc/.../c/` | Expected — sdkjs falls back to polling automatically. Not an error. |
 | “Token” / JWT errors | `OFFICE_JWT_SECRET` mismatch with integrator, or secret still named `JWT_SECRET`. |
 | `api.js` 404 | Wrong `documentServerUrl` or `OFFICE_BASE_PATH` does not match how the URL is constructed. |
 | Health check fails | Probe still targeting internal port `8000`; use port `80` on the container. |

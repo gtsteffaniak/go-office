@@ -1,8 +1,21 @@
 import { defineConfig, devices } from "@playwright/test";
+import os from "node:os";
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:8080";
 
 const ciTest = process.env.OFFICE_PLAYWRIGHT_TEST === "true";
+
+function defaultWorkers(): number {
+  if (process.env.PLAYWRIGHT_WORKERS) {
+    return Number(process.env.PLAYWRIGHT_WORKERS);
+  }
+  if (ciTest) {
+    return 6;
+  }
+  return Math.min(6, Math.max(2, os.cpus().length));
+}
+
+const workers = defaultWorkers();
 
 export default defineConfig({
   timeout: ciTest ? 120_000 : 90_000,
@@ -12,8 +25,8 @@ export default defineConfig({
   testDir: "./tests/playwright/office",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: ciTest ? 2 : 1,
-  workers: Number(process.env.PLAYWRIGHT_WORKERS ?? 10),
+  retries: ciTest ? 1 : 1,
+  workers,
   reporter: "line",
   grep: process.env.PLAYWRIGHT_GREP ? new RegExp(process.env.PLAYWRIGHT_GREP) : undefined,
   use: {

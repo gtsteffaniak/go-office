@@ -154,6 +154,9 @@ func copyFile(src, dest string) error {
 }
 
 func (o *Opener) errorPackets(cmdType string, err error) ([]string, error) {
+	if o.Logger != nil {
+		o.Logger.Warn("document open failed", "err", err)
+	}
 	pkt, perr := documentOpenPacket(cmdType, "error", err.Error())
 	if perr != nil {
 		return nil, err
@@ -211,4 +214,12 @@ func requestOrigin(r *http.Request) string {
 		return "https://" + r.Host
 	}
 	return "http://" + r.Host
+}
+
+// CoauthoringOrigin returns the public document-server origin for cache URLs.
+func CoauthoringOrigin(publicOrigin string, r *http.Request) string {
+	if o := strings.TrimSpace(publicOrigin); o != "" {
+		return strings.TrimSuffix(o, "/")
+	}
+	return requestOrigin(r)
 }

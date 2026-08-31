@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"net/http"
 	"sync"
 	"time"
 )
@@ -154,7 +153,7 @@ func (s *session) queueAuthLocked(req authRequest) {
 	}
 }
 
-func (s *session) startOpen(r *http.Request, opener *Opener, req authRequest) {
+func (s *session) startOpen(opener *Opener, req authRequest, origin string) {
 	if opener == nil || req.Open == nil {
 		return
 	}
@@ -173,7 +172,7 @@ func (s *session) startOpen(r *http.Request, opener *Opener, req authRequest) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		packets, err := opener.Open(ctx, requestOrigin(r), basePath, docKey, open)
+		packets, err := opener.Open(ctx, origin, basePath, docKey, open)
 		if err != nil {
 			s.mu.Lock()
 			s.openStarted = false

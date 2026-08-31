@@ -141,6 +141,7 @@ func (s *Server) buildRoutes() {
 	s.mux.HandleFunc(joinURLPath(prefix, "healthz"), s.handleHealth)
 	s.mux.HandleFunc(joinURLPath(prefix, "healthcheck"), s.handleHealthCheck)
 	s.mux.HandleFunc(joinURLPath(prefix, "info/info.json"), s.handleInfoJSON)
+	s.mux.HandleFunc(joinURLPath(prefix, "plugins.json"), s.handlePluginsJSON)
 
 	if s.opts.AssetDir != "" {
 		webApps := static.Dir(s.opts.AssetDir, "web-apps")
@@ -167,6 +168,7 @@ func (s *Server) buildRoutes() {
 				s.mux.Handle("/fonts/", http.StripPrefix("/fonts/", fonts))
 			}
 			s.mux.HandleFunc("/document_editor_service_worker.js", s.handleServiceWorker)
+			s.mux.HandleFunc("/plugins.json", s.handlePluginsJSON)
 		}
 	}
 
@@ -197,13 +199,15 @@ func (s *Server) registerCoauthoringFallback() {
 		s.opts.Logger.Debug("coauthoring converter unavailable", "err", err)
 	}
 	co := ws.NewWithOptions(ws.HandlerOptions{
-		Version:  s.opts.ProtocolVersion,
-		BasePath: s.opts.BasePath,
-		Logger:   s.opts.Logger,
-		Debug:    s.opts.Debug,
-		Opener:   opener,
-		CacheDir: s.cacheDir(),
-		Saver:    s,
+		Version:      s.opts.ProtocolVersion,
+		BasePath:     s.opts.BasePath,
+		Logger:       s.opts.Logger,
+		Debug:        s.opts.Debug,
+		PollHold:     s.opts.PollHold,
+		PublicOrigin: s.opts.PublicOrigin,
+		Opener:       opener,
+		CacheDir:     s.cacheDir(),
+		Saver:        s,
 	})
 	s.coauthoring = co
 	docPattern := joinURLPath(prefix, "doc") + "/"
@@ -251,6 +255,16 @@ func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleInfoJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"version":` + strconvQuote(s.opts.ProtocolVersion) + `}`))
+}
+
+func (s *Server) handlePluginsJSON(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	_, _ = w.Write([]byte("[]"))
 }
 
 func (s *Server) handleServiceWorker(w http.ResponseWriter, r *http.Request) {

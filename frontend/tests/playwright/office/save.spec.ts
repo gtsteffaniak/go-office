@@ -10,7 +10,7 @@ const bundledTest = process.env.OFFICE_PLAYWRIGHT_TEST === "true";
 const STATUS_OK_TIMEOUT = bundledTest ? 15_000 : 8_000;
 const MARKER = `PLAYWRIGHT_EDIT_${Date.now()}`;
 
-test.describe.configure({ retries: bundledTest ? 3 : 2 });
+test.describe.configure({ retries: bundledTest ? 2 : 2 });
 test.use({ trace: bundledTest ? "retain-on-failure" : "on-first-retry" });
 
 test("csv save round-trip via demo file API", async ({ page, request }) => {

@@ -116,7 +116,7 @@ Paths are relative to `documentServerUrl` (default site root). `OFFICE_BASE_PATH
 | **`/spellchecker/`** | * | ✅ | ❌ | Separate Node service; nginx proxies to port 8080. Editor works; spell-check calls fail silently or error in console |
 | `/example/` (bundled test apps) | GET | ✅ | ❌ | go-office provides `/demo/` instead (not ONLYOFFICE-compatible path) |
 | Admin panel | GET | ✅ | ❌ | Port 9000 in full install |
-| `/plugins.json` (root) | GET | ⚠️ | ⚠️ | Often under `/web-apps/…` in assets; served if file exists in bundle |
+| `/plugins.json` (root) | GET | ✅ | ✅ | Empty plugin list (`[]`) for mobile/desktop editors |
 | `document-formats/onlyoffice-docs-formats.json` | GET | ⚠️ | ⚠️ | Referenced in server config; served only if present in asset tree |
 | Welcome / example nginx default page | GET | ✅ | — | go-office serves AGPL **home page** at `/` instead |
 

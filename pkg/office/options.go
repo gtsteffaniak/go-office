@@ -32,6 +32,16 @@ type Options struct {
 	// ConvertLimit caps concurrent x2t subprocess conversions (default 1).
 	ConvertLimit int
 
+	// PollHold is how long coauthoring long-poll GETs block waiting for packets.
+	// When set (including zero), overrides the 20s production default. Use 0 in CI
+	// so idle polls return immediately instead of holding connections.
+	PollHold *time.Duration
+
+	// PublicOrigin is the browser-visible document server URL (scheme + host, no path).
+	// Used for cache/files links in coauthoring responses when set; otherwise inferred
+	// from each request (X-Forwarded-* or Host).
+	PublicOrigin string
+
 	// Debug enables verbose logging.
 	Debug bool
 

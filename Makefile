@@ -49,7 +49,7 @@ help:
 	@echo "  make extract-sample-manifest  Regenerate Playwright content expectations from sample-files/"
 	@echo "  make test-playwright    E2E Playwright tests in Docker (runs build first)"
 	@echo "  make test-playwright-ui Local Playwright UI (server in Docker, tests on host)"
-	@echo "  make build-docker       Build Docker image and run server (sample-files/)"
+	@echo "  make build-docker       Build Docker image (office-server)"
 	@echo "  make build-docker-image Build Docker image only (debian-slim runtime for x2t)"
 	@echo "  make build-docker-builder  Build reusable Alpine Go builder image"
 	@echo "  make run-docker         Run server from existing Docker image"
@@ -181,12 +181,13 @@ DOCKER_CONTAINER ?= go-office-serve
 DOCKER_PORT ?= 8080
 DOCKER_PUBLIC ?= http://localhost:$(DOCKER_PORT)
 
-build-docker: build-docker-image run-docker
+build-docker: build-docker-image
 
 build-docker-image: check-linux check-samples
 	@mkdir -p assets
 	@echo "==> Docker image $(DOCKER_IMAGE)"
-	$(DOCKER_BUILD) -t "$(DOCKER_IMAGE)" -f _docker/Dockerfile .
+	$(DOCKER_BUILD) -t "$(DOCKER_IMAGE)" -f _docker/Dockerfile \
+		$(if $(OFFICE_DEBUG_LOGGING),--build-arg OFFICE_DEBUG_LOGGING=$(OFFICE_DEBUG_LOGGING),) .
 
 build-docker-builder:
 	@echo "==> Docker builder image $(DOCKER_BUILDER_IMAGE)"

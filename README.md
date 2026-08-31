@@ -43,8 +43,9 @@ make test     # unit tests (no assets)
 | `make test-integration` | `build` then integration tests |
 | `make test-playwright` | `build` then Playwright E2E in Docker |
 | `make test-playwright-ui` | Demo server in Docker + Playwright UI on host |
-| `make build-docker` | Build `office-server` image and run on host port 8080 → container 80 |
-| `make build-docker-image` | Build Docker image only |
+| `make build-docker` | Build `office-server` Docker image |
+| `make run-docker` | Run built image on host port 8080 → container 80 |
+| `make build-docker-image` | Alias for `make build-docker` |
 | `make clean` | Remove `bin/` and `assets/` |
 
 Useful variables: `OFFICE_ADDR`, `OFFICE_ASSETS`, `OFFICE_JWT_SECRET`, `OFFICE_DISABLE_SAMPLES`. See [migration.md](migration.md) when replacing `onlyoffice/documentserver`.
@@ -95,9 +96,11 @@ make test-playwright-ui # server in Docker, Playwright --ui on host
 ### Docker image (Document Server replacement)
 
 ```bash
-make build-docker-image     # tags ghcr.io/quantumx-apps/office-server:local
-make build-docker           # build + run on http://localhost:8080/ (maps host 8080 → container 80)
+make build-docker             # tags ghcr.io/quantumx-apps/office-server:local
+make run-docker               # run on http://localhost:8080/ (host 8080 → container 80)
 DOCKER_PORT=9052 make run-docker
+OFFICE_DEBUG_LOGGING=1 make run-docker   # verbose logs at runtime
+make build-docker OFFICE_DEBUG_LOGGING=1 # bake debug default into image (optional)
 ```
 
 Pull from GHCR (published on push to `main`):
@@ -115,6 +118,9 @@ Variables:
 
 - `PLAYWRIGHT_SAMPLE_TIER=1|2|3` — which sample tiers to test (default `3`)
 - `PLAYWRIGHT_STRICT=1` — fail if tier-1 samples are missing (enabled in Docker CI)
+- `PLAYWRIGHT_WORKERS=6` — parallel browser workers (default `6` in Docker CI; locally `min(6, CPU count)`)
+- `OFFICE_POLL_HOLD=0` — disable coauthoring long-poll waits in CI (production default `20s`)
+- `OFFICE_CONVERT_LIMIT=4` — concurrent x2t conversions during CI (default `1` in production)
 
 **Non-Linux workstations:** use WSL or let CI populate `assets/` — `fetch-assets` exits immediately on other OSes.
 

@@ -1,5 +1,5 @@
 import { test, expect } from "../test-setup";
-import { waitForEditorReady, setCellContent, waitForSaveDone } from "../editor";
+import { waitForEditorReady, waitForEditorInteractive, setCellContent, waitForSaveDone, typeInDocument } from "../editor";
 
 const bundledTest = process.env.OFFICE_PLAYWRIGHT_TEST === "true";
 const STATUS_OK_TIMEOUT = 8_000;
@@ -14,6 +14,7 @@ test("csv save round-trip via demo file API", async ({ page, request }) => {
     timeout: STATUS_OK_TIMEOUT,
   });
   await waitForEditorReady(page, "cell");
+  await waitForEditorInteractive(page, "cell");
 
   await setCellContent(page, "cell", "B2", MARKER);
   await waitForSaveDone(page, { request, filePath: file, marker: MARKER });
@@ -32,10 +33,8 @@ test("docx save round-trip via demo file API", async ({ page, request }) => {
     timeout: STATUS_OK_TIMEOUT,
   });
   await waitForEditorReady(page, "word");
-
-  const frame = page.frameLocator('iframe[src*="/documenteditor/"]').first();
-  await frame.locator("#id_main, #editor_sdk").first().click();
-  await page.keyboard.type(marker);
+  await waitForEditorInteractive(page, "word");
+  await typeInDocument(page, "word", marker);
   await waitForSaveDone(page, { request, filePath: file, marker });
 
   const res = await request.get(`/api/office/demo/file/${encodeURIComponent(file)}`);

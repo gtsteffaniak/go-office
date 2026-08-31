@@ -80,7 +80,7 @@ go run ./cmd/go-office -assets "$OFFICE_ASSETS"
 
 - Unit tests on every push (no assets).
 - Integration job: `go run ./cmd/fetch-assets`, cache `assets/` (per arch), then `go test -tags=integration ./...`.
-- Playwright job: matrix on `ubuntu-latest` (amd64) and `ubuntu-24.04-arm` (arm64); cache arch-specific assets, verify `sample-files/` matrix, then `make test-playwright`.
+- Playwright job: cache Euro-Office assets, verify `sample-files/` matrix, then `make test-playwright`.
 
 ## Playwright E2E tests
 

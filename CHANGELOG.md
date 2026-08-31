@@ -24,7 +24,7 @@ Euro-Office / ONLYOFFICE editor assets (`web-apps/`, `sdkjs/`, `x2t`) are **not*
 - **`save.spec.ts`** — CSV + DOCX save round-trip verified via `/api/office/demo/file/…`.
 - **Demo viewer hooks** (`internal/demo/viewer.html`): `data-document-ready` and `data-save-done` via DocsAPI `onDocumentReady` / `onRequestSaveResult`.
 - **`open-formats.spec.ts`** uses `waitForDocumentReady` instead of fixed sleeps.
-- **CI**: Docker Playwright uses `PLAYWRIGHT_SAMPLE_TIER=1`, `PLAYWRIGHT_WORKERS=10`, `OFFICE_POLL_HOLD=0`, and `OFFICE_CONVERT_LIMIT=6` for parallel E2E without coauthoring long-poll pile-ups.
+- **CI**: Docker Playwright uses `PLAYWRIGHT_SAMPLE_TIER=1`, `PLAYWRIGHT_WORKERS=10`, `OFFICE_POLL_HOLD=0`, and `OFFICE_CONVERT_LIMIT=6`; runs on amd64 and arm64 GitHub-hosted runners.
 - **`make extract-sample-manifest`** target.
 
 #### Docs, demo UX, API reference

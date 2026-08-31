@@ -33,7 +33,7 @@ jobs:
         id: assets-cache
         with:
           path: assets
-          key: euro-office-assets-v4-${{ hashFiles('scripts/euro-office.version') }}
+          key: euro-office-assets-v5-amd64-${{ hashFiles('scripts/euro-office.version') }}
       - name: Prepare assets
         run: make ensure-assets
       - name: Integration tests
@@ -42,9 +42,17 @@ jobs:
         run: make test-integration
 
   playwright:
-    name: Playwright E2E
-    runs-on: ubuntu-latest
+    name: Playwright E2E (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -56,7 +64,7 @@ jobs:
         id: assets-cache
         with:
           path: assets
-          key: euro-office-assets-v4-${{ hashFiles('scripts/euro-office.version') }}
+          key: euro-office-assets-v5-${{ matrix.arch }}-${{ hashFiles('scripts/euro-office.version') }}
       - name: Prepare assets
         run: make ensure-assets
       - name: Verify sample matrix

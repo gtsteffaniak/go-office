@@ -38,6 +38,12 @@ func TestHealthEndpoint(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"status":"ok"`) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
+	if !strings.Contains(rec.Body.String(), `"sessions":`) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"cacheDirs":`) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
 }
 
 func TestHealthCheckEndpoint(t *testing.T) {

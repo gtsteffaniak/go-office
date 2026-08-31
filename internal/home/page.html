@@ -71,9 +71,10 @@
         <li><a href="{{.HealthURL}}"><code>{{.HealthURL}}</code></a> — JSON health</li>
         <li><a href="{{.HealthCheckURL}}"><code>{{.HealthCheckURL}}</code></a> — ONLYOFFICE-compatible healthcheck (<code>true</code>)</li>
         <li><a href="{{.APIJSURL}}"><code>{{.APIJSURL}}</code></a> — <code>api.js</code> for integrators</li>
-        <li><code>{{.CoauthoringPrefix}}/…</code> — coauthoring (Socket.IO / polling)</li>
+        <li><code>{{.CoauthoringVersioned}}</code> — coauthoring (Engine.IO / Socket.IO polling; preferred)</li>
+        <li><code>{{.CoauthoringUnversioned}}</code> — coauthoring without version prefix (also supported)</li>
       </ul>
-      <p><a href="{{.APIDocsURL}}">Full API reference</a> — endpoints, methods, and callback flow</p>
+      <p><a href="{{.APIDocsURL}}">Full API reference</a> — endpoints, methods, callback flow, and <a href="{{.APIDocsURL}}#compatibility">ONLYOFFICE compatibility matrix</a></p>
     </section>
 
     {{if .SamplesOn}}

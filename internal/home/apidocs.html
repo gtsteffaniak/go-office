@@ -31,7 +31,7 @@
     }
     h2 { margin: 0 0 0.65rem; font-size: 1.05rem; }
     h3 { margin: 1rem 0 0.4rem; font-size: 0.95rem; color: #444; }
-  .endpoint {
+    .endpoint {
       border-top: 1px solid #eee;
       padding: 0.85rem 0 0;
       margin-top: 0.85rem;
@@ -54,6 +54,39 @@
     ul { padding-left: 1.2rem; }
     code { background: #eee; padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.92em; }
     a { color: #0b57d0; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.92rem; margin-top: 0.5rem; }
+    th, td { border: 1px solid #eee; padding: 0.45rem 0.55rem; text-align: left; vertical-align: top; }
+    th { background: #f8f8f8; }
+    .yes { color: #137333; font-weight: 600; }
+    .no { color: #b3261e; font-weight: 600; }
+    .partial { color: #8a5a00; font-weight: 600; }
+    .compat-table { margin-top: 0.75rem; }
+    .compat-table td:first-child { font-family: ui-monospace, monospace; font-size: 0.88em; }
+    .compat-table td:nth-child(3),
+    .compat-table td:nth-child(4) { text-align: center; width: 6.5rem; }
+    .compat-table .notes { font-family: system-ui, sans-serif; font-size: 0.88em; color: #555; }
+    .compat-summary {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.75rem;
+      margin: 0.75rem 0 0;
+    }
+    .compat-summary div {
+      border: 1px solid #eee;
+      border-radius: 6px;
+      padding: 0.65rem 0.75rem;
+      background: #fafafa;
+      font-size: 0.9rem;
+    }
+    .compat-summary strong { display: block; font-size: 1.25rem; }
+    .compat-summary .yes strong { color: #137333; }
+    .compat-summary .partial strong { color: #8a5a00; }
+    .compat-summary .no strong { color: #b3261e; }
+    @media (max-width: 640px) {
+      .compat-summary { grid-template-columns: 1fr; }
+      .compat-table td:nth-child(3),
+      .compat-table td:nth-child(4) { width: auto; }
+    }
   </style>
 </head>
 <body>
@@ -62,14 +95,15 @@
     <h1>Document Server API</h1>
     <p class="lede">
       ONLYOFFICE-compatible HTTP surface served by go-office.
-      Protocol version <code>{{.Version}}</code>. Paths are relative to this host.
+      Protocol version <code>{{.Version}}</code>. Paths below are relative to this host
+      (same origin as <code>documentServerUrl</code>).
     </p>
 
     <section>
       <h2>Health &amp; info</h2>
       <div class="endpoint">
         <span class="method">GET</span><span class="path"><a href="{{.HealthURL}}">{{.HealthURL}}</a></span>
-        <p>JSON status: <code>{"status":"ok","version":"…"}</code></p>
+        <p>JSON status: <code>{"status":"ok","version":"…","sessions":0,"cacheDirs":0,"cacheBytes":0}</code></p>
       </div>
       <div class="endpoint">
         <span class="method">GET</span><span class="path"><a href="{{.HealthCheckURL}}">{{.HealthCheckURL}}</a></span>
@@ -82,10 +116,11 @@
     </section>
 
     <section>
-      <h2>Editor assets</h2>
+      <h2>Editor assets (Docs API)</h2>
+      <p>Load <code>api.js</code> from your <code>documentServerUrl</code> and pass editor config with <code>document.key</code>, <code>document.url</code>, and <code>editorConfig.callbackUrl</code>. See <a href="https://api.onlyoffice.com/docs/docs-api/get-started/basic-concepts/">ONLYOFFICE basic concepts</a>.</p>
       <div class="endpoint">
         <span class="method">GET</span><span class="path"><a href="{{.APIJSURL}}">{{.APIJSURL}}</a></span>
-        <p><code>api.js</code> — load this from integrator pages to embed the editor.</p>
+        <p><code>api.js</code> — embeds Document/Spreadsheet/Presentation/PDF editors.</p>
       </div>
       <div class="endpoint">
         <span class="method">GET</span><span class="path">{{.WebAppsPrefix}}/…</span>
@@ -94,14 +129,25 @@
     </section>
 
     <section>
-      <h2>Coauthoring</h2>
+      <h2>Coauthoring (real-time editing transport)</h2>
+      <p>
+        The browser editor connects to the document server over <strong>Socket.IO / Engine.IO</strong>
+        (since ONLYOFFICE 7.3). sdkjs builds the URL from the document <code>key</code> and server version.
+      </p>
       <div class="endpoint">
-        <span class="method">GET</span><span class="method post">POST</span><span class="path">{{.CoauthoringPrefix}}/…</span>
-        <p>Socket.IO polling transport for document open, save, and license handshake.</p>
+        <span class="method">GET</span><span class="method post">POST</span>
+        <span class="path">{{.CoauthoringVersioned}}</span>
+        <p>Primary path used by current sdkjs builds: <code>/{version}/doc/{key}/c/?EIO=4&amp;transport=polling</code></p>
+      </div>
+      <div class="endpoint">
+        <span class="method">GET</span><span class="method post">POST</span>
+        <span class="path">{{.CoauthoringUnversioned}}</span>
+        <p>Legacy-compatible path without version prefix (also accepted).</p>
         <ul>
-          <li><code>GET …?transport=polling</code> — session open / long-poll receive</li>
-          <li><code>POST …?transport=polling&amp;sid=…</code> — send auth, saveChanges, etc.</li>
+          <li><code>GET …?transport=polling</code> — open session / long-poll receive (packets <code>0</code>, <code>40</code>, <code>42</code>)</li>
+          <li><code>POST …?transport=polling&amp;sid=…</code> — send <code>auth</code>, <code>saveChanges</code>, <code>isSaveLock</code>, etc.</li>
         </ul>
+        <p><strong>WebSocket upgrade:</strong> <span class="no">not implemented</span> (HTTP 501). Polling transport is used.</p>
       </div>
       <h3>Save flow (single-user)</h3>
       <p>Client sends <code>isSaveLock</code> → <code>saveChanges</code> → server responds <code>unSaveLock</code>, then converts cache and POSTs to the integrator <code>callbackUrl</code> with status <code>2</code> or <code>6</code>.</p>
@@ -119,13 +165,23 @@
       </div>
     </section>
 
+    <section>
+      <h2>Integrator callback (Docs API)</h2>
+      <p>Your app exposes <code>editorConfig.callbackUrl</code>. ONLYOFFICE POSTs JSON when the document should be saved. See <a href="https://api.onlyoffice.com/docs/docs-api/usage-api/callback-handler/">callback handler</a>.</p>
+      <div class="endpoint">
+        <span class="method post">POST</span><span class="path">{your callbackUrl}</span>
+        <p>Request: <code>{"key":"…","status":2,"url":"…"}</code> — Response: <code>{"error":0}</code></p>
+        <p>When <code>OFFICE_JWT_SECRET</code> is set, bodies may be wrapped as <code>{"token":"…"}</code> (JWT_IN_BODY style).</p>
+      </div>
+    </section>
+
     {{if .SamplesOn}}
     <section>
       <h2>Demo integrator API</h2>
       <p>Example routes used by the bundled demo UI. Production integrators implement the same contract on their own paths.</p>
       <div class="endpoint">
         <span class="method">GET</span><span class="path"><a href="{{.DemoConfigURL}}">{{.DemoConfigURL}}</a>?file=…</span>
-        <p>Editor init JSON for <code>@onlyoffice/document-editor-vue</code>.</p>
+        <p>Editor init JSON for <code>DocsAPI.DocEditor</code>.</p>
       </div>
       <div class="endpoint">
         <span class="method">GET</span><span class="path">{{.DemoFilePrefix}}/{path…}</span>
@@ -133,11 +189,314 @@
       </div>
       <div class="endpoint">
         <span class="method post">POST</span><span class="path">{{.DemoCallbackURL}}</span>
-        <p>ONLYOFFICE callback handler. Status <code>2</code>/<code>6</code> triggers <code>Storage.Save</code>.</p>
-        <p>Request: <code>{"key":"…","status":2,"url":"…"}</code> — Response: <code>{"error":0}</code></p>
+        <p>Demo callback handler. Status <code>2</code>/<code>6</code> triggers <code>Storage.Save</code>.</p>
       </div>
     </section>
     {{end}}
+
+    <section id="compatibility">
+      <h2>ONLYOFFICE ↔ go-office compatibility matrix</h2>
+      <p>
+        Side-by-side comparison of the official
+        <a href="https://api.onlyoffice.com/docs/docs-api/">ONLYOFFICE Docs API</a>
+        / Document Server HTTP surface vs go-office <code>{{.Version}}</code>.
+        Paths are relative to <code>documentServerUrl</code> (site root by default).
+      </p>
+      <div class="compat-summary">
+        <div class="yes"><strong>22</strong>Compatible — same contract, verified in E2E</div>
+        <div class="partial"><strong>4</strong>Partial — works with documented limits</div>
+        <div class="no"><strong>6</strong>Not supported — optional / admin APIs</div>
+      </div>
+
+      <h3>1. Document Server routes (browser &amp; sdkjs)</h3>
+      <table class="compat-table">
+        <thead>
+          <tr>
+            <th>API</th>
+            <th>ONLYOFFICE reference</th>
+            <th>ONLYOFFICE</th>
+            <th>go-office</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>GET /web-apps/apps/api/documents/api.js</code></td>
+            <td><a href="https://api.onlyoffice.com/docs/docs-api/get-started/basic-concepts/">Basic concepts</a></td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Primary integrator entry point; same path.</td>
+          </tr>
+          <tr>
+            <td><code>GET /web-apps/…</code>, <code>/sdkjs/…</code>, <code>/fonts/…</code></td>
+            <td>Document Server static assets</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Euro-Office asset tree served unchanged.</td>
+          </tr>
+          <tr>
+            <td><code>GET /document_editor_service_worker.js</code></td>
+            <td>sdkjs service worker</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Served from <code>sdkjs/common/serviceworker/</code>.</td>
+          </tr>
+          <tr>
+            <td><code>GET|POST /{version}/doc/{key}/c/?EIO=4&amp;transport=polling</code></td>
+            <td><a href="https://api.onlyoffice.com/docs/docs-api/get-started/how-it-works/co-editing/">Co-editing</a></td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Primary coauthoring path since 7.3 (Socket.IO / Engine.IO). Golden fixtures + Playwright.</td>
+          </tr>
+          <tr>
+            <td><code>GET|POST /doc/{key}/c/?EIO=4&amp;transport=polling</code></td>
+            <td>Coauthoring (legacy path)</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Accepted without version prefix.</td>
+          </tr>
+          <tr>
+            <td>Coauthoring WebSocket (<code>transport=websocket</code>)</td>
+            <td>Socket.IO upgrade</td>
+            <td class="yes">✓</td><td class="no">✗</td>
+            <td class="notes">HTTP 501; polling transport used instead (browser falls back automatically).</td>
+          </tr>
+          <tr>
+            <td><code>GET /cache/files/{key}/…</code></td>
+            <td>Document cache</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes"><code>Editor.bin</code>, <code>origin.pdf</code>, media, saved output.</td>
+          </tr>
+          <tr>
+            <td><code>GET|POST /downloadfile/{key}</code></td>
+            <td>PDF / original bytes</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Range requests; optional JSON body <code>{"url":"…"}</code>.</td>
+          </tr>
+          <tr>
+            <td><code>GET /healthcheck</code> → <code>true</code></td>
+            <td>Health probes</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Drop-in probe for Docker / k8s.</td>
+          </tr>
+          <tr>
+            <td><code>GET /health</code></td>
+            <td>Health (varies by install)</td>
+            <td class="partial">~</td><td class="yes">✓</td>
+            <td class="notes">Extended JSON: <code>sessions</code>, <code>cacheDirs</code>, <code>cacheBytes</code>.</td>
+          </tr>
+          <tr>
+            <td><code>GET /info/info.json</code></td>
+            <td>Server version info</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes"><code>{"version":"…"}</code> from <code>OFFICE_VERSION</code>.</td>
+          </tr>
+          <tr>
+            <td><code>POST /command</code> (command service)</td>
+            <td><a href="https://api.onlyoffice.com/docs/docs-api/additional-api/command-service/">Command service</a></td>
+            <td class="yes">✓</td><td class="no">✗</td>
+            <td class="notes">info / drop / forcesave commands — not needed for single-user embed.</td>
+          </tr>
+          <tr>
+            <td><code>POST /converter</code></td>
+            <td>Conversion API</td>
+            <td class="yes">✓</td><td class="no">✗</td>
+            <td class="notes">go-office runs x2t internally on open/save, not as HTTP API.</td>
+          </tr>
+          <tr>
+            <td>WOPI endpoints</td>
+            <td><a href="https://api.onlyoffice.com/docs/docs-api/using-wopi/">WOPI</a></td>
+            <td class="yes">✓</td><td class="no">✗</td>
+            <td class="notes">Use Docs API + <code>Storage</code> interface instead.</td>
+          </tr>
+          <tr>
+            <td>Spell checker service</td>
+            <td>Optional plugin service</td>
+            <td class="yes">✓</td><td class="no">✗</td>
+            <td class="notes">Editor loads without spell-check server.</td>
+          </tr>
+          <tr>
+            <td><code>POST /ConvertService.ashx</code></td>
+            <td>Legacy conversion API</td>
+            <td class="yes">✓</td><td class="no">✗</td>
+            <td class="notes">Pre-5.5 path; same as <code>/converter</code>.</td>
+          </tr>
+          <tr>
+            <td><code>POST /coauthoring/CommandService.ashx</code></td>
+            <td>Legacy command service</td>
+            <td class="yes">✓</td><td class="no">✗</td>
+            <td class="notes">Pre-8.2 path; same as <code>/command</code>.</td>
+          </tr>
+          <tr>
+            <td><code>GET /hosting/discovery</code></td>
+            <td>WOPI discovery XML</td>
+            <td class="yes">✓</td><td class="no">✗</td>
+            <td class="notes">WOPI integrators only.</td>
+          </tr>
+          <tr>
+            <td>Callback status 1 / 4 (outbound)</td>
+            <td><a href="https://api.onlyoffice.com/docs/docs-api/usage-api/callback-handler/">Callback handler</a></td>
+            <td class="yes">✓</td><td class="no">✗</td>
+            <td class="notes">go-office only POSTs status 2 / 6 to integrator.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>2. Coauthoring protocol (sdkjs ↔ server)</h3>
+      <table class="compat-table">
+        <thead>
+          <tr>
+            <th>Message / packet</th>
+            <th>ONLYOFFICE reference</th>
+            <th>ONLYOFFICE</th>
+            <th>go-office</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Engine.IO open <code>0{"sid":…}</code></td>
+            <td>Socket.IO handshake</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Unit-tested polling handshake.</td>
+          </tr>
+          <tr>
+            <td>Namespace connect <code>40{"sid":…}</code></td>
+            <td>Socket.IO namespace</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Golden fixture.</td>
+          </tr>
+          <tr>
+            <td><code>license</code> packet (handshake type 3)</td>
+            <td>Editor protocol</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes"><code>buildVersion</code> / <code>buildNumber</code> match assets.</td>
+          </tr>
+          <tr>
+            <td><code>auth</code> + <code>authChanges</code></td>
+            <td>Document open</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes"><code>openCmd</code> triggers x2t or PDF <code>origin.pdf</code>.</td>
+          </tr>
+          <tr>
+            <td><code>documentOpen</code> response</td>
+            <td>Document open</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Returns cache file list for editor.</td>
+          </tr>
+          <tr>
+            <td><code>isSaveLock</code> → <code>saveLock</code></td>
+            <td>Save protocol</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Golden fixture.</td>
+          </tr>
+          <tr>
+            <td><code>saveChanges</code> → <code>unSaveLock</code></td>
+            <td>Save protocol</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">5s debounced flush → reverse x2t → callback.</td>
+          </tr>
+          <tr>
+            <td>Multi-user concurrent editing</td>
+            <td><a href="https://api.onlyoffice.com/docs/docs-api/get-started/how-it-works/co-editing/">Co-editing</a></td>
+            <td class="yes">✓</td><td class="no">✗</td>
+            <td class="notes">Single session per key; Phase 3.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>3. Integrator contract (your app ↔ Document Server)</h3>
+      <table class="compat-table">
+        <thead>
+          <tr>
+            <th>API / field</th>
+            <th>ONLYOFFICE reference</th>
+            <th>ONLYOFFICE</th>
+            <th>go-office</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>DocsAPI.DocEditor(…, config)</code></td>
+            <td><a href="https://api.onlyoffice.com/docs/docs-api/usage-api/config/">Config</a></td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Demo + <code>pkg/config.Build</code> produce standard JSON.</td>
+          </tr>
+          <tr>
+            <td><code>document.key</code>, <code>document.url</code>, <code>document.fileType</code></td>
+            <td>Config / document</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Required for open; same semantics.</td>
+          </tr>
+          <tr>
+            <td><code>editorConfig.callbackUrl</code></td>
+            <td><a href="https://api.onlyoffice.com/docs/docs-api/usage-api/callback-handler/">Callback handler</a></td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Server POSTs status 2/6; integrator responds <code>{"error":0}</code>.</td>
+          </tr>
+          <tr>
+            <td>Callback status codes 1, 2, 4, 6, …</td>
+            <td>Callback handler</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes"><code>pkg/callback</code> mirrors official status constants.</td>
+          </tr>
+          <tr>
+            <td>Callback response <code>{"error":0}</code></td>
+            <td>Callback handler</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Same success/error JSON.</td>
+          </tr>
+          <tr>
+            <td>JWT on editor config (<code>token</code> field)</td>
+            <td><a href="https://api.onlyoffice.com/docs/docs-api/usage-api/config/">Config JWT</a></td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes"><code>OFFICE_JWT_SECRET</code> signs config when set.</td>
+          </tr>
+          <tr>
+            <td>JWT on callback body (<code>{"token":"…"}</code>)</td>
+            <td>JWT_IN_BODY</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Sign outbound + verify inbound when secret set.</td>
+          </tr>
+          <tr>
+            <td><code>document.permissions</code> (edit / download / print)</td>
+            <td>Config permissions</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Passed through in <code>config.Build</code>.</td>
+          </tr>
+          <tr>
+            <td><code>editorConfig.mode</code> (edit / view)</td>
+            <td>Config</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Supported.</td>
+          </tr>
+          <tr>
+            <td><code>editorConfig.coEditing</code> (fast / strict)</td>
+            <td>Co-editing modes</td>
+            <td class="yes">✓</td><td class="partial">~</td>
+            <td class="notes">Config accepted; only one editor session per key.</td>
+          </tr>
+          <tr>
+            <td>Automation API / <code>connector</code></td>
+            <td><a href="https://api.onlyoffice.com/docs/docs-api/usage-api/automation-api/">Automation API</a></td>
+            <td class="yes">✓</td><td class="partial">~</td>
+            <td class="notes">Client-side sdkjs API works; no server-side macro runner.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>4. Verdict — editor embed compatibility</h3>
+      <p>
+        For the standard <strong>open → edit → autosave → callback → persist</strong> flow described in the
+        <a href="https://api.onlyoffice.com/docs/docs-api/get-started/how-it-works/">ONLYOFFICE how-it-works</a>
+        guides, go-office is <strong>API-compatible</strong>: the browser loads the same <code>api.js</code>,
+        connects to the same coauthoring URL shape, reads/writes the same cache paths, and notifies your
+        integrator via the same callback contract. Gaps are limited to optional admin APIs (command service,
+        HTTP converter, WOPI), WebSocket transport, and multi-user co-editing.
+      </p>
+      <p class="notes">
+        Evidence: <code>go test ./...</code> (protocol unit tests + golden WS fixtures);
+        Playwright tier-1 <code>open-formats</code>, <code>content</code>, and <code>save</code> specs against live sdkjs.
+        Full audit (conversion, command, WOPI, callback field gaps, legacy paths):
+        <a href="https://github.com/quantumx-apps/go-office/blob/main/api.md">api.md</a>.
+      </p>
+    </section>
   </main>
 </body>
 </html>

@@ -66,7 +66,10 @@ func TestDemoLandingAndConfig(t *testing.T) {
 		t.Fatalf("landing status=%d body=%q", rec.Code, body[:min(200, len(body))])
 	}
 	if !strings.Contains(body, "/office/demo/view?file=") {
-		t.Fatal("expected viewer links on landing page")
+		t.Fatal("expected relative viewer links on landing page")
+	}
+	if strings.Contains(body, "http://localhost") {
+		t.Fatal("landing page should not use absolute localhost URLs")
 	}
 
 	rec = httptest.NewRecorder()

@@ -282,7 +282,6 @@ func (h *Handler) listSampleFiles() ([]landingFile, error) {
 		return nil, fmt.Errorf("samples path is not a directory: %s", h.opts.SamplesDir)
 	}
 
-	base := strings.TrimSuffix(h.opts.PublicOrigin, "/") + h.office.BasePath()
 	var files []landingFile
 	err = filepath.WalkDir(root, func(full string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -303,9 +302,10 @@ func (h *Handler) listSampleFiles() ([]landingFile, error) {
 		if err != nil {
 			return err
 		}
+		viewPath := office.URLPath(h.office.BasePath(), "demo/view")
 		files = append(files, landingFile{
 			Name: rel,
-			URL:  base + "/demo/view?file=" + url.QueryEscape(rel),
+			URL:  viewPath + "?file=" + url.QueryEscape(rel),
 			Size: formatSize(fi.Size()),
 		})
 		return nil

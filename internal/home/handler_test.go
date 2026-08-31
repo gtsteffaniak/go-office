@@ -31,6 +31,7 @@ func TestHomePage(t *testing.T) {
 		`href="/office/demo/"`,
 		`href="/office/health"`,
 		`href="/docs/api"`,
+		"/doc/{key}/c/",
 		"sample-files",
 	} {
 		if !strings.Contains(body, want) {
@@ -70,6 +71,11 @@ func TestAPIDocsPage(t *testing.T) {
 		`href="/health"`,
 		`href="/api/office/demo/config"`,
 		"saveChanges",
+		"/doc/{key}/c/",
+		"id=\"compatibility\"",
+		"Coauthoring WebSocket",
+		"POST /command",
+		"Verdict",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("missing %q in api docs", want)

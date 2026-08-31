@@ -65,7 +65,7 @@ Official Document Server uses many variables for PostgreSQL, Redis, RabbitMQ, an
 | `JWT_SECRET` | **`OFFICE_JWT_SECRET`** | **Rename required.** Same secret value; must match integrator. |
 | `JWT_ENABLED=true` | *(not used)* | JWT is enabled when `OFFICE_JWT_SECRET` is non-empty. |
 | `JWT_HEADER` | *(not used)* | Standard `Authorization` header; same as typical ONLYOFFICE setups. |
-| `JWT_IN_BODY` | *(not used)* | Callback body JWT parsing not implemented yet (Phase 1). |
+| `JWT_IN_BODY` | **`OFFICE_JWT_SECRET`** | When set, outbound callbacks are signed as `{"token":"…"}` and incoming callback bodies are verified the same way. |
 | `DB_*`, `REDIS_*`, `AMQP_*` | *(none)* | Not used — no Postgres/Redis/RabbitMQ. |
 | `WOPI_*` | *(none)* | WOPI not supported. |
 
@@ -83,7 +83,7 @@ These are **not** read by current builds. Rename in compose, CI, and shell profi
 | Endpoint | ONLYOFFICE Document Server | go-office |
 | -------- | -------------------------- | --------- |
 | Editor `api.js` | `/web-apps/apps/api/documents/api.js` | Same |
-| Coauthoring | `/doc/{key}/c/` or `/{version}/doc/{key}/c/` | Same |
+| Coauthoring | `/{version}/doc/{key}/c/` (primary) or `/doc/{key}/c/` | Same — Engine.IO polling; WebSocket returns 501 |
 | Document cache | `/cache/files/{key}/…` | Same |
 | Health (JSON) | varies | `/health` |
 | Health (compat) | `/healthcheck` → `true` | Same |
@@ -123,10 +123,15 @@ Plan accordingly before migrating production **edit-and-save** workflows:
 | WebSocket coauthoring | Yes | Polling only (501 on WS upgrade) |
 | PostgreSQL / Redis / clustering | Yes | **No** (single process) |
 | WOPI | Yes | **No** |
+| `POST /converter` (conversion API / thumbnails) | Yes | **No** — see [api.md](api.md#filebrowser-office-previews) |
+| Callback status 1 / 4 (editing telemetry) | Yes | **No** — not emitted outbound (see [api.md](api.md#32-callback--integrator-receives-posts-document-server--your-app)) |
+| `POST /coauthoring/CommandService.ashx` | Yes | **No** |
+| `GET /hosting/discovery` (WOPI) | Yes | **No** |
+| `/spellchecker/` | Yes | **No** |
 | Spell checker service | Optional | **No** |
 | Admin panel | Port 9000 | **No** |
 
-Opening and viewing documents in the editor works; **persisting edits back to storage** is not complete yet. Validate your use case against [README.md](README.md) roadmap before cutover.
+Opening and viewing documents in the editor works; **saving edits back to storage** is supported via coauthoring flush, reverse x2t, and the integrator callback. Validate your use case against [README.md](README.md) roadmap before cutover.
 
 ## FileBrowser
 
@@ -134,6 +139,7 @@ FileBrowser today expects an external `onlyOfficeUrl` and signs config with `int
 
 - Set `onlyOfficeUrl` to this server’s public URL (e.g. `http://files.example.com:9052/`).
 - Use the **same** secret as `OFFICE_JWT_SECRET`.
+- **Office grid previews** (`POST {onlyOfficeUrl}/converter` for JPG thumbnails) are **not supported** by go-office today. See [api.md](api.md#filebrowser-office-previews) for workarounds.
 - Embedded mode (`//go:build office`) is planned; until then, run `office-server` as a sidecar or standalone container.
 
 ## Troubleshooting

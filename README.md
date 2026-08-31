@@ -207,12 +207,13 @@ Set the Vue `documentServerUrl` to `srv.DocumentServerURL(publicOrigin)`.
 | `internal/home/` | Site home page (`/`) |
 | `cmd/go-office/` | Standalone `office-server` binary |
 | `migration.md` | Replacing `onlyoffice/documentserver` |
+| `api.md` | ONLYOFFICE API compatibility matrix (incl. FileBrowser previews) |
 
 ## Roadmap
 
 - **Phase 0.5:** ✅ Document Server Docker image, root URLs, `OFFICE_*` env, migration guide
 - **Phase 1:** single-user edit + save, reverse x2t, `Storage` save path — **done**
-- **Phase 2:** packaging, cache hardening, WS golden fixtures
+- **Phase 2:** cache lifecycle, callback JWT, WS golden fixtures, content-aware Playwright (formula bar / file round-trip) — **done**
 - **Phase 3:** multi-user co-editing
 
 ## License and AGPL compliance

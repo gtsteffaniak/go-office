@@ -11,6 +11,7 @@ import (
 
 func testHandler(t *testing.T) *ws.Handler {
 	t.Helper()
+	ws.ResetSessionsForTest()
 	h := ws.New("9.3.4-hotfix.1", nil)
 	h.PollHold = 0
 	return h

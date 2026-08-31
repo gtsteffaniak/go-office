@@ -108,10 +108,7 @@ func (h *Handler) ServePath(w http.ResponseWriter, r *http.Request, path string)
 }
 
 func (h *Handler) pollHoldDuration() time.Duration {
-	if h.PollHold > 0 {
-		return h.PollHold
-	}
-	return defaultPollHold
+	return h.PollHold
 }
 
 func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey string) {

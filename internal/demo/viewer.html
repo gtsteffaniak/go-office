@@ -55,6 +55,23 @@
         .then(function (config) {
           document.getElementById("doc-title").textContent = config.document.title;
           setStatus("Opening " + config.document.title + "…");
+          var baseEvents = config.events || {};
+          config.events = {
+            onDocumentReady: function () {
+              document.body.setAttribute("data-document-ready", "true");
+              if (typeof baseEvents.onDocumentReady === "function") {
+                baseEvents.onDocumentReady();
+              }
+            },
+            onRequestSaveResult: function (event) {
+              if (event && event.data) {
+                document.body.setAttribute("data-save-done", String(Date.now()));
+              }
+              if (typeof baseEvents.onRequestSaveResult === "function") {
+                baseEvents.onRequestSaveResult(event);
+              }
+            },
+          };
           window.docEditor = new DocsAPI.DocEditor("editor", config);
           setStatus("Editor ready");
         })

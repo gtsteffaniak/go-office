@@ -1,5 +1,5 @@
 import { test, expect } from "../test-setup";
-import { waitForEditorShell } from "../editor";
+import { waitForEditorShell, waitForDocumentReady } from "../editor";
 import {
   REPO_ROOT,
   sampleExists,
@@ -11,7 +11,6 @@ const maxTier = Number(process.env.PLAYWRIGHT_SAMPLE_TIER ?? "3") as 1 | 2 | 3;
 
 const bundledTest = process.env.OFFICE_PLAYWRIGHT_TEST === "true";
 const STATUS_OK_TIMEOUT = bundledTest ? 15_000 : 8_000;
-const SETTLE_MS = bundledTest ? 1_000 : 500;
 
 test.describe.configure({ mode: "parallel" });
 
@@ -32,8 +31,7 @@ async function assertEditorOpens(page: import("@playwright/test").Page, sample: 
   });
 
   await waitForEditorShell(page, sample.editor);
-
-  await page.waitForTimeout(SETTLE_MS);
+  await waitForDocumentReady(page);
 
   expect(font404s, `font 404s: ${font404s.join(", ")}`).toHaveLength(0);
   await expect(page.locator("#status")).not.toContainText(/fonts are not loaded/i);

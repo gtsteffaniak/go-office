@@ -24,11 +24,12 @@ func (s *Server) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload, err := callback.ReadBody(r.Body)
+	body, err := callback.ReadBodyWithSecret(r.Body, s.opts.JWTSecret)
 	if err != nil {
 		callback.WriteError(w, 1)
 		return
 	}
+	payload := body
 
 	if s.opts.Debug && s.opts.Logger != nil {
 		s.opts.Logger.Debug("office callback", "key", payload.Key, "status", payload.Status, "url", payload.URL)
@@ -142,14 +143,23 @@ func (s *Server) NotifyCallback(ctx context.Context, docKey, callbackURL, downlo
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, callbackURL, bytes.NewReader(body))
+	postBody := body
+	if len(s.opts.JWTSecret) > 0 {
+		token, err := callback.SignBody(s.opts.JWTSecret, body)
+		if err != nil {
+			return err
+		}
+		wrapped, err := json.Marshal(map[string]string{"token": token})
+		if err != nil {
+			return err
+		}
+		postBody = wrapped
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, callbackURL, bytes.NewReader(postBody))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if len(s.opts.JWTSecret) > 0 {
-		// Integrators often accept unsigned callbacks in dev; signing is Phase 1 follow-up.
-	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err

@@ -15,6 +15,7 @@ export default defineConfig({
   retries: ciTest ? 2 : 1,
   workers: Number(process.env.PLAYWRIGHT_WORKERS ?? 10),
   reporter: "line",
+  grep: process.env.PLAYWRIGHT_GREP ? new RegExp(process.env.PLAYWRIGHT_GREP) : undefined,
   use: {
     baseURL,
     actionTimeout: ciTest ? 30_000 : 15_000,

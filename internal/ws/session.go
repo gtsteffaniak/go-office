@@ -57,6 +57,11 @@ func getSession(sid, docKey string, build BuildInfo, basePath string) *session {
 	return actual.(*session)
 }
 
+// ResetSessionsForTest clears in-memory coauthoring sessions (tests only).
+func ResetSessionsForTest() {
+	sessions = sync.Map{}
+}
+
 func (s *session) enqueue(packets ...string) {
 	s.mu.Lock()
 	s.outbox = append(s.outbox, packets...)

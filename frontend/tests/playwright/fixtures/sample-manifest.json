@@ -1,0 +1,98 @@
+[
+  {
+    "path": "sample-files/sample.docx",
+    "editor": "word",
+    "tier": 1,
+    "text": "Demonstration of DOCX"
+  },
+  {
+    "path": "sample-files/sample.doc",
+    "editor": "word",
+    "tier": 1,
+    "text": "Lorem ipsum"
+  },
+  {
+    "path": "sample-files/sample.xlsx",
+    "editor": "cell",
+    "tier": 1,
+    "cell": {
+      "ref": "A1",
+      "value": ""
+    }
+  },
+  {
+    "path": "sample-files/sample.xls",
+    "editor": "cell",
+    "tier": 1
+  },
+  {
+    "path": "sample-files/sample.pptx",
+    "editor": "slide",
+    "tier": 1
+  },
+  {
+    "path": "sample-files/sample.ppt",
+    "editor": "slide",
+    "tier": 1
+  },
+  {
+    "path": "sample-files/sample.odt",
+    "editor": "word",
+    "tier": 2
+  },
+  {
+    "path": "sample-files/sample.ods",
+    "editor": "cell",
+    "tier": 2
+  },
+  {
+    "path": "sample-files/sample.odp",
+    "editor": "slide",
+    "tier": 2
+  },
+  {
+    "path": "sample-files/sample.rtf",
+    "editor": "word",
+    "tier": 2
+  },
+  {
+    "path": "sample-files/sample.txt",
+    "editor": "word",
+    "tier": 2,
+    "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit."
+  },
+  {
+    "path": "sample-files/sample.csv",
+    "editor": "cell",
+    "tier": 2,
+    "cell": {
+      "ref": "B2",
+      "value": "DD37Cf93aecA6Dc"
+    }
+  },
+  {
+    "path": "sample-files/sample.dot",
+    "editor": "word",
+    "tier": 3
+  },
+  {
+    "path": "sample-files/sample.dotx",
+    "editor": "word",
+    "tier": 3
+  },
+  {
+    "path": "sample-files/sample.xlsm",
+    "editor": "cell",
+    "tier": 3
+  },
+  {
+    "path": "sample-files/sample.pptm",
+    "editor": "slide",
+    "tier": 3
+  },
+  {
+    "path": "sample-files/sample.pdf",
+    "editor": "pdf",
+    "tier": 3
+  }
+]

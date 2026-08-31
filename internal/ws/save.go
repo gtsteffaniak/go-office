@@ -38,6 +38,22 @@ func newSaveScheduler(cacheDir string, saver DocumentSaver, logger *slog.Logger)
 	}
 }
 
+func (s *saveScheduler) stop() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, t := range s.timers {
+		t.Stop()
+	}
+	s.timers = make(map[string]*time.Timer)
+}
+
+// Stop cancels pending save timers.
+func (h *Handler) Stop() {
+	if h != nil && h.Scheduler != nil {
+		h.Scheduler.stop()
+	}
+}
+
 func (s *saveScheduler) schedule(docKey, origin string, force bool) {
 	if s == nil || s.saver == nil {
 		return

@@ -24,10 +24,13 @@ type Server struct {
 	storage Storage
 	opts    Options
 
-	sessions *session.Manager
-	mux      *http.ServeMux
+	sessions     *session.Manager
+	mux          *http.ServeMux
+	coauthoring  *ws.Handler
+	cacheJanitor *cacheJanitor
 
 	finishOnce sync.Once
+	closeOnce  sync.Once
 }
 
 // New creates a document server. AssetDir may be empty for protocol-only testing.
@@ -41,6 +44,15 @@ func New(store Storage, opts Options) (*Server, error) {
 		opts:     opts,
 		sessions: session.NewManager(),
 		mux:      http.NewServeMux(),
+	}
+	if opts.AssetDir != "" {
+		s.cacheJanitor = newCacheJanitor(
+			s.cacheDir(),
+			opts.CacheTTL,
+			opts.CacheMaxEntries,
+			func(docKey string) { s.sessions.Delete(docKey) },
+		)
+		s.cacheJanitor.start()
 	}
 	s.buildRoutes()
 	return s, nil
@@ -108,9 +120,18 @@ func (s *Server) BuildEditorConfig(ctx context.Context, req config.EditorRequest
 	return config.Build(req, token), nil
 }
 
-// Close releases in-memory session state.
+// Close releases in-memory session state and stops background workers.
 func (s *Server) Close() error {
-	return nil
+	var err error
+	s.closeOnce.Do(func() {
+		if s.coauthoring != nil {
+			s.coauthoring.Stop()
+		}
+		if s.cacheJanitor != nil {
+			s.cacheJanitor.stop()
+		}
+	})
+	return err
 }
 
 func (s *Server) buildRoutes() {
@@ -184,6 +205,7 @@ func (s *Server) registerCoauthoringFallback() {
 		CacheDir: s.cacheDir(),
 		Saver:    s,
 	})
+	s.coauthoring = co
 	docPattern := joinURLPath(prefix, "doc") + "/"
 	s.mux.Handle(docPattern, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rel := stripMountPath(prefix, r.URL.Path)
@@ -214,7 +236,11 @@ func (s *Server) cacheDir() string {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte(`{"status":"ok","version":` + strconvQuote(s.opts.ProtocolVersion) + `}`))
+	cacheDir := s.cacheDir()
+	_, _ = w.Write([]byte(`{"status":"ok","version":` + strconvQuote(s.opts.ProtocolVersion) +
+		`,"sessions":` + fmt.Sprintf("%d", s.sessions.Len()) +
+		`,"cacheDirs":` + fmt.Sprintf("%d", cacheDirCount(cacheDir)) +
+		`,"cacheBytes":` + fmt.Sprintf("%d", cacheDirSize(cacheDir)) + `}`))
 }
 
 func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {

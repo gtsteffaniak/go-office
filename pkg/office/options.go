@@ -3,6 +3,7 @@ package office
 import (
 	"log/slog"
 	"strings"
+	"time"
 )
 
 // DefaultBasePath is the default URL prefix for the embedded document server.
@@ -31,8 +32,14 @@ type Options struct {
 	// ConvertLimit caps concurrent x2t subprocess conversions (default 1).
 	ConvertLimit int
 
-	// Debug enables verbose request and protocol logging.
+	// Debug enables verbose logging.
 	Debug bool
+
+	// CacheTTL evicts document cache dirs not touched within this duration (default 24h).
+	CacheTTL time.Duration
+
+	// CacheMaxEntries caps the number of document cache subdirectories (default 256).
+	CacheMaxEntries int
 
 	Logger *slog.Logger
 }

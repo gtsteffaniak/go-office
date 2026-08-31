@@ -30,7 +30,7 @@ DOCKER_BUILD = timeout $(DOCKER_BUILD_TIMEOUT) docker build
 
 .PHONY: help setup build serve doctor fonts test test-integration clean \
         check-linux check-go mod-download fetch-assets compile check-assets check-samples test-x2t \
-        playwright-base playwright-npm test-playwright test-playwright-ui check-sample-matrix \
+        playwright-base playwright-npm test-playwright test-playwright-ui check-sample-matrix extract-sample-manifest \
         build-docker build-docker-image build-docker-builder run-docker stop-docker ensure-assets
 
 help:
@@ -46,6 +46,7 @@ help:
 	@echo ""
 	@echo "  make test-integration   Integration tests (runs build first)"
 	@echo "  make check-sample-matrix  Verify all Playwright sample files exist (git-tracked under sample-files/)"
+	@echo "  make extract-sample-manifest  Regenerate Playwright content expectations from sample-files/"
 	@echo "  make test-playwright    E2E Playwright tests in Docker (runs build first)"
 	@echo "  make test-playwright-ui Local Playwright UI (server in Docker, tests on host)"
 	@echo "  make build-docker       Build Docker image and run server (sample-files/)"
@@ -108,6 +109,10 @@ check-samples:
 check-sample-matrix: check-samples
 	@chmod +x scripts/check-sample-matrix.sh
 	@scripts/check-sample-matrix.sh "$(SAMPLES_DIR)"
+
+extract-sample-manifest:
+	@echo "==> Playwright sample manifest"
+	$(GO) run ./scripts/extract-sample-expectations.go
 
 fetch-assets: check-linux
 	@echo "==> Euro-Office assets → $(OFFICE_ASSETS)/"

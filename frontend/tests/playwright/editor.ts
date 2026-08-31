@@ -74,7 +74,8 @@ export function getEditorFrame(page: Page, editor: SampleFile["editor"]): FrameL
 }
 
 async function isLoadMaskBlocking(frame: FrameLocator): Promise<boolean> {
-  return frame.locator("body").evaluate((_, selectors: string[]) => {
+  try {
+    return await frame.locator("body").evaluate((_, selectors: string[]) => {
     const isMaskNode = (node: Element | null): boolean => {
       if (!node) {
         return false;
@@ -111,6 +112,9 @@ async function isLoadMaskBlocking(frame: FrameLocator): Promise<boolean> {
     }
     return false;
   }, LOAD_MASK_SELECTORS);
+  } catch {
+    return false;
+  }
 }
 
 async function isEditorShellReady(
@@ -522,8 +526,8 @@ async function replaceDocumentTextViaSdk(
   return frame.locator("body").evaluate(
     ({ from: search, to: replace }) => {
       const w = window as {
-        Asc?: { editor?: AscEditor };
-        editor?: AscEditor;
+        Asc?: { editor?: AscEditor & { WordControl?: { m_oLogicDocument?: LogicDocument } } };
+        editor?: AscEditor & { WordControl?: { m_oLogicDocument?: LogicDocument } };
         AscCommon?: {
           CSearchSettings?: new () => {
             SetText?: (text: string) => void;
@@ -531,28 +535,40 @@ async function replaceDocumentTextViaSdk(
           };
         };
       };
+      type LogicDocument = {
+        Search: (props: unknown) => void;
+        SearchEngine?: { CurId?: number };
+      };
+
       const api = w.Asc?.editor ?? w.editor;
-      if (!api?.asc_replaceText) {
+      const doc = api?.WordControl?.m_oLogicDocument;
+      if (!api?.asc_replaceText || !doc || !w.AscCommon?.CSearchSettings) {
         return false;
       }
-      try {
-        let props: { findWhat?: string; GetText?: () => string; SetText?: (text: string) => void };
-        if (w.AscCommon?.CSearchSettings) {
-          props = new w.AscCommon.CSearchSettings();
-          if (typeof props.SetText === "function") {
-            props.SetText(search);
-          } else if (typeof props.put_Text === "function") {
-            props.put_Text(search);
-          }
-        } else {
-          props = {
-            findWhat: search,
-            GetText() {
-              return this.findWhat;
-            },
-          };
+
+      const makeProps = (text: string) => {
+        const props = new w.AscCommon.CSearchSettings();
+        if (typeof props.SetText === "function") {
+          props.SetText(text);
+        } else if (typeof props.put_Text === "function") {
+          props.put_Text(text);
         }
-        return api.asc_replaceText(props, replace, false) !== false;
+        return props;
+      };
+
+      const hasMatch = (text: string): boolean => {
+        doc.Search(makeProps(text));
+        const curId = doc.SearchEngine?.CurId;
+        return typeof curId === "number" && curId !== -1;
+      };
+
+      try {
+        const replaced = (): boolean => hasMatch(replace) || !hasMatch(search);
+        if (!hasMatch(search)) {
+          return replaced();
+        }
+        api.asc_replaceText(makeProps(search), replace, true);
+        return replaced();
       } catch {
         return false;
       }
@@ -561,35 +577,43 @@ async function replaceDocumentTextViaSdk(
   );
 }
 
-async function replaceDocumentTextViaSearchBar(
-  page: Page,
+async function replaceDocumentTextViaSearchUI(
   frame: FrameLocator,
   from: string,
   to: string,
 ): Promise<boolean> {
-  await frame.locator("#search-bar-close").click({ force: true }).catch(() => undefined);
-  await frame.locator("body").press("Control+f");
-  const searchInput = frame.locator("#search-bar-text").first();
-  if ((await searchInput.count()) === 0) {
+  try {
+    await frame.locator("body").press("Control+f");
+    const searchInput = frame.locator("#search-bar-text").first();
+    await searchInput.waitFor({ state: "visible", timeout: 5_000 });
+    await searchInput.fill(from);
+    await searchInput.press("Enter");
+    await frame.locator("body").press("Escape");
+
+    const openPanel = frame.locator("#search-bar-open-panel").first();
+    if (await openPanel.isVisible()) {
+      await openPanel.click();
+      const replaceInput = frame
+        .locator("#search-adv-replace-input, #search-adv-replace-text, input[placeholder*='Replace' i]")
+        .first();
+      if ((await replaceInput.count()) > 0) {
+        await replaceInput.fill(to);
+        const replaceAll = frame.locator("#search-adv-replace-all").first();
+        if (await replaceAll.isVisible()) {
+          await replaceAll.click();
+        } else {
+          await frame.locator("#search-adv-replace").first().click();
+        }
+      }
+    } else {
+      await frame.locator("body").pressSequentially(to, { delay: 15 });
+    }
+
+    await frame.locator("#search-bar-close, #search-adv-close").first().click({ timeout: 2_000 }).catch(() => {});
+    return replaceDocumentTextViaSdk(frame, from, to);
+  } catch {
     return false;
   }
-  await expect(searchInput).toBeVisible({ timeout: 5_000 });
-  await searchInput.fill(from);
-  await searchInput.press("Enter");
-  await page.waitForTimeout(300);
-
-  const viaParent = await page.evaluate((replace: string) => {
-    const ed = (window as { docEditor?: { grabFocus?: () => void; insertPlainText?: (t: string) => void } })
-      .docEditor;
-    if (!ed?.insertPlainText) {
-      return false;
-    }
-    ed.grabFocus?.();
-    ed.insertPlainText(replace);
-    return true;
-  }, to);
-  await frame.locator("#search-bar-close").click({ force: true }).catch(() => undefined);
-  return viaParent;
 }
 
 /** Replace existing document text (word/slide). Prefer this over appending unique markers for save tests. */
@@ -605,12 +629,16 @@ export async function replaceDocumentText(
   await expect
     .poll(
       async () => {
-        if (await replaceDocumentTextViaSdk(frame, from, to)) {
+        const viaSdk = await replaceDocumentTextViaSdk(frame, from, to);
+        if (viaSdk) {
           return true;
         }
-        return replaceDocumentTextViaSearchBar(page, frame, from, to);
+        return replaceDocumentTextViaSearchUI(frame, from, to);
       },
-      { timeout: CONTENT_FIND_TIMEOUT, intervals: [500, 1000, 2000] },
+      {
+        timeout: CONTENT_FIND_TIMEOUT,
+        intervals: [500, 1000, 2000],
+      },
     )
     .toBe(true);
 
@@ -767,12 +795,11 @@ export async function waitForSaveDone(
           const res = await options.request.get(
             `/api/office/demo/file/${encodeURIComponent(options.filePath)}`,
           );
-          if (res.ok()) {
-            const body = await res.body();
-            if (officeFileContains(body, options.marker)) {
-              return true;
-            }
+          if (!res.ok()) {
+            return false;
           }
+          const body = await res.body();
+          return officeFileContains(body, options.marker);
         }
         const attr = await page.locator("body").getAttribute("data-save-done");
         return attr !== null && attr !== "";

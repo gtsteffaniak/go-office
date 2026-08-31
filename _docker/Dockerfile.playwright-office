@@ -35,7 +35,6 @@ ENV OFFICE_CONVERT_LIMIT=6
 ENV OFFICE_SAVE_DELAY=500ms
 ENV PLAYWRIGHT_BASE_URL=http://127.0.0.1:8080
 ENV PLAYWRIGHT_STRICT=1
-ENV PLAYWRIGHT_SAMPLE_TIER=3
 
 RUN timeout 10m sh -c 'cd /app && ./go-office \
       -assets /app/assets \

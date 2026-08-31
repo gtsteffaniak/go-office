@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -20,13 +21,15 @@ type Options struct {
 
 // Converter runs Euro-Office x2t to produce Editor.bin from office files.
 type Converter struct {
-	binDir       string
-	fontDir      string
-	saveFontDir  string
-	themeDir     string
-	allFonts     string
-	saveAllFonts string
-	limit        chan struct{}
+	assetDir      string
+	binDir        string
+	fontDir       string
+	saveFontDir   string
+	themeDir      string
+	webAllFonts   string // sdkjs bundle for browser only
+	seedAllFonts  []byte // converter/bin/AllFonts.js frozen at startup
+	fontSelection []byte // converter/bin/font_selection.bin frozen at startup
+	limit         chan struct{}
 }
 
 // New creates a converter. Returns an error when x2t is missing.
@@ -53,14 +56,24 @@ func New(opts Options) (*Converter, error) {
 	if st, err := os.Stat(fontDir); err != nil || !st.IsDir() {
 		fontDir = filepath.Join(opts.AssetDir, "fonts")
 	}
+	fontSelPath := filepath.Join(binDir, "font_selection.bin")
+	rawAllFonts, err := os.ReadFile(filepath.Join(binDir, "AllFonts.js"))
+	if err != nil {
+		return nil, fmt.Errorf("convert: read AllFonts.js: %w", err)
+	}
+	ensureStaleFontPrefixAlias(rawAllFonts, opts.AssetDir)
+	seedAllFonts := rewriteAllFontsPaths(rawAllFonts, opts.AssetDir)
+	fontSel, _ := os.ReadFile(fontSelPath)
 	return &Converter{
-		binDir:       binDir,
-		fontDir:      fontDir,
-		saveFontDir:  binDir,
-		themeDir:     filepath.Join(opts.AssetDir, "sdkjs", "slide", "themes"),
-		allFonts:     filepath.Join(opts.AssetDir, "sdkjs", "common", "AllFonts.js"),
-		saveAllFonts: filepath.Join(binDir, "AllFonts.js"),
-		limit:        make(chan struct{}, limit),
+		assetDir:      opts.AssetDir,
+		binDir:        binDir,
+		fontDir:       fontDir,
+		saveFontDir:   binDir,
+		themeDir:      filepath.Join(opts.AssetDir, "sdkjs", "slide", "themes"),
+		webAllFonts:   filepath.Join(opts.AssetDir, "sdkjs", "common", "AllFonts.js"),
+		seedAllFonts:  seedAllFonts,
+		fontSelection: fontSel,
+		limit:         make(chan struct{}, limit),
 	}, nil
 }
 
@@ -102,7 +115,7 @@ func (c *Converter) ToEditorBin(ctx context.Context, sourcePath, outDir string) 
 		}
 	}
 	if editorBinReusable(outDir, srcHash) {
-		return nil
+		return ensureDocumentFonts(c, outDir)
 	}
 	_ = os.Remove(outFile)
 	_ = os.Remove(sourceHashPath(outDir))
@@ -121,7 +134,18 @@ func (c *Converter) ToEditorBin(ctx context.Context, sourcePath, outDir string) 
 	taskPath := taskFile.Name()
 	defer os.Remove(taskPath)
 
-	xml := buildTaskXML(convertPath, outFile, c.fontDir, c.themeDir, filepath.Ext(sourcePath))
+	runDir, err := c.prepareX2TRunDir("")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(runDir)
+
+	allFontsPath := filepath.Join(runDir, "AllFonts.js")
+	workDir := filepath.Join(runDir, "work")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		return err
+	}
+	xml := buildTaskXML(convertPath, outFile, c.fontDir, c.themeDir, filepath.Ext(sourcePath), allFontsPath, workDir)
 	if _, err := taskFile.WriteString(xml); err != nil {
 		taskFile.Close()
 		return err
@@ -130,12 +154,18 @@ func (c *Converter) ToEditorBin(ctx context.Context, sourcePath, outDir string) 
 		return err
 	}
 
-	out, err := c.runX2t(ctx, taskPath)
+	out, err := c.runX2t(ctx, taskPath, runDir)
 	if err != nil {
 		return fmt.Errorf("convert: x2t: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	if st, err := os.Stat(outFile); err != nil || st.Size() == 0 {
 		return fmt.Errorf("convert: x2t produced no output")
+	}
+	if err := snapshotFontArtifacts(runDir, outDir); err != nil {
+		return err
+	}
+	if err := ensureDocumentFonts(c, outDir); err != nil {
+		return err
 	}
 	if err := writeSourceHash(outDir, srcHash); err != nil {
 		return err
@@ -191,7 +221,7 @@ func (c *Converter) SaveChanges(ctx context.Context, cacheDir, destPath, targetE
 			xlsxSize = st.Size()
 		}
 		slog.Debug("xlsx after apply_changes", "path", xlsxPath, "bytes", xlsxSize)
-		if err := c.convertOffice(ctx, xlsxPath, destPath, "xlsx", ext); err != nil {
+		if err := c.convertOffice(ctx, xlsxPath, destPath, "xlsx", ext, cacheDir); err != nil {
 			return err
 		}
 		stripped, err := rewriteNormalizedCSV(destPath)
@@ -225,15 +255,12 @@ func (c *Converter) fromEditor(ctx context.Context, editorBin, destPath, targetE
 		return ctx.Err()
 	}
 
-	var tempDir string
-	if fromChanges {
-		var err error
-		tempDir, err = os.MkdirTemp(filepath.Dir(editorBin), "go-office-x2t-tmp-*")
-		if err != nil {
-			return err
-		}
-		defer os.RemoveAll(tempDir)
+	cacheDir := filepath.Dir(editorBin)
+	runDir, err := c.prepareX2TRunDir(cacheDir)
+	if err != nil {
+		return err
 	}
+	defer os.RemoveAll(runDir)
 
 	taskFile, err := os.CreateTemp("", "go-office-x2t-save-*.xml")
 	if err != nil {
@@ -243,7 +270,13 @@ func (c *Converter) fromEditor(ctx context.Context, editorBin, destPath, targetE
 	defer os.Remove(taskPath)
 
 	ext := strings.TrimPrefix(strings.ToLower(targetExt), ".")
-	xml := buildReverseTaskXML(editorBin, destPath, c.saveFontDir, c.themeDir, c.saveAllFonts, ext, fromChanges, tempDir)
+	allFontsPath := filepath.Join(runDir, "AllFonts.js")
+	workDir := filepath.Join(runDir, "work")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		return err
+	}
+	c.logFontSources("reverse", cacheDir, allFontsPath)
+	xml := buildReverseTaskXML(editorBin, destPath, c.fontDir, c.themeDir, allFontsPath, ext, fromChanges, workDir)
 	if _, err := taskFile.WriteString(xml); err != nil {
 		taskFile.Close()
 		return err
@@ -252,17 +285,176 @@ func (c *Converter) fromEditor(ctx context.Context, editorBin, destPath, targetE
 		return err
 	}
 
-	out, err := c.runX2t(ctx, taskPath)
+	out, err := c.runX2t(ctx, taskPath, runDir)
 	if err != nil {
 		return fmt.Errorf("convert: reverse x2t: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	if st, err := os.Stat(destPath); err != nil || st.Size() == 0 {
 		return fmt.Errorf("convert: reverse x2t produced no output")
 	}
+	if err := snapshotFontArtifacts(runDir, cacheDir); err != nil {
+		return err
+	}
 	return nil
 }
 
-func (c *Converter) convertOffice(ctx context.Context, srcPath, destPath, fromExt, toExt string) error {
+// prepareX2TRunDir creates an isolated cwd for DoctRenderer so concurrent x2t
+// processes never read or write shared AllFonts.js under converter/bin.
+// cacheDir is the per-document cache (assets/cache/<key>/); when empty, fonts
+// are seeded from the converter/bin/AllFonts.js snapshot frozen at startup.
+func (c *Converter) prepareX2TRunDir(cacheDir string) (string, error) {
+	runRoot := filepath.Join(c.binDir, ".run")
+	if err := os.MkdirAll(runRoot, 0o755); err != nil {
+		return "", err
+	}
+	runDir, err := os.MkdirTemp(runRoot, "x2t-*")
+	if err != nil {
+		return "", err
+	}
+	if _, err := c.stageReverseFonts(runDir, cacheDir); err != nil {
+		os.RemoveAll(runDir)
+		return "", err
+	}
+	if err := writeRunDoctRendererConfig(runDir, c.assetDir); err != nil {
+		os.RemoveAll(runDir)
+		return "", err
+	}
+	// DoctRenderer resolves paths from the x2t binary location (/proc/self/exe).
+	// Symlinks still resolve to converter/bin, so copy the small x2t stub (~64KiB).
+	if err := copyExecutable(filepath.Join(c.binDir, "x2t"), filepath.Join(runDir, "x2t")); err != nil {
+		os.RemoveAll(runDir)
+		return "", err
+	}
+	return runDir, nil
+}
+
+func copyExecutable(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+// stageReverseFonts copies x2t font metadata into an isolated work dir so concurrent
+// reverse conversions do not race on shared files under converter/bin.
+func (c *Converter) stageReverseFonts(workDir, cacheDir string) (string, error) {
+	allFontsPath := filepath.Join(workDir, "AllFonts.js")
+	allFontsData := c.seedAllFonts
+	if cacheDir != "" {
+		if raw, err := os.ReadFile(filepath.Join(cacheDir, "AllFonts.js")); err == nil && len(raw) > 0 {
+			allFontsData = raw
+		}
+	}
+	if len(allFontsData) == 0 {
+		return "", fmt.Errorf("convert: no AllFonts.js seed")
+	}
+	if err := os.WriteFile(allFontsPath, allFontsData, 0o644); err != nil {
+		return "", err
+	}
+	selData := c.fontSelection
+	if cacheDir != "" {
+		if raw, err := os.ReadFile(filepath.Join(cacheDir, "font_selection.bin")); err == nil && len(raw) > 0 {
+			selData = raw
+		}
+	}
+	if len(selData) > 0 {
+		if err := os.WriteFile(filepath.Join(workDir, "font_selection.bin"), selData, 0o644); err != nil {
+			return "", err
+		}
+	}
+	return allFontsPath, nil
+}
+
+func ensureDocumentFonts(c *Converter, cacheDir string) error {
+	allFontsPath := filepath.Join(cacheDir, "AllFonts.js")
+	if st, err := os.Stat(allFontsPath); err != nil || st.Size() == 0 {
+		if len(c.seedAllFonts) == 0 {
+			return fmt.Errorf("convert: no AllFonts.js seed")
+		}
+		if err := os.WriteFile(allFontsPath, c.seedAllFonts, 0o644); err != nil {
+			return err
+		}
+	}
+	selPath := filepath.Join(cacheDir, "font_selection.bin")
+	if st, err := os.Stat(selPath); err == nil && st.Size() > 0 {
+		return nil
+	}
+	selRaw, err := c.readBinFontSelection()
+	if err != nil || len(selRaw) == 0 {
+		return nil
+	}
+	return os.WriteFile(selPath, selRaw, 0o644)
+}
+
+func (c *Converter) logFontSources(kind, cacheDir, runAllFonts string) {
+	if cacheDir == "" {
+		return
+	}
+	src := "seed"
+	if cacheDir != "" {
+		if st, err := os.Stat(filepath.Join(cacheDir, "AllFonts.js")); err == nil && st.Size() > 0 {
+			src = "cache"
+		}
+	}
+	slog.Debug("x2t font isolation",
+		"kind", kind,
+		"cache", cacheDir,
+		"allFontsSource", src,
+		"runAllFonts", runAllFonts,
+	)
+}
+
+func (c *Converter) readBinFontSelection() ([]byte, error) {
+	if len(c.fontSelection) == 0 {
+		return nil, os.ErrNotExist
+	}
+	out := make([]byte, len(c.fontSelection))
+	copy(out, c.fontSelection)
+	return out, nil
+}
+
+func snapshotFontArtifacts(fromDir, cacheDir string) error {
+	for _, name := range []string{"AllFonts.js", "font_selection.bin"} {
+		src := filepath.Join(fromDir, name)
+		st, err := os.Stat(src)
+		if err != nil || st.Size() == 0 {
+			continue
+		}
+		if err := copyFile(src, filepath.Join(cacheDir, name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+func (c *Converter) convertOffice(ctx context.Context, srcPath, destPath, fromExt, toExt, cacheDir string) error {
 	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
 		return err
 	}
@@ -273,11 +465,11 @@ func (c *Converter) convertOffice(ctx context.Context, srcPath, destPath, fromEx
 		return ctx.Err()
 	}
 
-	tempDir, err := os.MkdirTemp("", "go-office-x2t-fmt-*")
+	runDir, err := c.prepareX2TRunDir(cacheDir)
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(tempDir)
+	defer os.RemoveAll(runDir)
 
 	taskFile, err := os.CreateTemp("", "go-office-x2t-fmt-*.xml")
 	if err != nil {
@@ -286,7 +478,13 @@ func (c *Converter) convertOffice(ctx context.Context, srcPath, destPath, fromEx
 	taskPath := taskFile.Name()
 	defer os.Remove(taskPath)
 
-	xml := buildOfficeToOfficeXML(srcPath, destPath, c.fontDir, c.themeDir, fromExt, toExt, tempDir)
+	allFontsPath := filepath.Join(runDir, "AllFonts.js")
+	workDir := filepath.Join(runDir, "work")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		return err
+	}
+	c.logFontSources("office", cacheDir, allFontsPath)
+	xml := buildOfficeToOfficeXML(srcPath, destPath, c.fontDir, c.themeDir, allFontsPath, fromExt, toExt, workDir)
 	if _, err := taskFile.WriteString(xml); err != nil {
 		taskFile.Close()
 		return err
@@ -294,21 +492,38 @@ func (c *Converter) convertOffice(ctx context.Context, srcPath, destPath, fromEx
 	if err := taskFile.Close(); err != nil {
 		return err
 	}
-	out, err := c.runX2t(ctx, taskPath)
+	out, err := c.runX2t(ctx, taskPath, runDir)
 	if err != nil {
 		return fmt.Errorf("convert: x2t %s→%s: %w: %s", fromExt, toExt, err, strings.TrimSpace(string(out)))
 	}
 	if st, err := os.Stat(destPath); err != nil || st.Size() == 0 {
 		return fmt.Errorf("convert: x2t %s→%s produced no output", fromExt, toExt)
 	}
+	if cacheDir != "" {
+		if err := snapshotFontArtifacts(runDir, cacheDir); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 // runX2t executes x2t via /bin/sh so chmod and LD_LIBRARY_PATH match Nextcloud's approach.
-func (c *Converter) runX2t(ctx context.Context, taskPath string) ([]byte, error) {
-	script := fmt.Sprintf("chmod +x ./x2t 2>/dev/null; LD_LIBRARY_PATH=. exec ./x2t %s", shellQuote(taskPath))
+// When isolatedDir is set, x2t runs with that cwd and a private DoctRenderer.config so
+// concurrent saves do not share converter/bin/AllFonts.js.
+func (c *Converter) runX2t(ctx context.Context, taskPath string, isolatedDir string) ([]byte, error) {
+	dir := c.binDir
+	if isolatedDir != "" {
+		dir = isolatedDir
+	}
+	// Always invoke ./x2t relative to dir. Isolated runs use a copied binary so DoctRenderer
+	// picks up the per-run config beside the binary, not converter/bin/AllFonts.js.
+	script := fmt.Sprintf(
+		"chmod +x ./x2t 2>/dev/null; LD_LIBRARY_PATH=%s exec ./x2t %s",
+		shellQuote(c.binDir),
+		shellQuote(taskPath),
+	)
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", script)
-	cmd.Dir = c.binDir
+	cmd.Dir = dir
 	return cmd.CombinedOutput()
 }
 
@@ -340,7 +555,7 @@ func ensureExecutable(path string) error {
 	return nil
 }
 
-func buildTaskXML(from, to, fontDir, themeDir, sourceExt string) string {
+func buildTaskXML(from, to, fontDir, themeDir, sourceExt, allFonts, tempDir string) string {
 	ext := strings.TrimPrefix(strings.ToLower(sourceExt), ".")
 	formatFrom := FormatFromExtension(ext)
 	formatTo := FormatCanvasTo(ext)
@@ -350,9 +565,18 @@ func buildTaskXML(from, to, fontDir, themeDir, sourceExt string) string {
 	if formatFrom > 0 {
 		fmt.Fprintf(&extra, "<m_nFormatFrom>%d</m_nFormatFrom>\n", formatFrom)
 	}
-	if ext == "csv" {
+	switch ext {
+	case "csv", "tsv", "scsv", "txt":
 		extra.WriteString("<m_nCsvTxtEncoding>46</m_nCsvTxtEncoding>\n")
+	}
+	if ext == "csv" {
 		extra.WriteString("<m_nCsvDelimiter>4</m_nCsvDelimiter>\n")
+	}
+	if allFonts != "" {
+		fmt.Fprintf(&extra, "<m_sAllFontsPath>%s</m_sAllFontsPath>\n", escapeXML(allFonts))
+	}
+	if tempDir != "" {
+		fmt.Fprintf(&extra, "<m_sTempDir>%s</m_sTempDir>\n", escapeXML(tempDir))
 	}
 
 	return fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
@@ -415,7 +639,7 @@ func buildReverseTaskXML(from, to, fontDir, themeDir, allFonts, targetExt string
 `, escapeXML(from), escapeXML(to), extra.String(), escapeXML(fontDir), escapeXML(themeDir), now)
 }
 
-func buildOfficeToOfficeXML(from, to, fontDir, themeDir, fromExt, toExt, tempDir string) string {
+func buildOfficeToOfficeXML(from, to, fontDir, themeDir, allFonts, fromExt, toExt, tempDir string) string {
 	fromExt = strings.TrimPrefix(strings.ToLower(fromExt), ".")
 	toExt = strings.TrimPrefix(strings.ToLower(toExt), ".")
 	formatFrom := FormatFromExtension(fromExt)
@@ -427,6 +651,9 @@ func buildOfficeToOfficeXML(from, to, fontDir, themeDir, fromExt, toExt, tempDir
 	}
 	if formatTo > 0 {
 		fmt.Fprintf(&extra, "<m_nFormatTo>%d</m_nFormatTo>\n", formatTo)
+	}
+	if allFonts != "" {
+		fmt.Fprintf(&extra, "<m_sAllFontsPath>%s</m_sAllFontsPath>\n", escapeXML(allFonts))
 	}
 	if tempDir != "" {
 		fmt.Fprintf(&extra, "<m_sTempDir>%s</m_sTempDir>\n", escapeXML(tempDir))

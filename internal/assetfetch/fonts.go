@@ -10,6 +10,9 @@ import (
 )
 
 // GenerateAllFonts builds sdkjs/common/AllFonts.js using the Euro-Office allfontsgen tool.
+// Output paths are absolute for the current OutDir/host. Converter.New remaps them at
+// runtime so Docker copies (e.g. /app/assets) still resolve. --use-system=false keeps
+// faces inside core-fonts instead of /usr/share/fonts.
 func GenerateAllFonts(outDir string) error {
 	if err := RequireLinux(); err != nil {
 		return err
@@ -47,7 +50,7 @@ func GenerateAllFonts(outDir string) error {
 		"--images="+images,
 		"--selection="+filepath.Join(converterBin, "font_selection.bin"),
 		"--output-web="+fontsOut,
-		"--use-system=true",
+		"--use-system=false",
 		"--use-system-user-fonts=false",
 	)
 	cmd.Dir = outDir
@@ -61,7 +64,7 @@ func GenerateAllFonts(outDir string) error {
 	if st, err := os.Stat(allFontsWeb); err != nil || st.Size() == 0 {
 		return fmt.Errorf("assetfetch: AllFonts.js was not created")
 	}
-	fmt.Println("AllFonts.js ready")
+	fmt.Println("AllFonts.js ready (absolute paths are host-specific; Converter remaps them at runtime)")
 	return nil
 }
 

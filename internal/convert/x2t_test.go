@@ -53,8 +53,21 @@ func TestCSVNeedsXlsxBridge(t *testing.T) {
 	}
 }
 
+func TestBuildTaskXMLTxt(t *testing.T) {
+	xml := buildTaskXML("/samples/sample.txt", "/cache/Editor.bin", "/fonts", "/themes", ".txt", "/run/AllFonts.js", "/run")
+	if !strings.Contains(xml, "<m_nFormatFrom>69</m_nFormatFrom>") {
+		t.Fatalf("txt formatFrom missing: %s", xml)
+	}
+	if !strings.Contains(xml, "<m_nCsvTxtEncoding>46</m_nCsvTxtEncoding>") {
+		t.Fatalf("txt encoding missing: %s", xml)
+	}
+	if !strings.Contains(xml, "<m_sAllFontsPath>") {
+		t.Fatalf("all fonts path missing: %s", xml)
+	}
+}
+
 func TestBuildOfficeToOfficeXMLXlsxToCSV(t *testing.T) {
-	xml := buildOfficeToOfficeXML("/cache/saved.xlsx", "/cache/saved.csv", "/fonts", "/themes", "xlsx", "csv", "/tmp/x2t")
+	xml := buildOfficeToOfficeXML("/cache/saved.xlsx", "/cache/saved.csv", "/fonts", "/themes", "/run/AllFonts.js", "xlsx", "csv", "/tmp/x2t")
 	if !strings.Contains(xml, "<m_nFormatFrom>257</m_nFormatFrom>") {
 		t.Fatalf("xlsx formatFrom missing: %s", xml)
 	}
@@ -63,5 +76,8 @@ func TestBuildOfficeToOfficeXMLXlsxToCSV(t *testing.T) {
 	}
 	if strings.Contains(xml, "<m_bFromChanges>true</m_bFromChanges>") {
 		t.Fatal("xlsx→csv must not set fromChanges")
+	}
+	if !strings.Contains(xml, "<m_sAllFontsPath>") {
+		t.Fatalf("all fonts path missing: %s", xml)
 	}
 }

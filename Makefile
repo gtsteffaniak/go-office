@@ -29,7 +29,7 @@ DOCKER_BUILD_TIMEOUT ?= 10m
 DOCKER_BUILD = timeout $(DOCKER_BUILD_TIMEOUT) docker build
 
 .PHONY: help setup build serve doctor fonts test test-integration clean \
-        check-linux check-go mod-download fetch-assets compile check-assets check-samples test-x2t \
+        check-linux check-go mod-download fetch-assets compile check-assets check-samples test-x2t test-x2t-concurrent \
         playwright-base playwright-npm test-playwright test-playwright-ui check-sample-matrix extract-sample-manifest \
         build-docker build-docker-image build-docker-builder run-docker stop-docker ensure-assets
 
@@ -41,8 +41,9 @@ help:
 	@echo "  make serve   Build (if needed) and run the document server on $(ADDR)"
 	@echo "  make test    Run unit tests (no assets required)"
 	@echo "  make test-x2t  Run x2t conversion on the sample .doc (needs assets)"
+	@echo "  make test-x2t-concurrent  Concurrent CSV save regression (10 workers, limit 6)"
 	@echo "  make doctor    Diagnose x2t permissions, libs, and sample conversion"
-	@echo "  make fonts     Regenerate AllFonts.js and font_selection.bin"
+	@echo "  make fonts     Regenerate AllFonts.js and font_selection.bin (host paths; remapped at runtime)"
 	@echo ""
 	@echo "  make test-integration   Integration tests (runs build first)"
 	@echo "  make check-sample-matrix  Verify all Playwright sample files exist (git-tracked under sample-files/)"
@@ -158,12 +159,16 @@ test-x2t: build check-samples
 	@echo "==> x2t conversion test"
 	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) run ./cmd/test-x2t -assets "$(OFFICE_ASSETS)" -sample "$(SAMPLE_DOC)"
 
+test-x2t-concurrent: build check-samples
+	@echo "==> Concurrent CSV save (Playwright load regression, needs x2t)"
+	$(GO) test ./internal/convert/ -run 'TestSaveChangesCSVConcurrent|TestPrepareX2TRunDir' -count=3 -v
+
 doctor: build check-samples
 	@echo "==> go-office doctor"
 	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) run ./cmd/doctor -assets "$(OFFICE_ASSETS)" -sample "$(SAMPLE_DOC)" -report "$(CURDIR)/doctor-report.txt"
 
 fonts: check-linux
-	@echo "==> Regenerating font files"
+	@echo "==> Regenerating font files (paths are host-specific until Converter.New remaps them)"
 	@mkdir -p "$(BIN_DIR)"
 	$(GO) build -o "$(FETCH_ASSETS_BIN)" ./cmd/fetch-assets
 	$(FETCH_ASSETS_BIN) -fonts -out "$(OFFICE_ASSETS)"

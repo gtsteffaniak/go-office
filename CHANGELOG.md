@@ -6,45 +6,42 @@ Euro-Office / ONLYOFFICE editor assets (`web-apps/`, `sdkjs/`, `x2t`) are **not*
 
 ## [Unreleased]
 
-### Phase 2 — Hardening + robust Playwright
+## [0.2.0] - 2026-09-01
 
-#### Server hardening
-- **Cache lifecycle** (`pkg/office/cache.go`): configurable TTL (default 24h) and max cache dirs (default 256); periodic janitor; cache eviction on sweep.
-- **`Server.Close()`** stops coauthoring save timers and the cache janitor (no longer a no-op).
-- **Graceful shutdown** in `cmd/go-office/main.go`: SIGINT/SIGTERM → `http.Server.Shutdown` → `srv.Close()`.
-- **`/health`** extended with `sessions`, `cacheDirs`, and `cacheBytes`.
-- **Callback JWT** (`pkg/callback/jwt.go`): sign outbound callback bodies as `{"token":"…"}` when `OFFICE_JWT_SECRET` is set; verify inbound JWT-wrapped callbacks in `HandleCallback`.
-- **WS golden fixtures** (`internal/ws/fixtures/coauthoring.json`) and tests; `ResetSessionsForTest()` for isolated handler tests; `scripts/record-ws-fixtures.sh`.
-- **Coauthoring `PollHold` fix**: `PollHold=0` disables long-poll wait in tests (was incorrectly falling back to 20s).
+**Euro-Office pin:** `9.3.4-hotfix.1`
 
-#### Playwright (content-aware E2E)
-- **Sample manifest** (`scripts/extract-sample-expectations.go`, `frontend/tests/playwright/fixtures/sample-manifest.json|.ts`) — expected cell/text per sample file.
-- **Editor helpers** (`frontend/tests/playwright/editor.ts`): `waitForDocumentReady`, `assertCellContent` (formula bar), `assertDocumentContains`, `setCellContent`, `waitForSaveDone`.
-- **`content.spec.ts`** — tier-1 content assertions; `sample.csv` B2 via formula bar (not canvas `getByText`).
-- **`save.spec.ts`** — CSV + DOCX save round-trip verified via `/api/office/demo/file/…`.
-- **Demo viewer hooks** (`internal/demo/viewer.html`): `data-document-ready` and `data-save-done` via DocsAPI `onDocumentReady` / `onRequestSaveResult`.
-- **`open-formats.spec.ts`** uses `waitForDocumentReady` instead of fixed sleeps.
-- **CI**: Docker Playwright uses `PLAYWRIGHT_SAMPLE_TIER=1`, `PLAYWRIGHT_WORKERS=10`, `OFFICE_POLL_HOLD=0`, and `OFFICE_CONVERT_LIMIT=6`; runs on amd64 and arm64 GitHub-hosted runners.
-- **`make extract-sample-manifest`** target.
+- **Go module:** `go get github.com/quantumx-apps/go-office@v0.2.0`
+- **Docker:** `docker pull ghcr.io/quantumx-apps/office-server:v0.2.0` or `docker pull ghcr.io/quantumx-apps/office-server:9.3.4-hotfix.1` (images are tagged with both go-office semver and Euro-Office version)
 
-#### Docs, demo UX, API reference
-- **`migration.md`**: JWT_IN_BODY mapping; save support accurate; FileBrowser `/converter` preview gap; expanded limitations.
-- **`api.md`**: full ONLYOFFICE ↔ go-office compatibility audit (conversion, command, WOPI, spellchecker, callback payload gaps, legacy `.ashx` paths).
-- **`GET /docs/api#compatibility`**: expanded side-by-side matrix on the live API docs page.
-- **Demo landing links** use relative paths (`/demo/view?file=…`) instead of `http://localhost/…` URLs.
-- **Homepage / API docs**: coauthoring paths document both `/{version}/doc/{key}/c/` and `/doc/{key}/c/`.
-- **README** roadmap marks Phase 2 done.
+### Library and assets
 
-### Licensing and compliance
+- **`office.DiscoverAssets`**, **`office.FetchAssets`**, **`office.EnsureAssets`** — caller-controlled Euro-Office asset discovery and download; `office.New()` never fetches.
+- **`office.ValidAssetDir`** and **`office.ExpectedAssetsVersion`** (embedded pin from `scripts/euro-office.version`).
+- Single **`EURO_OFFICE_VERSION`** pin (replaces `EURO_OFFICE_RELEASE` / `EURO_OFFICE_PROTOCOL`).
+- **`cmd/gen-assets-version`** generates `pkg/office/assets_version.go`.
+- **`cmd/go-office`**: calls `EnsureAssets` at startup (skips download when assets are already present); optional `-skip-asset-fetch` / `OFFICE_SKIP_ASSET_FETCH` to fail instead of downloading when assets are missing.
 
-- Clarified that users do **not** need to click or sign a EULA to download, host, or run go-office or its Docker images. Rights under [AGPL-3.0](LICENSE) are granted automatically.
-- Documented AGPL compliance expectations (source availability, license text, modification notices) in README and NOTICE.
-- Documented AGPL Section 7 branding obligations for ONLYOFFICE / Euro-Office editor UI (attribution must not be removed or replaced).
-- Added OCI image labels (`org.opencontainers.image.source`, `org.opencontainers.image.licenses`) to published Dockerfiles.
+### Conversion API
+
+- **`POST /converter`** and **`/ConvertService.ashx`** — sync conversion with JWT (Bearer + body token).
+- Demo landing thumbnails via **`GET /api/office/demo/thumbnail`**.
+
+### Server hardening (from v0.1.0 development)
+
+- Cache lifecycle, graceful shutdown, callback JWT, WS golden fixtures.
+- Content-aware Playwright E2E (`content`, `save`, `thumbnails` specs).
+
+### Documentation
+
+- **[README.md](README.md)** rewritten as current-state snapshot (no phase roadmap).
+- **[api.md](api.md)** updated: `/converter` and FileBrowser previews marked compatible.
+- **[RELEASE.md](RELEASE.md)** — version matrix and release schedule.
+- **[migration.md](migration.md)** — converter/previews and library asset APIs.
 
 ## [0.1.0] - 2026-08-30
 
 Initial public release: embedded Go document server, coauthoring polling handshake, x2t document open, demo UI, Playwright E2E, Docker demo image.
 
-[Unreleased]: https://github.com/quantumx-apps/go-office/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/quantumx-apps/go-office/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/quantumx-apps/go-office/releases/tag/v0.2.0
 [0.1.0]: https://github.com/quantumx-apps/go-office/releases/tag/v0.1.0

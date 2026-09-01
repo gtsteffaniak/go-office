@@ -12,6 +12,21 @@ import (
 func TestLoadVersion(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "euro-office.version")
+	if err := os.WriteFile(path, []byte("EURO_OFFICE_VERSION=v9.3.4-hotfix.1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	v, err := assetfetch.LoadVersion(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != "9.3.4-hotfix.1" {
+		t.Fatalf("unexpected version: %q", v)
+	}
+}
+
+func TestLoadVersionLegacyRelease(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "euro-office.version")
 	if err := os.WriteFile(path, []byte("EURO_OFFICE_RELEASE=v9.3.4-hotfix.1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -19,15 +34,29 @@ func TestLoadVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.Release != "9.3.4-hotfix.1" || v.Protocol != "9.3.4-hotfix.1" {
-		t.Fatalf("unexpected version: %+v", v)
+	if v != "9.3.4-hotfix.1" {
+		t.Fatalf("unexpected version: %q", v)
 	}
 }
 
 func TestDebURL(t *testing.T) {
-	url := assetfetch.DebURL(assetfetch.Version{Release: "9.3.4-hotfix.1"})
+	url := assetfetch.DebURL("9.3.4-hotfix.1")
 	if url == "" || !strings.Contains(url, "9.3.4-hotfix.1_amd64.deb") {
 		t.Fatalf("url = %q", url)
+	}
+}
+
+func TestValidAssetDirRequiresFonts(t *testing.T) {
+	dir := t.TempDir()
+	apiDir := filepath.Join(dir, "web-apps", "apps", "api", "documents")
+	if err := os.MkdirAll(apiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(apiDir, "api.js.tpl"), []byte("tpl"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if assetfetch.ValidAssetDir(dir) {
+		t.Fatal("expected incomplete assets (no fonts) to be invalid")
 	}
 }
 
@@ -87,4 +116,3 @@ func TestFindDocumentServerRoot(t *testing.T) {
 		t.Fatalf("got %q want %q", got, ds)
 	}
 }
-

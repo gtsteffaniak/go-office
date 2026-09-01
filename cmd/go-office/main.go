@@ -58,11 +58,36 @@ func (s *localStorage) Stat(_ context.Context, path string) (office.FileInfo, er
 func main() {
 	cfg := parseRunConfig()
 
-	if cfg.AssetDir == "" {
-		log.Fatal("assets required: set OFFICE_ASSETS or run `make build`")
+	ctx := context.Background()
+	debug := debuglog.Enabled(cfg.Debug)
+	logger := debuglog.NewLogger(debug)
+	slog.SetDefault(logger)
+
+	var bundle office.AssetBundle
+	var err error
+	if cfg.SkipAssetFetch {
+		var ok bool
+		bundle, ok, err = office.DiscoverAssets(office.AssetOptions{Dir: cfg.AssetDir, Logger: logger})
+		if err != nil {
+			log.Fatalf("assets: %v", err)
+		}
+		if !ok {
+			log.Fatal("assets not found: set OFFICE_ASSETS, run `make build`, or remove -skip-asset-fetch")
+		}
+	} else {
+		bundle, err = office.EnsureAssets(ctx, office.EnsureAssetsOptions{
+			AssetOptions: office.AssetOptions{Dir: cfg.AssetDir, Logger: logger},
+		})
+		if err != nil {
+			log.Fatalf("assets: %v", err)
+		}
+	}
+	cfg.AssetDir = bundle.Dir
+	if cfg.Version == "" {
+		cfg.Version = bundle.Version
 	}
 	if cfg.Version == "" {
-		if v, err := office.ReadAssetVersion(cfg.AssetDir); err == nil {
+		if v, readErr := office.ReadAssetVersion(cfg.AssetDir); readErr == nil {
 			cfg.Version = v
 		}
 	}
@@ -76,10 +101,6 @@ func main() {
 			log.Fatalf("samples directory not found: %s (%v) — use OFFICE_DISABLE_SAMPLES=1 to run without demo", samplesPath, err)
 		}
 	}
-
-	debug := debuglog.Enabled(cfg.Debug)
-	logger := debuglog.NewLogger(debug)
-	slog.SetDefault(logger)
 
 	store := &localStorage{root: cfg.DataDir}
 	srv, err := office.New(store, office.Options{

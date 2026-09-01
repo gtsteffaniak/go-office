@@ -1,6 +1,7 @@
 package assetfetch
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -153,7 +154,7 @@ func fontGenerationPossible(outDir string) bool {
 	return err == nil && !st.IsDir()
 }
 
-func ensureFontToolchain(opts Options, v Version) error {
+func ensureFontToolchain(opts Options, version string) error {
 	tmpRoot, err := os.MkdirTemp("", "go-office-fonts-*")
 	if err != nil {
 		return err
@@ -161,9 +162,12 @@ func ensureFontToolchain(opts Options, v Version) error {
 	defer os.RemoveAll(tmpRoot)
 
 	debPath := filepath.Join(tmpRoot, "package.deb")
-	url := DebURL(v)
+	url := DebURL(version)
 	fmt.Printf("Downloading toolchain %s\n", url)
-	if err := downloadFile(opts.Client, url, debPath); err != nil {
+	if opts.Client == nil {
+		opts.Client = &http.Client{Timeout: 30 * time.Minute}
+	}
+	if err := downloadFile(context.Background(), opts.Client, url, debPath); err != nil {
 		return err
 	}
 

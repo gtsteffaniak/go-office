@@ -99,7 +99,7 @@ These are **not** read by current builds. Rename in compose, CI, and shell profi
 
 ## Integrator checklist
 
-1. **Image** — `ghcr.io/quantumx-apps/office-server:latest` or a version tag matching Euro-Office (e.g. `9.3.4-hotfix.1`).
+1. **Image** — `ghcr.io/quantumx-apps/office-server:latest`, a Euro-Office tag (e.g. `9.3.4-hotfix.1`), or a go-office tag (e.g. `v0.2.0`).
 2. **JWT** — Rename `JWT_SECRET` → `OFFICE_JWT_SECRET` with the **same value** on both document server and integrator.
 3. **documentServerUrl** — Unchanged URL shape; must end with `/` and serve `web-apps/…/api.js`.
 4. **document.url / callbackUrl** — Still point at your integrator; go-office fetches documents from those URLs on open.
@@ -123,11 +123,11 @@ Plan accordingly before migrating production **edit-and-save** workflows:
 | Feature | ONLYOFFICE Document Server | go-office (current) |
 | ------- | -------------------------- | ------------------- |
 | Save / force-save to integrator | ✅ | ✅ (coauthoring save → reverse x2t → callback → `Storage.Save`) |
-| Multi-user co-editing | ✅ | ❌ — Phase 3 |
+| Multi-user co-editing | ✅ | ❌ |
 | WebSocket coauthoring | ✅ | ⚠️ Polling only (501 on WS upgrade) |
 | PostgreSQL / Redis / clustering | ✅ | ❌ (single process) |
 | WOPI | ✅ | ❌ |
-| `POST /converter` (conversion API / thumbnails) | ✅ | ❌ — see [api.md](api.md#filebrowser-office-previews) |
+| `POST /converter` (conversion API / thumbnails) | ✅ | ✅ (sync only; `async: true` not supported) — see [api.md](api.md#12-conversion-api-filebrowser-previews-printexport-pipelines) |
 | Callback status 1 / 4 (editing telemetry) | ✅ | ❌ — not emitted outbound (see [api.md](api.md#32-callback--integrator-receives-posts-document-server--your-app)) |
 | `POST /coauthoring/CommandService.ashx` | ✅ | ❌ |
 | `GET /hosting/discovery` (WOPI) | ✅ | ❌ |
@@ -135,7 +135,7 @@ Plan accordingly before migrating production **edit-and-save** workflows:
 | Spell checker service | ⚠️ Optional | ❌ |
 | Admin panel | ✅ | ❌ (port 9000 in full install) |
 
-Opening and viewing documents in the editor works; **saving edits back to storage** is supported via coauthoring flush, reverse x2t, and the integrator callback. Validate your use case against [README.md](README.md) roadmap before cutover.
+Opening and viewing documents in the editor works; **saving edits back to storage** is supported via coauthoring flush, reverse x2t, and the integrator callback. See [api.md](api.md) for the full compatibility matrix.
 
 ## FileBrowser
 
@@ -143,8 +143,25 @@ FileBrowser today expects an external `onlyOfficeUrl` and signs config with `int
 
 - Set `onlyOfficeUrl` to this server’s public URL (e.g. `http://files.example.com:9052/`).
 - Use the **same** secret as `OFFICE_JWT_SECRET`.
-- **Office grid previews** (`POST {onlyOfficeUrl}/converter` for JPG thumbnails) are **not supported** by go-office today. See [api.md](api.md#filebrowser-office-previews) for workarounds.
-- Embedded mode (`//go:build office`) is planned; until then, run `office-server` as a sidecar or standalone container.
+- **Office grid previews:** `POST {onlyOfficeUrl}/converter` with `outputtype: "jpg"` (sync thumbnail conversion).
+- Run `office-server` as a sidecar or standalone container.
+
+### Library integration (Go host app)
+
+`office.New()` never downloads assets. Call asset helpers explicitly before creating the server:
+
+```go
+bundle, err := office.EnsureAssets(ctx, office.EnsureAssetsOptions{
+    AssetOptions: office.AssetOptions{Dir: os.Getenv("OFFICE_ASSETS")},
+})
+srv, err := office.New(store, office.Options{
+    AssetDir:        bundle.Dir,
+    ProtocolVersion: bundle.Version,
+    JWTSecret:       []byte(secret),
+})
+```
+
+Use `office.DiscoverAssets` when assets are pre-installed and you must not download at runtime.
 
 ## Troubleshooting
 
@@ -166,8 +183,9 @@ Docker images are tagged with:
 
 - `latest` — current `main` build
 - Euro-Office release tag (e.g. `9.3.4-hotfix.1`) — matches bundled `assets/VERSION`
+- go-office release tag (e.g. `v0.2.0`) — on git tag releases; see [RELEASE.md](RELEASE.md) for the Euro-Office pin paired with each tag
 
-Pin the Euro-Office tag in production so `documentServerUrl`, sdkjs, and coauthoring protocol stay aligned.
+Pin the Euro-Office tag when you care about editor/sdkjs protocol alignment. Pin the go-office tag when you care about the server/library release.
 
 ## Further reading
 

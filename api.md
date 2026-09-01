@@ -1,6 +1,6 @@
 # go-office API compatibility reference
 
-Audit of go-office against the official [ONLYOFFICE Docs API](https://api.onlyoffice.com/docs/docs-api/) and the HTTP surface of ONLYOFFICE Document Server. Last reviewed against go-office Phase 2 (`OFFICE_VERSION` / bundled Euro-Office assets).
+Audit of go-office against the official [ONLYOFFICE Docs API](https://api.onlyoffice.com/docs/docs-api/) and the HTTP surface of ONLYOFFICE Document Server. Last reviewed against go-office v0.2.0 (`OFFICE_VERSION` / bundled Euro-Office assets).
 
 **Browsable summary:** `GET /docs/api#compatibility` on a running server.
 
@@ -38,12 +38,12 @@ This document compares:
 | Core editor embed (api.js, assets, coauthoring polling, cache, save) | 14 | 3 | 2 |
 | Integrator callback (inbound to your app) | 4 | 2 | 0 |
 | Outbound callbacks (go-office → your `callbackUrl`) | 2 | 1 | 4 |
-| Conversion API | 0 | 1 | 8 |
+| Conversion API | 6 | 1 | 2 |
 | Command service | 0 | 1 | 9 |
 | WOPI | 0 | 0 | 4 |
 | Ancillary services | 1 | 2 | 5 |
 
-**Bottom line:** Docs API **editing** is compatible. **Thumbnail/conversion HTTP APIs**, **command service**, **WOPI**, and **rich callback telemetry** are not.
+**Bottom line:** Docs API **editing** and **sync conversion/thumbnails** (`POST /converter`, JPG output) are compatible. **Command service**, **WOPI**, **async conversion**, and **rich callback telemetry** are not.
 
 ---
 
@@ -75,15 +75,16 @@ Paths are relative to `documentServerUrl` (default site root). `OFFICE_BASE_PATH
 
 | Endpoint | Method | ONLYOFFICE | go-office | Notes |
 | -------- | ------ | :--------: | :---------: | ----- |
-| **`/converter`** | **POST** | **✅** | **❌** | [Conversion API](https://api.onlyoffice.com/docs/docs-api/additional-api/conversion-api/). JSON body: `filetype`, `key`, `outputtype`, `url`, optional `thumbnail`, `async`, … |
-| `/converter?shardkey={key}` | POST | ✅ | ❌ | Load-balancing query param (8.1+) |
-| `Accept: application/json` on `/converter` | — | ✅ | ❌ | ONLYOFFICE can return JSON; default response is XML |
-| **`/ConvertService.ashx`** | POST | ✅ (legacy) | ❌ | Pre-5.5 path; same role as `/converter` |
-| JWT: `Authorization: Bearer` on converter | — | ✅ | ❌ | FileBrowser signs body claims, sends Bearer header |
-| JWT: `{"token":"…"}` in converter body | — | ✅ | ❌ | Alternative ONLYOFFICE style |
-| Internal x2t on editor open/save | — | ✅ | ✅ | Same binary; **not exposed as HTTP** |
+| **`/converter`** | **POST** | **✅** | **✅** | [Conversion API](https://api.onlyoffice.com/docs/docs-api/additional-api/conversion-api/). JSON body: `filetype`, `key`, `outputtype`, `url`, optional `thumbnail`, `async`, … |
+| `/converter?shardkey={key}` | POST | ✅ | ⚠️ | Load-balancing query param (8.1+); **ignored** (harmless) |
+| `Accept: application/json` on `/converter` | — | ✅ | ✅ | JSON response when `Accept: application/json` |
+| **`/ConvertService.ashx`** | POST | ✅ (legacy) | ✅ | Pre-5.5 path; same handler as `/converter` |
+| JWT: `Authorization: Bearer` on converter | — | ✅ | ✅ | `VerifyConverterJWT` when `OFFICE_JWT_SECRET` set |
+| JWT: `{"token":"…"}` in converter body | — | ✅ | ✅ | Alternative ONLYOFFICE style |
+| `async: true` on `/converter` | — | ✅ | ❌ | Synchronous conversion only |
+| Internal x2t on editor open/save | — | ✅ | ✅ | Same binary |
 
-**FileBrowser `GenerateOfficePreview`:** `POST {onlyOfficeUrl}/converter` with `outputType: "jpg"` → **will not work** against go-office today.
+**FileBrowser `GenerateOfficePreview`:** `POST {onlyOfficeUrl}/converter` with `outputtype: "jpg"` → **supported** (sync JPG thumbnail).
 
 ### 1.3 Command service (admin / operational)
 
@@ -136,7 +137,7 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 | `isSaveLock` → `saveLock` | ✅ | ✅ | Golden fixture |
 | `saveChanges` → `unSaveLock` | ✅ | ✅ | Changes appended; debounced flush |
 | Other coauthoring messages (cursor, chat, presence, …) | ✅ | ❌ | Ignored (POST returns `ok`, no reply) |
-| Multi-user on same `key` | ✅ | ❌ | Single session; Phase 3 |
+| Multi-user on same `key` | ✅ | ❌ | Single session per document key |
 
 ---
 
@@ -188,7 +189,7 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 | Sign editor config `token` | ✅ | ✅ |
 | Verify config token on server | ✅ | ❌ |
 | Callback body `{"token":"…"}` | ✅ | ✅ |
-| Converter `Authorization: Bearer` | ✅ | ❌ (no `/converter`) |
+| Converter `Authorization: Bearer` | ✅ | ✅ | When `OFFICE_JWT_SECRET` set |
 | Command service `{"token":"…"}` | ✅ | ❌ (no `/command`) |
 
 ---
@@ -199,7 +200,7 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 | ------------------- | -------------------- | --------- |
 | In-browser editor | `{url}/web-apps/…/api.js` + config | ✅ |
 | Config JWT (`integrations.onlyOffice.secret`) | Same as `OFFICE_JWT_SECRET` | ✅ |
-| **Grid preview thumbnails** | `POST {url}/converter` | **❌** |
+| **Grid preview thumbnails** | `POST {url}/converter` | **✅** |
 | Document download URL in config | Your app’s download route | ✅ (host responsibility) |
 | Callback save | Your app’s callback route | ✅ |
 
@@ -212,12 +213,13 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 - Nextcloud / FileBrowser / custom app using **Docs API only**: load `api.js`, pass `document.key` / `document.url` / `callbackUrl`, handle callback status **2** and **6**, respond `{"error":0}`.
 - Coauthoring over **polling** (production default when WebSocket unavailable).
 - PDF open in editor via `downloadfile` + cache.
+- FileBrowser **grid previews** via `POST /converter` with `outputtype: "jpg"`.
 
 ### Not compatible without workarounds
 
 | Gap | Workaround |
 | --- | ---------- |
-| `POST /converter` (previews, bulk convert) | Separate converter service; or non-ONLYOFFICE thumbnails |
+| `async: true` on `/converter` | Use synchronous conversion only |
 | `POST /command` | Use editor forcesave; accept no `info`/`drop` |
 | WOPI integrators | Use Docs API instead |
 | Spell checker service | Disable server spell-check; or proxy `/spellchecker/` elsewhere |
@@ -234,7 +236,7 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 | Coauthoring handshake, auth, save | `go test ./internal/ws/...`, `fixtures/coauthoring.json` |
 | Callback JWT | `go test ./pkg/callback/...`, `./pkg/office/save_test.go` |
 | Editor open + content + save E2E | Playwright `open-formats`, `content`, `save` |
-| Conversion API | **No tests** — endpoint absent |
+| Conversion API | `go test ./pkg/office/...` (`TestHandleConverterJSON`), Playwright `thumbnails` |
 | Command service | **No tests** — endpoint absent |
 | WOPI / spellchecker | **No tests** — endpoints absent |
 
@@ -258,3 +260,4 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 | ---- | ------ |
 | Phase 2 | Initial matrix; FileBrowser `/converter` gap |
 | Follow-up audit | Added: legacy `.ashx` paths, WOPI, spellchecker, command subcommands, callback outbound field gaps, JWT matrix, `shardkey`, `downloadfile` partial, healthcheck semantics, coauthoring message gaps, integrator vs document-server callback direction |
+| v0.2.0 | `/converter` + `/ConvertService.ashx` implemented (sync JPG); JWT on converter; demo thumbnails; library `DiscoverAssets` / `FetchAssets` / `EnsureAssets` |

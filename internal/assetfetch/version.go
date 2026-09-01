@@ -9,21 +9,16 @@ import (
 	"strings"
 )
 
-// Version pins a Euro-Office Document Server release.
-type Version struct {
-	Release  string // e.g. 9.3.4-hotfix.1 (no leading v)
-	Protocol string // reported to sdkjs; defaults to Release
-}
-
-// LoadVersion reads scripts/euro-office.version.
-func LoadVersion(path string) (Version, error) {
+// LoadVersion reads EURO_OFFICE_VERSION from a euro-office.version pin file.
+// Legacy EURO_OFFICE_RELEASE is accepted as an alias.
+func LoadVersion(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return Version{}, err
+		return "", err
 	}
 	defer f.Close()
 
-	var v Version
+	var version string
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
@@ -36,30 +31,29 @@ func LoadVersion(path string) (Version, error) {
 		}
 		val = strings.TrimSpace(val)
 		switch strings.TrimSpace(key) {
+		case "EURO_OFFICE_VERSION":
+			version = strings.TrimPrefix(val, "v")
 		case "EURO_OFFICE_RELEASE":
-			v.Release = strings.TrimPrefix(val, "v")
-		case "EURO_OFFICE_PROTOCOL":
-			v.Protocol = val
+			if version == "" {
+				version = strings.TrimPrefix(val, "v")
+			}
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return Version{}, err
+		return "", err
 	}
-	if v.Release == "" {
-		return Version{}, fmt.Errorf("EURO_OFFICE_RELEASE missing in %s", path)
+	if version == "" {
+		return "", fmt.Errorf("EURO_OFFICE_VERSION missing in %s", path)
 	}
-	if v.Protocol == "" {
-		v.Protocol = v.Release
-	}
-	return v, nil
+	return version, nil
 }
 
 // DebURL returns the GitHub release .deb download URL for this Linux host arch.
-func DebURL(v Version) string {
+func DebURL(version string) string {
 	arch := DebArch()
 	return fmt.Sprintf(
 		"https://github.com/Euro-Office/DocumentServer/releases/download/v%s/euro-office-documentserver_%s_%s.deb",
-		v.Release, v.Release, arch,
+		version, version, arch,
 	)
 }
 

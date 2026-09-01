@@ -30,6 +30,7 @@ type runConfig struct {
 	PollHold       *time.Duration
 	SaveDelay      *time.Duration
 	ConvertLimit   int
+	SkipAssetFetch bool
 }
 
 func parseRunConfig() runConfig {
@@ -44,6 +45,7 @@ func parseRunConfig() runConfig {
 		Version:        strings.TrimSpace(os.Getenv("OFFICE_VERSION")),
 		PublicOrigin:   strings.TrimSpace(os.Getenv("OFFICE_PUBLIC_ORIGIN")),
 		DisableSamples: envBool("OFFICE_DISABLE_SAMPLES"),
+		SkipAssetFetch: envBool("OFFICE_SKIP_ASSET_FETCH"),
 		Debug:          debugFromEnv(),
 		PollHold:       pollHoldFromEnv(),
 		SaveDelay:      saveDelayFromEnv(),
@@ -60,6 +62,7 @@ func parseRunConfig() runConfig {
 	flag.StringVar(&cfg.Version, "version", cfg.Version, "protocol version (default: assets/VERSION)")
 	flag.StringVar(&cfg.PublicOrigin, "public", cfg.PublicOrigin, "public origin for document URLs")
 	flag.BoolVar(&cfg.DisableSamples, "disable-samples", cfg.DisableSamples, "do not serve the demo UI or sample documents")
+	flag.BoolVar(&cfg.SkipAssetFetch, "skip-asset-fetch", cfg.SkipAssetFetch, "only discover pre-installed assets; do not download (OFFICE_SKIP_ASSET_FETCH=1)")
 	debugFlag := flag.Bool("debug", cfg.Debug, "enable verbose logging (or set OFFICE_DEBUG_LOGGING=1)")
 	flag.Parse()
 

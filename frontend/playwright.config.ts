@@ -6,8 +6,8 @@ const ciTest = process.env.OFFICE_PLAYWRIGHT_TEST === "true";
 const workers = Number(process.env.PLAYWRIGHT_WORKERS ?? 10);
 
 export default defineConfig({
-  // Fail fast in CI: happy path ~30–60s/test; cap hung tests so retries finish within 10m job limit.
-  timeout: Number(process.env.PLAYWRIGHT_TEST_TIMEOUT ?? (ciTest ? 85_000 : 90_000)),
+  // Save tests: editor ready (25s) + interactive (60s) + save poll (45s) under parallel load.
+  timeout: Number(process.env.PLAYWRIGHT_TEST_TIMEOUT ?? (ciTest ? 150_000 : 90_000)),
   expect: {
     timeout: Number(process.env.PLAYWRIGHT_EXPECT_TIMEOUT ?? (ciTest ? 6_000 : 10_000)),
   },

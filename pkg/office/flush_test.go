@@ -1,6 +1,7 @@
 package office_test
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
@@ -80,14 +81,19 @@ func TestPersistDocumentWritesStorage(t *testing.T) {
 type recordingStorage struct {
 	t         *testing.T
 	savedPath string
+	savedBody *bytes.Buffer
 }
 
 func (s *recordingStorage) Open(context.Context, string) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("")), nil
 }
 
-func (s *recordingStorage) Save(_ context.Context, path string, _ io.Reader) error {
+func (s *recordingStorage) Save(_ context.Context, path string, r io.Reader) error {
 	s.savedPath = path
+	if s.savedBody != nil {
+		_, err := io.Copy(s.savedBody, r)
+		return err
+	}
 	return nil
 }
 

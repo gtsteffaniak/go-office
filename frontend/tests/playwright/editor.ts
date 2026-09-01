@@ -738,7 +738,11 @@ function zipEntryText(buf: Buffer, entryName: string): string {
 }
 
 export function officeFileContains(buf: Buffer, marker: string): boolean {
-  if (buf.includes(Buffer.from(marker)) || buf.toString("utf8").includes(marker)) {
+  const text = decodeOfficeText(buf);
+  if (text.includes(marker)) {
+    return true;
+  }
+  if (buf.includes(Buffer.from(marker))) {
     return true;
   }
   const xml = zipEntryText(buf, "word/document.xml");
@@ -747,6 +751,17 @@ export function officeFileContains(buf: Buffer, marker: string): boolean {
   }
   const utf16 = Buffer.from(marker, "utf16le");
   return buf.includes(utf16);
+}
+
+function decodeOfficeText(buf: Buffer): string {
+  if (buf.length === 0) {
+    return "";
+  }
+  let text = buf.toString("utf8");
+  if (text.charCodeAt(0) === 0xfeff) {
+    text = text.slice(1);
+  }
+  return text;
 }
 
 export async function fetchDemoFileBody(

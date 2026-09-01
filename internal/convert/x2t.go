@@ -91,13 +91,39 @@ func (c *Converter) toEditorBin(ctx context.Context, sourcePath, outDir string) 
 	outFile := filepath.Join(outDir, "Editor.bin")
 	partFile := filepath.Join(outDir, "Editor.bin.part")
 	convertPath := sourcePath
+	sourceExt := filepath.Ext(sourcePath)
 	srcHash, err := fileSHA256(sourcePath)
 	if err != nil {
 		return err
 	}
-	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(sourcePath)), ".")
-	if csvNeedsXlsxBridge(ext) {
+	ext := strings.TrimPrefix(strings.ToLower(sourceExt), ".")
+	if ext == "txt" {
 		raw, err := os.ReadFile(sourcePath)
+		if err != nil {
+			return err
+		}
+		norm := normalizePlainTextBytes(raw)
+		srcHash = sha256Bytes(norm)
+		if !bytes.Equal(raw, norm) {
+			tmp, err := os.CreateTemp("", "go-office-txt-*.txt")
+			if err != nil {
+				return err
+			}
+			convertPath = tmp.Name()
+			if _, err := tmp.Write(norm); err != nil {
+				tmp.Close()
+				_ = os.Remove(convertPath)
+				return err
+			}
+			if err := tmp.Close(); err != nil {
+				_ = os.Remove(convertPath)
+				return err
+			}
+			defer os.Remove(convertPath)
+		}
+	}
+	if csvNeedsXlsxBridge(ext) {
+		raw, err := os.ReadFile(convertPath)
 		if err != nil {
 			return err
 		}
@@ -120,6 +146,22 @@ func (c *Converter) toEditorBin(ctx context.Context, sourcePath, outDir string) 
 			}
 			defer os.Remove(convertPath)
 		}
+	}
+	srcHash = editorImportSourceHash(srcHash, ext)
+	if wordSaveNeedsDocxBridge(ext) {
+		docxFile, err := os.CreateTemp("", "go-office-open-*.docx")
+		if err != nil {
+			return err
+		}
+		docxPath := docxFile.Name()
+		_ = docxFile.Close()
+		defer os.Remove(docxPath)
+		if err := c.convertOffice(ctx, convertPath, docxPath, ext, "docx", ""); err != nil {
+			return fmt.Errorf("convert: open %s via docx: %w", ext, err)
+		}
+		slog.Debug("word open via docx bridge", "ext", ext, "docx", docxPath)
+		convertPath = docxPath
+		sourceExt = ".docx"
 	}
 	if editorBinReusable(outDir, srcHash) {
 		return ensureDocumentFonts(c, outDir)
@@ -153,7 +195,7 @@ func (c *Converter) toEditorBin(ctx context.Context, sourcePath, outDir string) 
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return err
 	}
-	xml := buildTaskXML(convertPath, partFile, c.fontDir, c.themeDir, filepath.Ext(sourcePath), allFontsPath, workDir)
+	xml := buildTaskXML(convertPath, partFile, c.fontDir, c.themeDir, sourceExt, allFontsPath, workDir)
 	if _, err := taskFile.WriteString(xml); err != nil {
 		taskFile.Close()
 		return err
@@ -220,12 +262,17 @@ func (c *Converter) saveChanges(ctx context.Context, cacheDir, destPath, targetE
 		"dest", destPath,
 		"ext", ext,
 		"changeFiles", len(entries),
-		"xlsxBridge", csvNeedsXlsxBridge(ext),
+		"xlsxBridge", spreadsheetSaveNeedsXlsxBridge(ext),
+		"docxBridge", wordSaveNeedsDocxBridge(ext),
+		"pptxBridge", slideSaveNeedsPptxBridge(ext),
 	)
+	if err := prepareChangesForSave(changesDir, ""); err != nil {
+		return err
+	}
 	// x2t's Editor.bin → CSV path (xlst_bin2csv) never calls apply_changes.
 	// Spreadsheet coauthoring patches are applied on the XLSX path, then we
-	// convert that workbook to CSV.
-	if csvNeedsXlsxBridge(ext) {
+	// convert that workbook to the flat/legacy/ODF target.
+	if spreadsheetSaveNeedsXlsxBridge(ext) {
 		n, err := canonicalizeCSVChangeFiles(changesDir)
 		if err != nil {
 			return err
@@ -252,16 +299,52 @@ func (c *Converter) saveChanges(ctx context.Context, cacheDir, destPath, targetE
 		slog.Debug("csv persist normalized", "path", destPath, "stripped", stripped)
 		return nil
 	}
-	return c.fromEditor(ctx, editorBin, destPath, targetExt, true)
+	// x2t's Editor.bin → RTF/DOC/ODT paths do not apply coauthoring patches.
+	// Apply changes on the DOCX path, then convert to the target.
+	if wordSaveNeedsDocxBridge(ext) {
+		docxPath := filepath.Join(cacheDir, "changes-applied.docx")
+		if err := c.fromEditor(ctx, editorBin, docxPath, "docx", true); err != nil {
+			return err
+		}
+		docxSize := int64(0)
+		if st, err := os.Stat(docxPath); err == nil {
+			docxSize = st.Size()
+		}
+		slog.Debug("docx after apply_changes", "path", docxPath, "bytes", docxSize, "textPreview", headPlainTextPreview(docxPath))
+		if err := c.convertOffice(ctx, docxPath, destPath, "docx", ext, cacheDir); err != nil {
+			return err
+		}
+		return nil
+	}
+	// x2t's Editor.bin → PPT/ODP paths do not apply coauthoring patches.
+	if slideSaveNeedsPptxBridge(ext) {
+		pptxPath := filepath.Join(cacheDir, "changes-applied.pptx")
+		if err := c.fromEditor(ctx, editorBin, pptxPath, "pptx", true); err != nil {
+			return err
+		}
+		pptxSize := int64(0)
+		if st, err := os.Stat(pptxPath); err == nil {
+			pptxSize = st.Size()
+		}
+		slog.Debug("pptx after apply_changes", "path", pptxPath, "bytes", pptxSize)
+		return c.convertOffice(ctx, pptxPath, destPath, "pptx", ext, cacheDir)
+	}
+	if err := c.fromEditor(ctx, editorBin, destPath, targetExt, true); err != nil {
+		return err
+	}
+	if ext == "txt" {
+		if stripped, err := rewriteNormalizedTxt(destPath); err != nil {
+			return err
+		} else if stripped {
+			slog.Debug("txt persist normalized", "path", destPath)
+		}
+	}
+	return nil
 }
 
-func csvNeedsXlsxBridge(ext string) bool {
-	switch strings.TrimPrefix(strings.ToLower(ext), ".") {
-	case "csv", "tsv", "scsv":
-		return true
-	default:
-		return false
-	}
+// Deprecated: use spreadsheetSaveNeedsXlsxBridge for save; csv/tsv/scsv only for open normalize.
+func flatTextNeedsDocxBridge(ext string) bool {
+	return wordSaveNeedsDocxBridge(ext)
 }
 
 func (c *Converter) fromEditor(ctx context.Context, editorBin, destPath, targetExt string, fromChanges bool) error {
@@ -283,6 +366,27 @@ func (c *Converter) fromEditor(ctx context.Context, editorBin, destPath, targetE
 	}
 	defer os.RemoveAll(runDir)
 
+	ext := strings.TrimPrefix(strings.ToLower(targetExt), ".")
+	fontDir := c.fontDir
+	allFontsPath := filepath.Join(runDir, "AllFonts.js")
+	var changesTempDir string
+	if fromChanges {
+		// Document Server apply_changes uses fonts_cache_info_path (converter/bin)
+		// for both m_sFontDir and m_sAllFontsPath. Regression f36d047 pointed these
+		// at core-fonts and an isolated run dir, which breaks word/txt saves while
+		// spreadsheet saves can still appear to work.
+		fontDir, allFontsPath = c.applyChangesFontPaths()
+		var err error
+		changesTempDir, err = os.MkdirTemp(cacheDir, "x2t-save-*")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(changesTempDir)
+		slog.Debug("x2t changes temp dir", "cache", cacheDir, "temp", changesTempDir, "fontDir", fontDir, "allFonts", allFontsPath)
+	}
+	c.logFontSources("reverse", cacheDir, allFontsPath)
+	xml := buildReverseTaskXML(editorBin, destPath, fontDir, c.themeDir, allFontsPath, ext, fromChanges, changesTempDir)
+
 	taskFile, err := os.CreateTemp("", "go-office-x2t-save-*.xml")
 	if err != nil {
 		return err
@@ -290,14 +394,6 @@ func (c *Converter) fromEditor(ctx context.Context, editorBin, destPath, targetE
 	taskPath := taskFile.Name()
 	defer os.Remove(taskPath)
 
-	ext := strings.TrimPrefix(strings.ToLower(targetExt), ".")
-	allFontsPath := filepath.Join(runDir, "AllFonts.js")
-	workDir := filepath.Join(runDir, "work")
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		return err
-	}
-	c.logFontSources("reverse", cacheDir, allFontsPath)
-	xml := buildReverseTaskXML(editorBin, destPath, c.fontDir, c.themeDir, allFontsPath, ext, fromChanges, workDir)
 	if _, err := taskFile.WriteString(xml); err != nil {
 		taskFile.Close()
 		return err
@@ -347,6 +443,12 @@ func (c *Converter) prepareX2TRunDir(cacheDir string) (string, error) {
 		return "", err
 	}
 	return runDir, nil
+}
+
+// applyChangesFontPaths returns m_sFontDir and m_sAllFontsPath for x2t apply_changes,
+// matching Document Server (both under converter/bin).
+func (c *Converter) applyChangesFontPaths() (fontDir, allFontsPath string) {
+	return c.saveFontDir, filepath.Join(c.saveFontDir, "AllFonts.js")
 }
 
 func copyExecutable(src, dst string) error {

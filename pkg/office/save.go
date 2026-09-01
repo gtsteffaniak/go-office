@@ -89,6 +89,7 @@ func (s *Server) PersistDocument(ctx context.Context, docKey string) error {
 	if err != nil {
 		return err
 	}
+	raw = convert.NormalizePersistedOutput(ext, raw)
 	xlsxInfo, _ := os.Stat(filepath.Join(cacheDir, "changes-applied.xlsx"))
 	xlsxBytes := int64(0)
 	if xlsxInfo != nil {
@@ -120,12 +121,19 @@ func (s *Server) persistFromCallback(ctx context.Context, payload callback.Paylo
 	}
 
 	if payload.URL != "" {
-		return s.downloadAndSave(ctx, payload.URL, doc.Path)
+		return s.downloadAndSave(ctx, payload.URL, doc.Path, doc.FileType)
+	}
+	cacheDir := filepath.Join(s.cacheDir(), payload.Key)
+	if !hasPendingChanges(cacheDir) {
+		if s.opts.Logger != nil {
+			s.opts.Logger.Debug("callback persist skipped; no pending changes", "key", payload.Key, "status", payload.Status)
+		}
+		return nil
 	}
 	return s.PersistDocument(ctx, payload.Key)
 }
 
-func (s *Server) downloadAndSave(ctx context.Context, rawURL, storagePath string) error {
+func (s *Server) downloadAndSave(ctx context.Context, rawURL, storagePath, fileType string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return err
@@ -138,7 +146,12 @@ func (s *Server) downloadAndSave(ctx context.Context, rawURL, storagePath string
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download %s: %s", rawURL, resp.Status)
 	}
-	return s.storage.Save(ctx, storagePath, io.LimitReader(resp.Body, 128<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 128<<20))
+	if err != nil {
+		return err
+	}
+	body = convert.NormalizePersistedOutput(fileType, body)
+	return s.storage.Save(ctx, storagePath, bytes.NewReader(body))
 }
 
 // NotifyCallback POSTs a save notification to the integrator callback URL.

@@ -91,6 +91,121 @@ func TestSaveChangesCSVRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSaveChangesTxtRoundTrip(t *testing.T) {
+	repo := testutil.RepoRoot(t)
+	assets := filepath.Join(repo, "assets")
+	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
+		t.Skip("x2t not available")
+	}
+	if !testutil.SampleExists(repo, "sample-files/sample.txt") {
+		t.Skip("sample txt missing")
+	}
+
+	work := testutil.NewWorkspace(t)
+	txtPath := filepath.Join(work.Root, filepath.FromSlash(work.CopySample("sample-files/sample.txt")))
+
+	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cacheDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if err := conv.ToEditorBin(ctx, txtPath, cacheDir); err != nil {
+		t.Fatal(err)
+	}
+
+	outPath := filepath.Join(cacheDir, "saved.txt")
+	if err := conv.FromEditorBin(ctx, cacheDir, outPath, "txt"); err != nil {
+		t.Fatalf("from editor bin: %v", err)
+	}
+	body, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) == 0 {
+		t.Fatal("saved.txt is empty")
+	}
+	if !strings.Contains(string(body), "Lorem ipsum") {
+		t.Fatalf("txt lost original content after round-trip: %q", truncate(body, 200))
+	}
+}
+
+func TestSaveChangesTxtUsesDirectPath(t *testing.T) {
+	repo := testutil.RepoRoot(t)
+	assets := filepath.Join(repo, "assets")
+	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
+		t.Skip("x2t not available")
+	}
+	if !testutil.SampleExists(repo, "sample-files/sample.txt") {
+		t.Skip("sample txt missing")
+	}
+
+	work := testutil.NewWorkspace(t)
+	txtPath := filepath.Join(work.Root, filepath.FromSlash(work.CopySample("sample-files/sample.txt")))
+	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if err := conv.ToEditorBin(ctx, txtPath, cacheDir); err != nil {
+		t.Fatal(err)
+	}
+
+	changesDir := filepath.Join(cacheDir, "changes")
+	if err := os.MkdirAll(changesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(changesDir, "changes0.json"), []byte(`["txt-change"]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	outPath := filepath.Join(cacheDir, "saved.txt")
+	if err := conv.SaveChanges(ctx, cacheDir, outPath, "txt"); err != nil {
+		t.Fatalf("SaveChanges: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cacheDir, "changes-applied.docx")); err == nil {
+		t.Fatal("txt save must not use docx bridge")
+	}
+	if body, err := os.ReadFile(outPath); err != nil || len(body) == 0 {
+		t.Fatalf("saved.txt missing or empty: %v", err)
+	}
+}
+
+func TestToEditorBinTxtSkipsDocxOpenBridge(t *testing.T) {
+	repo := testutil.RepoRoot(t)
+	assets := filepath.Join(repo, "assets")
+	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
+		t.Skip("x2t not available")
+	}
+	if !testutil.SampleExists(repo, "sample-files/sample.txt") {
+		t.Skip("sample txt missing")
+	}
+
+	work := testutil.NewWorkspace(t)
+	txtPath := filepath.Join(work.Root, filepath.FromSlash(work.CopySample("sample-files/sample.txt")))
+	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if err := conv.ToEditorBin(ctx, txtPath, cacheDir); err != nil {
+		t.Fatal(err)
+	}
+	hash, err := os.ReadFile(filepath.Join(cacheDir, "source.sha256"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(hash), ":open-docx-v1") {
+		t.Fatalf("txt Editor.bin should use native txt import, not docx bridge: %q", hash)
+	}
+}
+
 func TestSaveChangesCSVAppliesCapturedCellEdit(t *testing.T) {
 	repo := testutil.RepoRoot(t)
 	assets := filepath.Join(repo, "assets")

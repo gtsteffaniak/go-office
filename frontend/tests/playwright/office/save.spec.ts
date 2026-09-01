@@ -24,7 +24,19 @@ const DOCX_FIND = "DOCX";
 const DOCX_REPLACEMENT = "REPLACED";
 const DOCX_EXPECTED = "Demonstration of REPLACED";
 
-test.use({ trace: bundledTest ? "retain-on-failure" : "on-first-retry" });
+const TXT_SOURCE = "sample-files/sample.txt";
+const TXT_ORIGINAL = "Sample-Files.com";
+const TXT_FIND = "Sample-Files";
+const TXT_REPLACEMENT = "REPLACED-SOURCE";
+const TXT_EXPECTED = "REPLACED-SOURCE.com";
+
+const SAVE_TEST_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_TEST_TIMEOUT ?? (bundledTest ? 150_000 : 120_000));
+
+test.describe.configure({ mode: "serial" });
+test.use({
+  trace: bundledTest ? "retain-on-failure" : "on-first-retry",
+  timeout: SAVE_TEST_TIMEOUT,
+});
 
 test("docx save round-trip via demo file API", async ({ page, request }, testInfo) => {
   const file = forkSample(DOCX_SOURCE, testInfo);
@@ -69,4 +81,27 @@ test("csv save round-trip via demo file API", async ({ page, request }, testInfo
 
   await assertDemoFileContains(request, file, CSV_REPLACEMENT);
   await assertDemoFileContains(request, file, CSV_ORIGINAL, { present: false });
+});
+
+test("txt save round-trip via demo file API", async ({ page, request }, testInfo) => {
+  const file = forkSample(TXT_SOURCE, testInfo);
+  await assertDemoFileContains(request, file, TXT_ORIGINAL);
+
+  await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
+  await expect(page.locator("#status")).not.toContainText(/^Error:/, {
+    timeout: STATUS_OK_TIMEOUT,
+  });
+  await waitForEditorReady(page, "word");
+  await waitForEditorInteractive(page, "word");
+
+  await replaceDocumentText(page, "word", TXT_FIND, TXT_REPLACEMENT);
+  await triggerEditorSave(page, "word");
+  await waitForSaveDone(page, {
+    request,
+    filePath: file,
+    marker: TXT_EXPECTED,
+  });
+
+  await assertDemoFileContains(request, file, TXT_EXPECTED);
+  await assertDemoFileContains(request, file, TXT_ORIGINAL, { present: false });
 });

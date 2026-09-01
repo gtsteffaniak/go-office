@@ -33,13 +33,34 @@
     li + li { border-top: 1px solid #eee; }
     a {
       display: flex;
-      justify-content: space-between;
-      gap: 1rem;
+      align-items: center;
+      gap: 0.85rem;
       padding: 0.85rem 1rem;
       color: #0b57d0;
       text-decoration: none;
     }
     a:hover { background: #f7faff; }
+    .thumb {
+      width: 96px;
+      height: 96px;
+      object-fit: cover;
+      border-radius: 4px;
+      border: 1px solid #ddd;
+      background: #fafafa;
+      flex-shrink: 0;
+    }
+    .row-text {
+      display: flex;
+      flex: 1;
+      justify-content: space-between;
+      gap: 1rem;
+      min-width: 0;
+    }
+    .row-text span:first-child {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .meta { color: #777; font-size: 0.9rem; white-space: nowrap; }
     .empty { padding: 1rem; color: #777; }
   </style>
@@ -53,8 +74,11 @@
       {{range .Files}}
       <li>
         <a href="{{.URL}}">
-          <span>{{.Name}}</span>
-          <span class="meta">{{.Size}}</span>
+          <img class="thumb" src="{{.ThumbnailURL}}" alt="" loading="lazy" data-sample-thumb />
+          <span class="row-text">
+            <span>{{.Name}}</span>
+            <span class="meta">{{.Size}}</span>
+          </span>
         </a>
       </li>
       {{end}}

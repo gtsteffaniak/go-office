@@ -45,9 +45,10 @@ type Handler struct {
 }
 
 type landingFile struct {
-	Name string
-	URL  string
-	Size string
+	Name         string
+	URL          string
+	ThumbnailURL string
+	Size         string
 }
 
 type landingData struct {
@@ -115,6 +116,9 @@ func Attach(srv *office.Server, store office.Storage, opts Options) error {
 	})
 	api.HandleFunc("POST /callback", func(w http.ResponseWriter, r *http.Request) {
 		h.serveCallback(w, r)
+	})
+	api.HandleFunc("GET /thumbnail", func(w http.ResponseWriter, r *http.Request) {
+		h.serveThumbnail(w, r)
 	})
 	srv.Mount(apiBase+"/", http.StripPrefix(apiBase, api))
 	return nil
@@ -252,6 +256,50 @@ func (h *Handler) serveCallback(w http.ResponseWriter, r *http.Request) {
 	h.office.HandleCallback(w, r)
 }
 
+func (h *Handler) serveThumbnail(w http.ResponseWriter, r *http.Request) {
+	file := strings.TrimSpace(r.URL.Query().Get("file"))
+	if file == "" || !h.isAllowedSample(file) {
+		http.NotFound(w, r)
+		return
+	}
+	ctx := r.Context()
+	info, err := h.store.Stat(ctx, file)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	origin := strings.TrimSuffix(h.opts.PublicOrigin, "/")
+	apiBase := h.opts.APIBasePath
+	fileURL := origin + apiBase + "/demo/file/" + strings.TrimPrefix(file, "/")
+	ext := strings.TrimPrefix(strings.ToLower(path.Ext(info.Name)), ".")
+	key := documentKey(file, info, h.fileFingerprint(ctx, file, info))
+	req := office.ConverterRequest{
+		FileType:   ext,
+		Key:        key,
+		OutputType: "jpg",
+		Title:      info.Name,
+		URL:        fileURL,
+		Thumbnail:  &office.ConverterThumbnail{Width: 200, Height: 200, Aspect: 2, First: true},
+	}
+	if _, err := h.office.RunConverter(ctx, origin, req); err != nil {
+		if h.opts.Logger != nil {
+			h.opts.Logger.Error("demo thumbnail", "file", file, "err", err)
+		}
+		http.Error(w, "thumbnail failed", http.StatusInternalServerError)
+		return
+	}
+	cacheName := office.ConvCacheDirName(key, "jpg")
+	outPath := filepath.Join(h.office.CacheDir(), cacheName, office.ConvOutputBasename("jpg", req.Thumbnail))
+	raw, err := os.ReadFile(outPath)
+	if err != nil {
+		http.Error(w, "thumbnail missing", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	_, _ = w.Write(raw)
+}
+
 func (h *Handler) serveLanding(w http.ResponseWriter, _ *http.Request) {
 	files, err := h.listSampleFiles()
 	if err != nil {
@@ -298,15 +346,20 @@ func (h *Handler) listSampleFiles() ([]landingFile, error) {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
+		if strings.Contains(rel, "/playwright/") {
+			return nil
+		}
 		fi, err := d.Info()
 		if err != nil {
 			return err
 		}
 		viewPath := office.URLPath(h.office.BasePath(), "demo/view")
+		thumbURL := h.opts.APIBasePath + "/demo/thumbnail?file=" + url.QueryEscape(rel)
 		files = append(files, landingFile{
-			Name: rel,
-			URL:  viewPath + "?file=" + url.QueryEscape(rel),
-			Size: formatSize(fi.Size()),
+			Name:         rel,
+			URL:          viewPath + "?file=" + url.QueryEscape(rel),
+			ThumbnailURL: thumbURL,
+			Size:         formatSize(fi.Size()),
 		})
 		return nil
 	})

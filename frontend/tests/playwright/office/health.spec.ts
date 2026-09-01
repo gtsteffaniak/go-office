@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../test-setup";
 
 test.describe.configure({ mode: "parallel" });
 
@@ -26,7 +26,10 @@ test.describe("demo infrastructure", () => {
   test("demo landing page loads", async ({ page }) => {
     await page.goto("/demo/", { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: /go-office demo/i })).toBeVisible();
-    await expect(page.locator("code").first()).toBeVisible();
+    await expect(page.locator('a[href="/demo/view?file=sample-files%2Fsample.csv"]')).toBeVisible();
+    await expect(
+      page.locator('a[href="/demo/view?file=sample-files%2Fsample.csv"] img.thumb[data-sample-thumb]'),
+    ).toBeVisible();
   });
 
   test("site home loads", async ({ page }) => {

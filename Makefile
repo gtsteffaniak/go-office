@@ -187,6 +187,9 @@ fonts: check-linux
 test:
 	$(GO) test -race ./...
 
+lint:
+	golangci-lint run ./...
+
 PLAYWRIGHT_BASE_IMAGE ?= go-office-playwright-base
 PLAYWRIGHT_TEST_IMAGE ?= go-office-playwright-tests
 PLAYWRIGHT_LOCAL_CONTAINER ?= go-office-playwright-local

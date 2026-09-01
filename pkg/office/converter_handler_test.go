@@ -17,10 +17,7 @@ import (
 
 func TestHandleConverterJSON(t *testing.T) {
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
-	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	sample := filepath.Join(repo, "sample-files", "sample.docx")
 	if _, err := os.Stat(sample); err != nil {
 		t.Skip("sample docx missing")

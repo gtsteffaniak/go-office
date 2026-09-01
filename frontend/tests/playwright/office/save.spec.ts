@@ -7,6 +7,8 @@ import {
   replaceDocumentText,
   triggerEditorSave,
   assertDemoFileContains,
+  discoverSlideMarker,
+  fetchDemoFileBody,
 } from "../editor";
 import { forkSample } from "../fork-sample";
 
@@ -29,6 +31,19 @@ const TXT_ORIGINAL = "Sample-Files.com";
 const TXT_FIND = "Sample-Files";
 const TXT_REPLACEMENT = "REPLACED-SOURCE";
 const TXT_EXPECTED = "REPLACED-SOURCE.com";
+
+const RTF_SOURCE = "sample-files/sample.rtf";
+const RTF_ORIGINAL = "Lorem ipsum dolor sit amet";
+const RTF_FIND = "ipsum";
+const RTF_REPLACEMENT = "REPLACED";
+const RTF_EXPECTED = "Lorem REPLACED dolor sit amet";
+
+const ODS_SOURCE = "sample-files/sample.ods";
+const ODS_CELL = CSV_CELL;
+const ODS_ORIGINAL = CSV_ORIGINAL;
+const ODS_REPLACEMENT = "REPLACED_ODS_ID";
+
+const PPT_SOURCE = "sample-files/sample.ppt";
 
 const SAVE_TEST_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_TEST_TIMEOUT ?? (bundledTest ? 150_000 : 120_000));
 
@@ -104,4 +119,74 @@ test("txt save round-trip via demo file API", async ({ page, request }, testInfo
 
   await assertDemoFileContains(request, file, TXT_EXPECTED);
   await assertDemoFileContains(request, file, TXT_ORIGINAL, { present: false });
+});
+
+test("rtf save round-trip via demo file API", async ({ page, request }, testInfo) => {
+  const file = forkSample(RTF_SOURCE, testInfo);
+  await assertDemoFileContains(request, file, RTF_ORIGINAL);
+
+  await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
+  await expect(page.locator("#status")).not.toContainText(/^Error:/, {
+    timeout: STATUS_OK_TIMEOUT,
+  });
+  await waitForEditorReady(page, "word");
+  await waitForEditorInteractive(page, "word");
+
+  await replaceDocumentText(page, "word", RTF_FIND, RTF_REPLACEMENT);
+  await triggerEditorSave(page, "word");
+  await waitForSaveDone(page, {
+    request,
+    filePath: file,
+    marker: RTF_EXPECTED,
+  });
+
+  await assertDemoFileContains(request, file, RTF_EXPECTED);
+});
+
+test("ods save round-trip via demo file API", async ({ page, request }, testInfo) => {
+  const file = forkSample(ODS_SOURCE, testInfo);
+  await assertDemoFileContains(request, file, ODS_ORIGINAL);
+
+  await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
+  await expect(page.locator("#status")).not.toContainText(/^Error:/, {
+    timeout: STATUS_OK_TIMEOUT,
+  });
+  await waitForEditorReady(page, "cell");
+  await waitForEditorInteractive(page, "cell");
+
+  await setCellContent(page, "cell", ODS_CELL, ODS_REPLACEMENT);
+  await triggerEditorSave(page, "cell");
+  await waitForSaveDone(page, {
+    request,
+    filePath: file,
+    marker: ODS_REPLACEMENT,
+  });
+
+  await assertDemoFileContains(request, file, ODS_REPLACEMENT);
+  await assertDemoFileContains(request, file, ODS_ORIGINAL, { present: false });
+});
+
+test("ppt save round-trip via demo file API", async ({ page, request }, testInfo) => {
+  const file = forkSample(PPT_SOURCE, testInfo);
+  const initial = await fetchDemoFileBody(request, file);
+  const marker = discoverSlideMarker(initial);
+  const replacement = "REPLACED_SLIDE";
+
+  await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
+  await expect(page.locator("#status")).not.toContainText(/^Error:/, {
+    timeout: STATUS_OK_TIMEOUT,
+  });
+  await waitForEditorReady(page, "slide");
+  await waitForEditorInteractive(page, "slide");
+
+  await replaceDocumentText(page, "slide", marker, replacement);
+  await triggerEditorSave(page, "slide");
+  await waitForSaveDone(page, {
+    request,
+    filePath: file,
+    marker: replacement,
+  });
+
+  await assertDemoFileContains(request, file, replacement);
+  await assertDemoFileContains(request, file, marker, { present: false });
 });

@@ -19,6 +19,8 @@ import (
 type Options struct {
 	AssetDir string
 	Limit    int
+	// Runner overrides the x2t subprocess (tests only).
+	Runner X2TRunner
 }
 
 // Converter runs Euro-Office x2t to produce Editor.bin from office files.
@@ -32,6 +34,7 @@ type Converter struct {
 	fontSelection []byte // converter/bin/font_selection.bin frozen at startup
 	limit         chan struct{}
 	inflight      sync.WaitGroup
+	runner        X2TRunner
 }
 
 // New creates a converter. Returns an error when x2t is missing.
@@ -65,6 +68,10 @@ func New(opts Options) (*Converter, error) {
 	}
 	seedAllFonts := rewriteAllFontsPaths(rawAllFonts, opts.AssetDir)
 	fontSel, _ := os.ReadFile(fontSelPath)
+	runner := opts.Runner
+	if runner == nil {
+		runner = defaultX2TRunner(binDir)
+	}
 	return &Converter{
 		assetDir:      opts.AssetDir,
 		binDir:        binDir,
@@ -74,6 +81,7 @@ func New(opts Options) (*Converter, error) {
 		seedAllFonts:  seedAllFonts,
 		fontSelection: fontSel,
 		limit:         make(chan struct{}, limit),
+		runner:        runner,
 	}, nil
 }
 
@@ -579,20 +587,26 @@ func (c *Converter) convertOfficeInner(ctx context.Context, srcPath, destPath, f
 // When isolatedDir is set, x2t runs with that cwd and a private DoctRenderer.config so
 // concurrent saves do not share converter/bin/AllFonts.js.
 func (c *Converter) runX2t(ctx context.Context, taskPath string, isolatedDir string) ([]byte, error) {
-	dir := c.binDir
-	if isolatedDir != "" {
-		dir = isolatedDir
+	return c.runner(ctx, taskPath, isolatedDir)
+}
+
+func defaultX2TRunner(binDir string) X2TRunner {
+	return func(ctx context.Context, taskPath string, isolatedDir string) ([]byte, error) {
+		dir := binDir
+		if isolatedDir != "" {
+			dir = isolatedDir
+		}
+		// Always invoke ./x2t relative to dir. Isolated runs use a copied binary so DoctRenderer
+		// picks up the per-run config beside the binary, not converter/bin/AllFonts.js.
+		script := fmt.Sprintf(
+			"chmod +x ./x2t 2>/dev/null; LD_LIBRARY_PATH=%s exec ./x2t %s",
+			shellQuote(binDir),
+			shellQuote(taskPath),
+		)
+		cmd := exec.CommandContext(ctx, "/bin/sh", "-c", script)
+		cmd.Dir = dir
+		return cmd.CombinedOutput()
 	}
-	// Always invoke ./x2t relative to dir. Isolated runs use a copied binary so DoctRenderer
-	// picks up the per-run config beside the binary, not converter/bin/AllFonts.js.
-	script := fmt.Sprintf(
-		"chmod +x ./x2t 2>/dev/null; LD_LIBRARY_PATH=%s exec ./x2t %s",
-		shellQuote(c.binDir),
-		shellQuote(taskPath),
-	)
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", script)
-	cmd.Dir = dir
-	return cmd.CombinedOutput()
 }
 
 func shellQuote(s string) string {

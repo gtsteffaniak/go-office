@@ -745,12 +745,29 @@ export function officeFileContains(buf: Buffer, marker: string): boolean {
   if (buf.includes(Buffer.from(marker))) {
     return true;
   }
-  const xml = zipEntryText(buf, "word/document.xml");
-  if (xml.includes(marker)) {
-    return true;
+  for (const entry of ["word/document.xml", "ppt/slides/slide1.xml", "content.xml"]) {
+    const xml = zipEntryText(buf, entry);
+    if (xml.includes(marker)) {
+      return true;
+    }
   }
   const utf16 = Buffer.from(marker, "utf16le");
   return buf.includes(utf16);
+}
+
+/** First short slide title/body string from a presentation file (pptx or ppt after save). */
+export function discoverSlideMarker(buf: Buffer): string {
+  const slide = zipEntryText(buf, "ppt/slides/slide1.xml");
+  const fromXml = slide.match(/<a:t>([^<]{3,60})<\/a:t>/);
+  if (fromXml) {
+    return fromXml[1];
+  }
+  const text = decodeOfficeText(buf);
+  const words = text.match(/[A-Za-z][A-Za-z0-9 ,.'-]{4,40}/g);
+  if (words?.length) {
+    return words[0].trim();
+  }
+  throw new Error("no slide marker found in presentation sample");
 }
 
 function decodeOfficeText(buf: Buffer): string {

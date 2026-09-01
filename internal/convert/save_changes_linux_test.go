@@ -19,11 +19,7 @@ import (
 
 func TestSaveChangesCSVRoundTrip(t *testing.T) {
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
-	x2t := filepath.Join(assets, "converter", "bin", "x2t")
-	if st, err := os.Stat(x2t); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	if !testutil.SampleExists(repo, "sample-files/sample.csv") {
 		t.Skip("sample csv missing")
 	}
@@ -93,10 +89,7 @@ func TestSaveChangesCSVRoundTrip(t *testing.T) {
 
 func TestSaveChangesTxtRoundTrip(t *testing.T) {
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
-	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	if !testutil.SampleExists(repo, "sample-files/sample.txt") {
 		t.Skip("sample txt missing")
 	}
@@ -134,10 +127,7 @@ func TestSaveChangesTxtRoundTrip(t *testing.T) {
 
 func TestSaveChangesTxtUsesDirectPath(t *testing.T) {
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
-	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	if !testutil.SampleExists(repo, "sample-files/sample.txt") {
 		t.Skip("sample txt missing")
 	}
@@ -177,10 +167,7 @@ func TestSaveChangesTxtUsesDirectPath(t *testing.T) {
 
 func TestToEditorBinTxtSkipsDocxOpenBridge(t *testing.T) {
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
-	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	if !testutil.SampleExists(repo, "sample-files/sample.txt") {
 		t.Skip("sample txt missing")
 	}
@@ -208,10 +195,7 @@ func TestToEditorBinTxtSkipsDocxOpenBridge(t *testing.T) {
 
 func TestSaveChangesCSVAppliesCapturedCellEdit(t *testing.T) {
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
-	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	if !testutil.SampleExists(repo, "sample-files/sample.csv") {
 		t.Skip("sample csv missing")
 	}
@@ -262,10 +246,7 @@ func TestSaveChangesCSVAppliesCapturedCellEdit(t *testing.T) {
 
 func TestSaveChangesCSVRemapsExcelSheetID(t *testing.T) {
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
-	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	if !testutil.SampleExists(repo, "sample-files/sample.csv") {
 		t.Skip("sample csv missing")
 	}
@@ -323,10 +304,7 @@ func firstCSVDataCell(raw []byte) string {
 
 func TestPrepareX2TRunDirIsolatesSharedAllFonts(t *testing.T) {
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
-	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "AllFonts.js")); err != nil || st.Size() == 0 {
 		t.Skip("AllFonts.js missing")
 	}
@@ -383,10 +361,7 @@ func TestPrepareX2TRunDirIsolatesSharedAllFonts(t *testing.T) {
 
 func TestAllFontsPathsExist(t *testing.T) {
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
-	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "AllFonts.js")); err != nil || st.Size() == 0 {
 		t.Skip("AllFonts.js missing")
 	}
@@ -427,10 +402,7 @@ func TestAllFontsPathsExist(t *testing.T) {
 
 func TestToEditorBinSnapshotsFontArtifacts(t *testing.T) {
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
-	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	if !testutil.SampleExists(repo, "sample-files/sample.csv") {
 		t.Skip("sample csv missing")
 	}
@@ -460,11 +432,8 @@ func TestSaveChangesCSVPlaywrightLiveBlob(t *testing.T) {
 
 func TestSharedAllFontsUnmodifiedDuringConcurrentSave(t *testing.T) {
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	sharedAllFonts := filepath.Join(assets, "converter", "bin", "AllFonts.js")
-	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
 	before, err := os.Stat(sharedAllFonts)
 	if err != nil || before.Size() == 0 {
 		t.Skip("AllFonts.js missing")
@@ -488,10 +457,7 @@ func TestSaveChangesCSVConcurrentPlaywrightLoad(t *testing.T) {
 	// OFFICE_CONVERT_LIMIT=6. Without per-run DoctRenderer isolation, reverse x2t hits:
 	//   exit status 86: CFontFileLoader.LoadFontFromData ... length of null
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
-	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	if !testutil.SampleExists(repo, "sample-files/sample.csv") {
 		t.Skip("sample csv missing")
 	}
@@ -561,10 +527,7 @@ func TestSaveChangesCSVConcurrentWithDocumentOpens(t *testing.T) {
 	// Forward ToEditorBin and reverse SaveChanges must each use isolated x2t run dirs
 	// with per-document font snapshots; sharing converter/bin/AllFonts.js races.
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
-	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	if !testutil.SampleExists(repo, "sample-files/sample.csv") ||
 		!testutil.SampleExists(repo, "sample-files/sample.docx") ||
 		!testutil.SampleExists(repo, "sample-files/sample.xlsx") ||
@@ -685,11 +648,7 @@ func TestSaveChangesCSVConcurrentWithDocumentOpens(t *testing.T) {
 
 func TestToEditorBinReconvertsWhenSourceChanges(t *testing.T) {
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
-	x2t := filepath.Join(assets, "converter", "bin", "x2t")
-	if st, err := os.Stat(x2t); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	if !testutil.SampleExists(repo, "sample-files/sample.csv") {
 		t.Skip("sample csv missing")
 	}
@@ -743,11 +702,7 @@ func TestToEditorBinReconvertsWhenSourceChanges(t *testing.T) {
 
 func TestConcurrentToEditorBinSameDir(t *testing.T) {
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
-	x2t := filepath.Join(assets, "converter", "bin", "x2t")
-	if st, err := os.Stat(x2t); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	if !testutil.SampleExists(repo, "sample-files/sample.docx") {
 		t.Skip("sample docx missing")
 	}

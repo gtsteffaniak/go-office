@@ -19,10 +19,7 @@ import (
 
 func TestPersistCSVAppliesPendingChanges(t *testing.T) {
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
-	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	if !testutil.SampleExists(repo, "sample-files/sample.csv") {
 		t.Skip("sample csv missing")
 	}
@@ -92,10 +89,7 @@ func TestPersistCSVAppliesPendingChanges(t *testing.T) {
 
 func TestPersistCSVThenDocxDoesNotBlock(t *testing.T) {
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
-	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	if !testutil.SampleExists(repo, "sample-files/sample.csv") || !testutil.SampleExists(repo, "sample-files/sample.docx") {
 		t.Skip("samples missing")
 	}

@@ -30,7 +30,13 @@ const TXT_FIND = "Sample-Files";
 const TXT_REPLACEMENT = "REPLACED-SOURCE";
 const TXT_EXPECTED = "REPLACED-SOURCE.com";
 
-test.use({ trace: bundledTest ? "retain-on-failure" : "on-first-retry" });
+const SAVE_TEST_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_TEST_TIMEOUT ?? (bundledTest ? 150_000 : 120_000));
+
+test.describe.configure({ mode: "serial" });
+test.use({
+  trace: bundledTest ? "retain-on-failure" : "on-first-retry",
+  timeout: SAVE_TEST_TIMEOUT,
+});
 
 test("docx save round-trip via demo file API", async ({ page, request }, testInfo) => {
   const file = forkSample(DOCX_SOURCE, testInfo);

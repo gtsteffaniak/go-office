@@ -346,6 +346,9 @@ func (h *Handler) listSampleFiles() ([]landingFile, error) {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
+		if strings.Contains(rel, "/playwright/") {
+			return nil
+		}
 		fi, err := d.Info()
 		if err != nil {
 			return err

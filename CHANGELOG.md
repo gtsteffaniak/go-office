@@ -19,7 +19,7 @@ Euro-Office / ONLYOFFICE editor assets (`web-apps/`, `sdkjs/`, `x2t`) are **not*
 - **`office.ValidAssetDir`** and **`office.ExpectedAssetsVersion`** (embedded pin from `scripts/euro-office.version`).
 - Single **`EURO_OFFICE_VERSION`** pin (replaces `EURO_OFFICE_RELEASE` / `EURO_OFFICE_PROTOCOL`).
 - **`cmd/gen-assets-version`** generates `pkg/office/assets_version.go`.
-- **`cmd/go-office`**: calls `EnsureAssets` at startup; `-skip-asset-fetch` / `OFFICE_SKIP_ASSET_FETCH` for pre-baked images.
+- **`cmd/go-office`**: calls `EnsureAssets` at startup (skips download when assets are already present); optional `-skip-asset-fetch` / `OFFICE_SKIP_ASSET_FETCH` to fail instead of downloading when assets are missing.
 
 ### Conversion API
 

@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -145,7 +146,7 @@ func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey st
 	if r.Method == http.MethodPost {
 		body, _ := io.ReadAll(io.LimitReader(r.Body, 16<<20))
 		if h.Debug {
-			h.Logger.Debug("coauthoring message", "key", docKey, "sid", sid, "body", string(body))
+			h.Logger.Debug("coauthoring message", "key", docKey, "sid", sid, "body", summarizeCoauthoringBody(string(body)))
 		}
 		sess := getSession(sid, docKey, h.Build, h.BasePath)
 		for _, packet := range parsePostPackets(string(body)) {
@@ -185,4 +186,14 @@ func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey st
 	}
 
 	_, _ = w.Write([]byte("6"))
+}
+
+func summarizeCoauthoringBody(body string) string {
+	if strings.Contains(body, `"saveChanges"`) {
+		return fmt.Sprintf("<saveChanges %d bytes omitted>", len(body))
+	}
+	if len(body) > 400 {
+		return body[:400] + "...(truncated)"
+	}
+	return body
 }

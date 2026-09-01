@@ -249,7 +249,21 @@ func (h *Handler) handleSaveChanges(sess *session, msg map[string]any, docKey st
 		if err != nil && h.Logger != nil {
 			h.Logger.Error("saveChanges write failed", "key", docKey, "err", err)
 		} else if h.Logger != nil {
-			h.Logger.Debug("saveChanges queued", "key", docKey, "index", index, "reSave", messageBool(msg, "reSave"), "preview", changeBlobPreview(blobs))
+			first := ""
+			if len(blobs) > 0 {
+				preview := changeBlobPreview(blobs[:1])
+				if len(preview) > 0 {
+					first = preview[0]
+				}
+			}
+			h.Logger.Debug("saveChanges queued",
+				"key", docKey,
+				"index", index,
+				"blobs", len(blobs),
+				"reSave", messageBool(msg, "reSave"),
+				"endSaveChanges", messageBool(msg, "endSaveChanges"),
+				"firstBlob", first,
+			)
 		}
 	}
 

@@ -4,6 +4,8 @@ import (
 	"archive/zip"
 	"bytes"
 	"io"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -30,21 +32,55 @@ func OOXMLPart(raw []byte, name string) ([]byte, error) {
 	return nil, io.ErrUnexpectedEOF
 }
 
-// OOXMLPlainText concatenates w:t nodes from word/document.xml.
+// OOXMLPlainText concatenates w:t nodes from word/document.xml, preserving
+// paragraph breaks from w:p boundaries.
 func OOXMLPlainText(raw []byte) string {
 	part, err := OOXMLPart(raw, "word/document.xml")
 	if err != nil {
 		return ""
 	}
-	matches := ooxmlTextRe.FindAllSubmatch(part, -1)
-	var b strings.Builder
-	for _, m := range matches {
-		if len(m) > 1 {
-			if b.Len() > 0 {
-				b.WriteByte(' ')
+	paragraphs := strings.Split(string(part), "</w:p>")
+	lines := make([]string, 0, len(paragraphs))
+	for _, para := range paragraphs {
+		matches := ooxmlTextRe.FindAllSubmatch([]byte(para), -1)
+		if len(matches) == 0 {
+			continue
+		}
+		var b strings.Builder
+		for _, m := range matches {
+			if len(m) > 1 {
+				b.Write(m[1])
 			}
-			b.Write(m[1])
+		}
+		if b.Len() > 0 {
+			lines = append(lines, b.String())
 		}
 	}
-	return b.String()
+	return strings.Join(lines, "\n")
+}
+
+// WritePlainTextFromDocx extracts visible text from a docx and writes destPath.
+// Used by tests and legacy tooling; txt persist goes through x2t txt export.
+func WritePlainTextFromDocx(docxPath, destPath string) error {
+	raw, err := os.ReadFile(docxPath)
+	if err != nil {
+		return err
+	}
+	body := normalizePlainTextBytes([]byte(OOXMLPlainText(raw)))
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(destPath, body, 0o644)
+}
+
+func headPlainTextPreview(docxPath string) string {
+	raw, err := os.ReadFile(docxPath)
+	if err != nil {
+		return ""
+	}
+	text := OOXMLPlainText(raw)
+	if len(text) > 180 {
+		return text[:180]
+	}
+	return text
 }

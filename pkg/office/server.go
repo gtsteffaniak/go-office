@@ -145,6 +145,8 @@ func (s *Server) buildRoutes() {
 	s.mux.HandleFunc(joinURLPath(prefix, "healthcheck"), s.handleHealthCheck)
 	s.mux.HandleFunc(joinURLPath(prefix, "info/info.json"), s.handleInfoJSON)
 	s.mux.HandleFunc(joinURLPath(prefix, "plugins.json"), s.handlePluginsJSON)
+	s.mux.HandleFunc(joinURLPath(prefix, "converter"), s.handleConverter)
+	s.mux.HandleFunc(joinURLPath(prefix, "ConvertService.ashx"), s.handleConverter)
 
 	if s.opts.AssetDir != "" {
 		webApps := static.Dir(s.opts.AssetDir, "web-apps")
@@ -172,13 +174,15 @@ func (s *Server) buildRoutes() {
 			}
 			s.mux.HandleFunc("/document_editor_service_worker.js", s.handleServiceWorker)
 			s.mux.HandleFunc("/plugins.json", s.handlePluginsJSON)
+			s.mux.HandleFunc("/converter", s.handleConverter)
+			s.mux.HandleFunc("/ConvertService.ashx", s.handleConverter)
 		}
 	}
 
 	cacheDir := s.cacheDir()
 	_ = os.MkdirAll(cacheDir, 0o755)
 	cachePrefix := joinURLPath(prefix, "cache/files")
-	s.mux.Handle(cachePrefix+"/", http.StripPrefix(cachePrefix, noStoreEditorBin(http.FileServer(http.Dir(cacheDir)))))
+	s.mux.Handle(cachePrefix+"/", http.StripPrefix(cachePrefix, cacheFileServer(http.Dir(cacheDir))))
 
 	s.mux.HandleFunc("/downloadfile/", s.handleDownloadFile)
 	if base := strings.Trim(strings.TrimSpace(prefix), "/"); base != "" && !mirrorAssetsAtRoot(prefix) {
@@ -231,6 +235,11 @@ func (s *Server) registerCoauthoringFallback() {
 		}
 		http.NotFound(w, r)
 	}))
+}
+
+// CacheDir returns the document cache directory (assets/cache).
+func (s *Server) CacheDir() string {
+	return s.cacheDir()
 }
 
 func (s *Server) cacheDir() string {
@@ -315,10 +324,13 @@ func stripMountPath(prefix, urlPath string) string {
 	return strings.TrimPrefix(strings.TrimPrefix(urlPath, mount), "/")
 }
 
-func noStoreEditorBin(next http.Handler) http.Handler {
+func cacheFileServer(root http.FileSystem) http.Handler {
+	next := http.FileServer(root)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "Editor.bin") {
 			w.Header().Set("Cache-Control", "no-store")
+		} else if strings.Contains(r.URL.Path, "/conv_") {
+			w.Header().Set("Cache-Control", "public, max-age=86400")
 		}
 		next.ServeHTTP(w, r)
 	})

@@ -66,7 +66,10 @@ func TestDemoLandingAndConfig(t *testing.T) {
 		t.Fatalf("landing status=%d body=%q", rec.Code, body[:min(200, len(body))])
 	}
 	if !strings.Contains(body, "/office/demo/view?file=") {
-		t.Fatal("expected viewer links on landing page")
+		t.Fatal("expected relative viewer links on landing page")
+	}
+	if strings.Contains(body, "http://localhost") {
+		t.Fatal("landing page should not use absolute localhost URLs")
 	}
 
 	rec = httptest.NewRecorder()
@@ -74,6 +77,12 @@ func TestDemoLandingAndConfig(t *testing.T) {
 	body = rec.Body.String()
 	if rec.Code != http.StatusOK || !strings.Contains(body, "DocsAPI.DocEditor") {
 		t.Fatalf("viewer status=%d body=%q", rec.Code, body[:min(200, len(body))])
+	}
+	if !strings.Contains(body, "destroyEditor") {
+		t.Fatal("viewer must destroy the editor on navigation so CSV dialogs cannot trap the page")
+	}
+	if !strings.Contains(body, "pagehide") || !strings.Contains(body, "beforeunload") {
+		t.Fatal("expected pagehide/beforeunload teardown hooks")
 	}
 	if !strings.Contains(body, "/api/office") || !strings.Contains(body, "/demo/config") {
 		t.Fatal("expected API config URL in viewer page")

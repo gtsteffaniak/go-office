@@ -24,11 +24,12 @@ func (s *Server) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload, err := callback.ReadBody(r.Body)
+	body, err := callback.ReadBodyWithSecret(r.Body, s.opts.JWTSecret)
 	if err != nil {
 		callback.WriteError(w, 1)
 		return
 	}
+	payload := body
 
 	if s.opts.Debug && s.opts.Logger != nil {
 		s.opts.Logger.Debug("office callback", "key", payload.Key, "status", payload.Status, "url", payload.URL)
@@ -69,29 +70,45 @@ func (s *Server) PersistDocument(ctx context.Context, docKey string) error {
 		return fmt.Errorf("office: save not supported for %s format", ext)
 	}
 
-	conv, err := convert.New(convert.Options{AssetDir: s.opts.AssetDir, Limit: s.opts.ConvertLimit})
+	conv, err := s.converter()
 	if err != nil {
 		return err
 	}
 
 	cacheDir := filepath.Join(s.cacheDir(), docKey)
 	outPath := filepath.Join(cacheDir, "saved."+ext)
+	pending := hasPendingChanges(cacheDir)
+	if s.opts.Logger != nil {
+		s.opts.Logger.Debug("persist convert", "key", docKey, "path", doc.Path, "ext", ext, "pendingChanges", pending)
+	}
 	if err := s.convertDocument(ctx, conv, cacheDir, outPath, ext); err != nil {
 		return err
 	}
 
-	f, err := os.Open(outPath)
+	raw, err := os.ReadFile(outPath)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	xlsxInfo, _ := os.Stat(filepath.Join(cacheDir, "changes-applied.xlsx"))
+	xlsxBytes := int64(0)
+	if xlsxInfo != nil {
+		xlsxBytes = xlsxInfo.Size()
+	}
+	if s.opts.Logger != nil {
+		s.opts.Logger.Debug("persist output",
+			"key", docKey,
+			"savedBytes", len(raw),
+			"xlsxBytes", xlsxBytes,
+			"textPreview", persistTextPreview(ext, raw),
+		)
+	}
 
-	if err := s.storage.Save(ctx, doc.Path, f); err != nil {
+	if err := s.storage.Save(ctx, doc.Path, bytes.NewReader(raw)); err != nil {
 		return err
 	}
 	s.sessions.UpsertDoc(session.Document{Key: docKey, Path: doc.Path, FileType: ext, UpdatedAt: time.Now().UTC()})
 	if s.opts.Logger != nil {
-		s.opts.Logger.Info("document saved", "key", docKey, "path", doc.Path)
+		s.opts.Logger.Info("document saved", "key", docKey, "path", doc.Path, "bytes", len(raw))
 	}
 	return nil
 }
@@ -142,14 +159,23 @@ func (s *Server) NotifyCallback(ctx context.Context, docKey, callbackURL, downlo
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, callbackURL, bytes.NewReader(body))
+	postBody := body
+	if len(s.opts.JWTSecret) > 0 {
+		token, err := callback.SignBody(s.opts.JWTSecret, body)
+		if err != nil {
+			return err
+		}
+		wrapped, err := json.Marshal(map[string]string{"token": token})
+		if err != nil {
+			return err
+		}
+		postBody = wrapped
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, callbackURL, bytes.NewReader(postBody))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if len(s.opts.JWTSecret) > 0 {
-		// Integrators often accept unsigned callbacks in dev; signing is Phase 1 follow-up.
-	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
@@ -179,4 +205,53 @@ func (s *Server) Sessions() *session.Manager {
 // Storage returns the configured host storage backend.
 func (s *Server) Storage() Storage {
 	return s.storage
+}
+
+func headPreview(raw []byte) string {
+	s := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	lines := strings.Split(s, "\n")
+	if len(lines) > 2 {
+		lines = lines[:2]
+	}
+	out := strings.Join(lines, "\n")
+	if len(out) > 180 {
+		return out[:180]
+	}
+	return out
+}
+
+func firstCSVDataCell(raw []byte) string {
+	s := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	lines := strings.Split(s, "\n")
+	if len(lines) < 2 {
+		return ""
+	}
+	line := lines[1]
+	if i := strings.IndexByte(line, ','); i >= 0 {
+		return line[:i]
+	}
+	return line
+}
+
+func persistTextPreview(ext string, raw []byte) string {
+	switch strings.TrimPrefix(strings.ToLower(ext), ".") {
+	case "csv", "tsv", "scsv":
+		cell := firstCSVDataCell(raw)
+		prev := headPreview(raw)
+		if cell != "" {
+			return "cell=" + cell + " " + prev
+		}
+		return prev
+	case "docx", "doc", "odt", "rtf":
+		text := convert.OOXMLPlainText(raw)
+		if text == "" {
+			return headPreview(raw)
+		}
+		if len(text) > 180 {
+			return text[:180]
+		}
+		return text
+	default:
+		return headPreview(raw)
+	}
 }

@@ -52,3 +52,40 @@ func TestOpenerOpenPDF(t *testing.T) {
 		t.Fatalf("cached pdf = %q, want %q", data, pdf)
 	}
 }
+
+type recordingFlushSaver struct {
+	calls int
+}
+
+func (s *recordingFlushSaver) FlushDocument(context.Context, string, string, bool) error {
+	s.calls++
+	return nil
+}
+
+func TestOpenerFlushPendingBeforeOpen(t *testing.T) {
+	cacheDir := t.TempDir()
+	key := "csv-key"
+	changesDir := filepath.Join(cacheDir, key, "changes")
+	if err := os.MkdirAll(changesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(changesDir, "changes0.json"), []byte(`["chg"]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	saver := &recordingFlushSaver{}
+	opener := &Opener{CacheDir: cacheDir, Saver: saver}
+	if err := opener.flushPending(context.Background(), key, "http://localhost"); err != nil {
+		t.Fatal(err)
+	}
+	if saver.calls != 1 {
+		t.Fatalf("flush calls = %d, want 1 for pending changes", saver.calls)
+	}
+
+	if err := opener.flushPending(context.Background(), "other-key", "http://localhost"); err != nil {
+		t.Fatal(err)
+	}
+	if saver.calls != 1 {
+		t.Fatalf("no pending changes should not flush again, calls=%d", saver.calls)
+	}
+}

@@ -10,14 +10,16 @@ import (
 	"strings"
 	"testing"
 
-	office "github.com/quantumx-apps/go-office/pkg/office"
 	"github.com/quantumx-apps/go-office/pkg/config"
+	office "github.com/quantumx-apps/go-office/pkg/office"
 )
 
 type nopStorage struct{}
 
-func (nopStorage) Open(context.Context, string) (io.ReadCloser, error) { return io.NopCloser(strings.NewReader("")), nil }
-func (nopStorage) Save(context.Context, string, io.Reader) error       { return nil }
+func (nopStorage) Open(context.Context, string) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
+}
+func (nopStorage) Save(context.Context, string, io.Reader) error { return nil }
 func (nopStorage) Stat(context.Context, string) (office.FileInfo, error) {
 	return office.FileInfo{}, nil
 }
@@ -37,6 +39,25 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"status":"ok"`) {
 		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"sessions":`) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"cacheDirs":`) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+func TestPluginsJSONEndpoint(t *testing.T) {
+	srv, err := office.New(nopStorage{}, office.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/plugins.json", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "[]" {
+		t.Fatalf("plugins.json = %d %q", rec.Code, rec.Body.String())
 	}
 }
 
@@ -177,5 +198,31 @@ func TestServesFonts(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s status = %d body = %s", path, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+func TestEditorBinIsNotBrowserCached(t *testing.T) {
+	dir := t.TempDir()
+	cache := filepath.Join(dir, "cache", "doc-key")
+	if err := os.MkdirAll(cache, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cache, "Editor.bin"), []byte("editor-bin"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv, err := office.New(nopStorage{}, office.Options{AssetDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/cache/files/doc-key/Editor.bin", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%q", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("Editor.bin Cache-Control = %q, want no-store", rec.Header().Get("Cache-Control"))
 	}
 }

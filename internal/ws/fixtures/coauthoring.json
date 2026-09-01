@@ -1,0 +1,17 @@
+[
+  {
+    "name": "handshake",
+    "post": "40",
+    "expectTypes": ["license"]
+  },
+  {
+    "name": "save_lock",
+    "post": "42[\"message\",{\"type\":\"isSaveLock\"}]",
+    "expectTypes": ["saveLock"]
+  },
+  {
+    "name": "save_changes",
+    "post": "42[\"message\",{\"type\":\"saveChanges\",\"changes\":[\"test\"],\"deleteIndex\":-1}]",
+    "expectTypes": ["unSaveLock"]
+  }
+]

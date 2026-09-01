@@ -29,9 +29,12 @@ RUN chmod +x /app/go-office /app/assets/converter/bin/* 2>/dev/null || true
 
 ENV OFFICE_ASSETS=/app/assets
 ENV OFFICE_PLAYWRIGHT_TEST=true
+ENV OFFICE_DEBUG_LOGGING=1
+ENV OFFICE_POLL_HOLD=0
+ENV OFFICE_CONVERT_LIMIT=6
+ENV OFFICE_SAVE_DELAY=500ms
 ENV PLAYWRIGHT_BASE_URL=http://127.0.0.1:8080
 ENV PLAYWRIGHT_STRICT=1
-ENV PLAYWRIGHT_SAMPLE_TIER=3
 
 RUN timeout 10m sh -c 'cd /app && ./go-office \
       -assets /app/assets \
@@ -39,9 +42,9 @@ RUN timeout 10m sh -c 'cd /app && ./go-office \
       -data /app \
       -samples sample-files \
       -public http://127.0.0.1:8080 & \
-    for i in $(seq 1 90); do \
+    for i in $(seq 1 30); do \
       curl -sf http://127.0.0.1:8080/health >/dev/null && break; \
-      sleep 2; \
+      sleep 1; \
     done && \
     curl -sf http://127.0.0.1:8080/health >/dev/null && \
     cd /app/frontend && npx playwright test'

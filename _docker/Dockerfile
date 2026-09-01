@@ -1,7 +1,8 @@
 # office-server image: go-office + Euro-Office assets + sample-files.
 #
 #   make build-docker-image   # build only
-#   make build-docker         # build image and run (default)
+#   make build-docker         # same as build-docker-image
+#   make run-docker           # run after build
 #
 # Published as ghcr.io/quantumx-apps/office-server (see .github/workflows/publish.yml).
 #
@@ -78,6 +79,9 @@ RUN set -eux; \
 ENV OFFICE_ASSETS=/app/assets \
     OFFICE_DATA_DIR=/app \
     OFFICE_ADDR=:80
+
+ARG OFFICE_DEBUG_LOGGING=
+ENV OFFICE_DEBUG_LOGGING=${OFFICE_DEBUG_LOGGING}
 
 EXPOSE 80
 

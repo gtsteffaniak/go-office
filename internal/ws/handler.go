@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -10,27 +11,38 @@ import (
 
 const defaultPollHold = 20 * time.Second
 
+// DocumentOpener opens or converts a document for coauthoring.
+type DocumentOpener interface {
+	Open(ctx context.Context, origin, basePath, docKey string, cmd openCmd) ([]string, error)
+}
+
 // Handler serves ONLYOFFICE coauthoring endpoints at /doc/{key}/c/.
 type Handler struct {
-	Version   string
-	Build     BuildInfo
-	BasePath  string
-	Logger    *slog.Logger
-	Debug     bool
-	PollHold  time.Duration
-	Opener    *Opener
-	Scheduler *saveScheduler
+	Version      string
+	Build        BuildInfo
+	BasePath     string
+	Logger       *slog.Logger
+	Debug        bool
+	PollHold     time.Duration
+	PublicOrigin string
+	Opener       *Opener
+	openHook     DocumentOpener
+	Scheduler    *saveScheduler
 }
 
 // HandlerOptions configures a coauthoring handler.
 type HandlerOptions struct {
-	Version   string
-	BasePath  string
-	Logger    *slog.Logger
-	Debug     bool
-	Opener    *Opener
-	CacheDir  string
-	Saver     DocumentSaver
+	Version      string
+	BasePath     string
+	Logger       *slog.Logger
+	Debug        bool
+	PollHold     *time.Duration
+	PublicOrigin string
+	Opener       *Opener
+	OpenHook     DocumentOpener
+	CacheDir     string
+	Saver        DocumentSaver
+	SaveDelay    *time.Duration
 }
 
 func New(version string, logger *slog.Logger) *Handler {
@@ -50,11 +62,23 @@ func NewWithOptions(opts HandlerOptions) *Handler {
 	h := New(opts.Version, opts.Logger)
 	h.Debug = opts.Debug
 	h.BasePath = opts.BasePath
+	if opts.PollHold != nil {
+		h.PollHold = *opts.PollHold
+	}
+	h.PublicOrigin = opts.PublicOrigin
 	h.Opener = opts.Opener
+	h.openHook = opts.OpenHook
 	if opts.Saver != nil && opts.CacheDir != "" {
-		h.Scheduler = newSaveScheduler(opts.CacheDir, opts.Saver, opts.Logger)
+		h.Scheduler = newSaveScheduler(opts.CacheDir, opts.Saver, opts.Logger, opts.SaveDelay)
 	}
 	return h
+}
+
+func (h *Handler) documentOpener() DocumentOpener {
+	if h.openHook != nil {
+		return h.openHook
+	}
+	return h.Opener
 }
 
 // Match reports whether path is a coauthoring route:
@@ -84,7 +108,7 @@ func (h *Handler) ServePath(w http.ResponseWriter, r *http.Request, path string)
 		return
 	}
 
-	if h.Debug {
+	if h.Debug && !IsCoauthoringPollingCheck(r) {
 		h.Logger.Debug("coauthoring",
 			"method", r.Method,
 			"path", path,
@@ -108,10 +132,7 @@ func (h *Handler) ServePath(w http.ResponseWriter, r *http.Request, path string)
 }
 
 func (h *Handler) pollHoldDuration() time.Duration {
-	if h.PollHold > 0 {
-		return h.PollHold
-	}
-	return defaultPollHold
+	return h.PollHold
 }
 
 func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey string) {
@@ -122,9 +143,9 @@ func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey st
 	}
 
 	if r.Method == http.MethodPost {
-		body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		body, _ := io.ReadAll(io.LimitReader(r.Body, 16<<20))
 		if h.Debug {
-			h.Logger.Debug("coauthoring polling post", "key", docKey, "sid", sid, "body", string(body))
+			h.Logger.Debug("coauthoring message", "key", docKey, "sid", sid, "body", string(body))
 		}
 		sess := getSession(sid, docKey, h.Build, h.BasePath)
 		for _, packet := range parsePostPackets(string(body)) {
@@ -132,12 +153,12 @@ func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey st
 			case strings.HasPrefix(packet, "40"):
 				sess.onConnect(connectAuthData(packet))
 				if req, ok := parseAuthPacket(packet); ok {
-					sess.startOpen(r, h.Opener, req)
+					sess.startOpen(h.documentOpener(), req, CoauthoringOrigin(h.PublicOrigin, r))
 				}
 			case strings.HasPrefix(packet, "42"):
 				if req, ok := parseAuthPacket(packet); ok {
 					sess.onAuth(req)
-					sess.startOpen(r, h.Opener, req)
+					sess.startOpen(h.documentOpener(), req, CoauthoringOrigin(h.PublicOrigin, r))
 					continue
 				}
 				if msg, ok := parseSocketMessage(packet); ok {
@@ -150,17 +171,14 @@ func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey st
 	}
 
 	if r.URL.Query().Get("sid") == "" {
-		if h.Debug {
-			h.Logger.Debug("coauthoring polling open", "key", docKey)
-		}
 		_, _ = w.Write([]byte(`0{"sid":"go-office","upgrades":[],"pingInterval":25000,"pingTimeout":20000}`))
 		return
 	}
 
 	sess := getSession(sid, docKey, h.Build, h.BasePath)
 	if packets := sess.waitForPackets(r.Context(), h.pollHoldDuration()); len(packets) > 0 {
-		if h.Debug {
-			h.Logger.Debug("coauthoring polling send", "key", docKey, "sid", sid, "packets", len(packets))
+		if h.Debug && h.Logger != nil {
+			h.Logger.Debug("coauthoring send", "key", docKey, "sid", sid, "types", packetTypes(packets))
 		}
 		_, _ = w.Write([]byte(joinPackets(packets)))
 		return

@@ -7,8 +7,11 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	office "github.com/quantumx-apps/go-office/pkg/office"
 	"github.com/quantumx-apps/go-office/internal/debuglog"
@@ -74,7 +77,7 @@ func main() {
 		}
 	}
 
-	debug := debuglog.Enabled(cfg.Debug) || cfg.samplesEnabled()
+	debug := debuglog.Enabled(cfg.Debug)
 	logger := debuglog.NewLogger(debug)
 	slog.SetDefault(logger)
 
@@ -84,6 +87,10 @@ func main() {
 		BasePath:        cfg.BasePath,
 		JWTSecret:       []byte(cfg.JWTSecret),
 		ProtocolVersion: cfg.Version,
+		PublicOrigin:    cfg.publicOrigin(),
+		ConvertLimit:    cfg.ConvertLimit,
+		PollHold:        cfg.PollHold,
+		SaveDelay:       cfg.SaveDelay,
 		Debug:           debug,
 		Logger:          logger,
 	})
@@ -146,7 +153,21 @@ func main() {
 		log.Printf("  jwt:     enabled (OFFICE_JWT_SECRET)")
 	}
 	log.Printf("  assets:  %s", cfg.AssetDir)
-	log.Fatal(http.ListenAndServe(cfg.Addr, mux))
+
+	httpSrv := &http.Server{Addr: cfg.Addr, Handler: mux}
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		<-sigCh
+		log.Printf("shutting down…")
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = httpSrv.Shutdown(ctx)
+	}()
+
+	if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatal(err)
+	}
 }
 
 var _ office.Storage = (*localStorage)(nil)

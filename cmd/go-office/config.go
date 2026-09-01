@@ -4,9 +4,12 @@ import (
 	"flag"
 	"net"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	office "github.com/quantumx-apps/go-office/pkg/office"
+	"github.com/quantumx-apps/go-office/internal/debuglog"
 	"github.com/quantumx-apps/go-office/internal/demo"
 	"github.com/quantumx-apps/go-office/internal/home"
 )
@@ -24,6 +27,9 @@ type runConfig struct {
 	PublicOrigin   string
 	DisableSamples bool
 	Debug          bool
+	PollHold       *time.Duration
+	SaveDelay      *time.Duration
+	ConvertLimit   int
 }
 
 func parseRunConfig() runConfig {
@@ -39,6 +45,9 @@ func parseRunConfig() runConfig {
 		PublicOrigin:   strings.TrimSpace(os.Getenv("OFFICE_PUBLIC_ORIGIN")),
 		DisableSamples: envBool("OFFICE_DISABLE_SAMPLES"),
 		Debug:          debugFromEnv(),
+		PollHold:       pollHoldFromEnv(),
+		SaveDelay:      saveDelayFromEnv(),
+		ConvertLimit:   convertLimitFromEnv(),
 	}
 
 	flag.StringVar(&cfg.AssetDir, "assets", cfg.AssetDir, "path to Euro-Office assets (web-apps/, sdkjs/)")
@@ -51,7 +60,7 @@ func parseRunConfig() runConfig {
 	flag.StringVar(&cfg.Version, "version", cfg.Version, "protocol version (default: assets/VERSION)")
 	flag.StringVar(&cfg.PublicOrigin, "public", cfg.PublicOrigin, "public origin for document URLs")
 	flag.BoolVar(&cfg.DisableSamples, "disable-samples", cfg.DisableSamples, "do not serve the demo UI or sample documents")
-	debugFlag := flag.Bool("debug", cfg.Debug, "enable verbose logging")
+	debugFlag := flag.Bool("debug", cfg.Debug, "enable verbose logging (or set OFFICE_DEBUG_LOGGING=1)")
 	flag.Parse()
 
 	if *debugFlag {
@@ -98,5 +107,43 @@ func jwtSecretFromEnv() string {
 }
 
 func debugFromEnv() bool {
-	return envBool("OFFICE_DEBUG")
+	return debuglog.EnvEnabled()
+}
+
+func pollHoldFromEnv() *time.Duration {
+	v := strings.TrimSpace(os.Getenv("OFFICE_POLL_HOLD"))
+	if v == "" {
+		return nil
+	}
+	if d, err := time.ParseDuration(v); err == nil {
+		return &d
+	}
+	if sec, err := strconv.Atoi(v); err == nil && sec >= 0 {
+		d := time.Duration(sec) * time.Second
+		return &d
+	}
+	return nil
+}
+
+func convertLimitFromEnv() int {
+	v := strings.TrimSpace(os.Getenv("OFFICE_CONVERT_LIMIT"))
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}
+
+func saveDelayFromEnv() *time.Duration {
+	v := strings.TrimSpace(os.Getenv("OFFICE_SAVE_DELAY"))
+	if v == "" {
+		return nil
+	}
+	if d, err := time.ParseDuration(v); err == nil && d >= 0 {
+		return &d
+	}
+	return nil
 }

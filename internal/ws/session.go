@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"net/http"
 	"sync"
 	"time"
 )
@@ -13,14 +12,15 @@ import (
 const defaultSessionID = "go-office"
 
 type session struct {
-	docKey  string
-	build   BuildInfo
+	docKey   string
+	build    BuildInfo
 	basePath string
 
 	mu sync.Mutex
 
-	outbox []string
-	waitCh chan struct{}
+	outbox  []string
+	waitCh  chan struct{}
+	waitGen uint64
 
 	namespaceAck bool
 	infoSent     bool
@@ -29,6 +29,7 @@ type session struct {
 
 	sessionID string
 	indexUser int
+	userID    string // participant id: original user id + indexUser (sdkjs _userId)
 }
 
 var sessions sync.Map // sessionKey -> *session
@@ -55,6 +56,11 @@ func getSession(sid, docKey string, build BuildInfo, basePath string) *session {
 	s := &session{docKey: docKey, build: build, basePath: basePath, indexUser: 1}
 	actual, _ := sessions.LoadOrStore(key, s)
 	return actual.(*session)
+}
+
+// ResetSessionsForTest clears in-memory coauthoring sessions (tests only).
+func ResetSessionsForTest() {
+	sessions = sync.Map{}
 }
 
 func (s *session) enqueue(packets ...string) {
@@ -97,6 +103,7 @@ func (s *session) waitForPackets(ctx context.Context, hold time.Duration) []stri
 		s.waitCh = make(chan struct{})
 	}
 	ch := s.waitCh
+	gen := s.waitGen
 	s.mu.Unlock()
 
 	timer := time.NewTimer(hold)
@@ -104,6 +111,12 @@ func (s *session) waitForPackets(ctx context.Context, hold time.Duration) []stri
 
 	select {
 	case <-ch:
+		s.mu.Lock()
+		stale := s.waitGen != gen
+		s.mu.Unlock()
+		if stale {
+			return nil
+		}
 		return s.drain()
 	case <-timer.C:
 		return nil
@@ -116,14 +129,18 @@ func (s *session) onConnect(authData []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if !s.namespaceAck {
-		s.namespaceAck = true
-		s.outbox = append(s.outbox, `40{"sid":"`+defaultSessionID+`"}`)
+	// Engine.IO packet 40 is a new transport session. The demo client always
+	// reuses sid=go-office, so a CSV reload would otherwise skip auth and hang.
+	s.authSent = false
+	s.waitGen++
+	if s.waitCh != nil {
+		close(s.waitCh)
+		s.waitCh = nil
 	}
-	if !s.infoSent {
-		s.infoSent = true
-		s.outbox = append(s.outbox, serverInfoPacket(s.build))
-	}
+	s.outbox = append(s.outbox, `40{"sid":"`+defaultSessionID+`"}`)
+	s.namespaceAck = true
+	s.outbox = append(s.outbox, serverInfoPacket(s.build))
+	s.infoSent = true
 	if len(authData) > 0 {
 		if req, ok := parseAuthPayload(authData); ok {
 			s.queueAuthLocked(req)
@@ -140,6 +157,11 @@ func (s *session) onAuth(req authRequest) {
 }
 
 func (s *session) queueAuthLocked(req authRequest) {
+	userID := req.User.ID
+	if userID == "" {
+		userID = "user"
+	}
+	s.userID = fmt.Sprintf("%s%d", userID, s.indexUser)
 	if !s.authSent {
 		s.authSent = true
 		if s.sessionID == "" {
@@ -149,7 +171,16 @@ func (s *session) queueAuthLocked(req authRequest) {
 	}
 }
 
-func (s *session) startOpen(r *http.Request, opener *Opener, req authRequest) {
+func (s *session) participantID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.userID != "" {
+		return s.userID
+	}
+	return fmt.Sprintf("user%d", s.indexUser)
+}
+
+func (s *session) startOpen(opener DocumentOpener, req authRequest, origin string) {
 	if opener == nil || req.Open == nil {
 		return
 	}
@@ -168,7 +199,7 @@ func (s *session) startOpen(r *http.Request, opener *Opener, req authRequest) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		packets, err := opener.Open(ctx, requestOrigin(r), basePath, docKey, open)
+		packets, err := opener.Open(ctx, origin, basePath, docKey, open)
 		if err != nil {
 			s.mu.Lock()
 			s.openStarted = false
@@ -181,6 +212,9 @@ func (s *session) startOpen(r *http.Request, opener *Opener, req authRequest) {
 		if len(packets) > 0 {
 			s.enqueue(packets...)
 		}
+		s.mu.Lock()
+		s.openStarted = false
+		s.mu.Unlock()
 	}()
 }
 
@@ -238,6 +272,9 @@ func authResponsePackets(build BuildInfo, sessionID string, indexUser int, req a
 		"buildNumber":        build.BuildNumber,
 		"licenseType":        handshakeOK,
 		"settings": map[string]any{
+			"binaryChanges":           false,
+			"websocketMaxPayloadSize": 1572864,
+			"maxChangesSize":          157286400,
 			"reconnection": map[string]any{
 				"attempts": 50,
 				"delay":    2000,

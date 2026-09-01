@@ -1,0 +1,50 @@
+package convert
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
+	"os"
+	"path/filepath"
+)
+
+const sourceHashFileName = "source.sha256"
+
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func sourceHashPath(outDir string) string {
+	return filepath.Join(outDir, sourceHashFileName)
+}
+
+func editorBinReusable(outDir, sourceHash string) bool {
+	if sourceHash == "" {
+		return false
+	}
+	st, err := os.Stat(filepath.Join(outDir, "Editor.bin"))
+	if err != nil || st.Size() == 0 {
+		return false
+	}
+	got, err := os.ReadFile(sourceHashPath(outDir))
+	if err != nil {
+		return false
+	}
+	return string(got) == sourceHash
+}
+
+func writeSourceHash(outDir, sourceHash string) error {
+	if sourceHash == "" {
+		return nil
+	}
+	return os.WriteFile(sourceHashPath(outDir), []byte(sourceHash), 0o644)
+}

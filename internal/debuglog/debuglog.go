@@ -6,15 +6,24 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/quantumx-apps/go-office/internal/ws"
 )
 
-// Enabled reports whether debug logging is on via flag or OFFICE_DEBUG.
+// Enabled reports whether debug logging is on via -debug flag or environment.
 func Enabled(flag bool) bool {
-	if flag {
-		return true
+	return flag || EnvEnabled()
+}
+
+// EnvEnabled reports whether OFFICE_DEBUG_LOGGING (or legacy OFFICE_DEBUG) is set.
+func EnvEnabled() bool {
+	for _, key := range []string{"OFFICE_DEBUG_LOGGING", "OFFICE_DEBUG"} {
+		v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+		if v == "1" || v == "true" || v == "yes" {
+			return true
+		}
 	}
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("OFFICE_DEBUG")))
-	return v == "1" || v == "true" || v == "yes"
+	return false
 }
 
 // NewLogger returns a stderr logger at debug level when enabled, otherwise info.
@@ -54,6 +63,9 @@ func Middleware(logger *slog.Logger, next http.Handler) http.Handler {
 		start := time.Now()
 		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rw, r)
+		if ws.IsCoauthoringPollingCheck(r) {
+			return
+		}
 		logger.Debug("http",
 			"method", r.Method,
 			"path", r.URL.Path,
@@ -61,11 +73,8 @@ func Middleware(logger *slog.Logger, next http.Handler) http.Handler {
 			"status", rw.status,
 			"bytes", rw.bytes,
 			"duration", time.Since(start).String(),
-			"remote", r.RemoteAddr,
-			"referer", r.Referer(),
-			"ua", r.UserAgent(),
 		)
-		if rw.status >= 400 {
+		if rw.status >= 400 && !isExpectedHTTPError(r, rw.status) {
 			logger.Warn("http error response",
 				"method", r.Method,
 				"path", r.URL.Path,
@@ -73,4 +82,16 @@ func Middleware(logger *slog.Logger, next http.Handler) http.Handler {
 			)
 		}
 	})
+}
+
+// isExpectedHTTPError reports benign client probes that should not emit WARN lines.
+func isExpectedHTTPError(r *http.Request, status int) bool {
+	path := r.URL.Path
+	switch {
+	case status == http.StatusNotImplemented && strings.Contains(path, "/c/") &&
+		(strings.EqualFold(r.Header.Get("Upgrade"), "websocket") || r.URL.Query().Get("transport") == "websocket"):
+		return true
+	default:
+		return false
+	}
 }

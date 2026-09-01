@@ -29,8 +29,8 @@ DOCKER_BUILD_TIMEOUT ?= 10m
 DOCKER_BUILD = timeout $(DOCKER_BUILD_TIMEOUT) docker build
 
 .PHONY: help setup build serve doctor fonts test test-integration clean \
-        check-linux check-go mod-download fetch-assets compile check-assets check-samples test-x2t \
-        playwright-base playwright-npm test-playwright test-playwright-ui check-sample-matrix \
+        check-linux check-go mod-download fetch-assets compile check-assets check-samples test-x2t test-x2t-concurrent \
+        playwright-base playwright-npm test-playwright test-playwright-ui check-sample-matrix extract-sample-manifest \
         build-docker build-docker-image build-docker-builder run-docker stop-docker ensure-assets
 
 help:
@@ -41,14 +41,16 @@ help:
 	@echo "  make serve   Build (if needed) and run the document server on $(ADDR)"
 	@echo "  make test    Run unit tests (no assets required)"
 	@echo "  make test-x2t  Run x2t conversion on the sample .doc (needs assets)"
+	@echo "  make test-x2t-concurrent  Concurrent CSV save regression (10 workers, limit 6)"
 	@echo "  make doctor    Diagnose x2t permissions, libs, and sample conversion"
-	@echo "  make fonts     Regenerate AllFonts.js and font_selection.bin"
+	@echo "  make fonts     Regenerate AllFonts.js and font_selection.bin (host paths; remapped at runtime)"
 	@echo ""
 	@echo "  make test-integration   Integration tests (runs build first)"
 	@echo "  make check-sample-matrix  Verify all Playwright sample files exist (git-tracked under sample-files/)"
+	@echo "  make extract-sample-manifest  Regenerate Playwright content expectations from sample-files/"
 	@echo "  make test-playwright    E2E Playwright tests in Docker (runs build first)"
 	@echo "  make test-playwright-ui Local Playwright UI (server in Docker, tests on host)"
-	@echo "  make build-docker       Build Docker image and run server (sample-files/)"
+	@echo "  make build-docker       Build Docker image (office-server)"
 	@echo "  make build-docker-image Build Docker image only (debian-slim runtime for x2t)"
 	@echo "  make build-docker-builder  Build reusable Alpine Go builder image"
 	@echo "  make run-docker         Run server from existing Docker image"
@@ -109,6 +111,10 @@ check-sample-matrix: check-samples
 	@chmod +x scripts/check-sample-matrix.sh
 	@scripts/check-sample-matrix.sh "$(SAMPLES_DIR)"
 
+extract-sample-manifest:
+	@echo "==> Playwright sample manifest"
+	$(GO) run ./scripts/extract-sample-expectations.go
+
 fetch-assets: check-linux
 	@echo "==> Euro-Office assets → $(OFFICE_ASSETS)/"
 	@mkdir -p "$(BIN_DIR)" "$(OFFICE_ASSETS)"
@@ -153,12 +159,16 @@ test-x2t: build check-samples
 	@echo "==> x2t conversion test"
 	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) run ./cmd/test-x2t -assets "$(OFFICE_ASSETS)" -sample "$(SAMPLE_DOC)"
 
+test-x2t-concurrent: build check-samples
+	@echo "==> Concurrent CSV save (Playwright load regression, needs x2t)"
+	$(GO) test ./internal/convert/ -run 'TestSaveChangesCSVConcurrent|TestPrepareX2TRunDir' -count=3 -v
+
 doctor: build check-samples
 	@echo "==> go-office doctor"
 	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) run ./cmd/doctor -assets "$(OFFICE_ASSETS)" -sample "$(SAMPLE_DOC)" -report "$(CURDIR)/doctor-report.txt"
 
 fonts: check-linux
-	@echo "==> Regenerating font files"
+	@echo "==> Regenerating font files (paths are host-specific until Converter.New remaps them)"
 	@mkdir -p "$(BIN_DIR)"
 	$(GO) build -o "$(FETCH_ASSETS_BIN)" ./cmd/fetch-assets
 	$(FETCH_ASSETS_BIN) -fonts -out "$(OFFICE_ASSETS)"
@@ -176,12 +186,13 @@ DOCKER_CONTAINER ?= go-office-serve
 DOCKER_PORT ?= 8080
 DOCKER_PUBLIC ?= http://localhost:$(DOCKER_PORT)
 
-build-docker: build-docker-image run-docker
+build-docker: build-docker-image
 
 build-docker-image: check-linux check-samples
 	@mkdir -p assets
 	@echo "==> Docker image $(DOCKER_IMAGE)"
-	$(DOCKER_BUILD) -t "$(DOCKER_IMAGE)" -f _docker/Dockerfile .
+	$(DOCKER_BUILD) -t "$(DOCKER_IMAGE)" -f _docker/Dockerfile \
+		$(if $(OFFICE_DEBUG_LOGGING),--build-arg OFFICE_DEBUG_LOGGING=$(OFFICE_DEBUG_LOGGING),) .
 
 build-docker-builder:
 	@echo "==> Docker builder image $(DOCKER_BUILDER_IMAGE)"
@@ -201,6 +212,9 @@ stop-docker:
 
 test-integration: build
 	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test -tags=integration ./...
+
+test-save-integration: build
+	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test -tags=integration ./integration/... -race -count=1
 
 playwright-base:
 	@echo "==> Playwright base image"

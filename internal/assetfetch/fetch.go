@@ -43,7 +43,7 @@ func Fetch(opts Options) error {
 		if err := ensureConverterExecutables(filepath.Join(opts.OutDir, "converter", "bin")); err != nil {
 			return err
 		}
-		return nil
+		return fixDoctRendererConfig(filepath.Join(opts.OutDir, "converter", "bin"))
 	}
 	if needsConverterBin(opts.OutDir) {
 		fmt.Println("Converter binaries missing — re-extracting assets...")

@@ -52,7 +52,7 @@ All go-office configuration uses the **`OFFICE_` prefix**. This is intentional: 
 | `OFFICE_BASE_PATH` | Mount prefix for editor routes | `/` (site root) |
 | `OFFICE_API_BASE` | Demo API prefix (`/demo/config`, etc.) | `/api/office` |
 | `OFFICE_VERSION` | Protocol version string (coauthoring) | read from `assets/VERSION` |
-| `OFFICE_DEBUG` | Verbose logging (`1` / `true`) | unset |
+| `OFFICE_DEBUG_LOGGING` | Verbose logging (`1` / `true`) | unset |
 
 CLI flags (`-assets`, `-addr`, `-jwt`, `-disable-samples`, …) override environment when passed explicitly.
 
@@ -65,7 +65,7 @@ Official Document Server uses many variables for PostgreSQL, Redis, RabbitMQ, an
 | `JWT_SECRET` | **`OFFICE_JWT_SECRET`** | **Rename required.** Same secret value; must match integrator. |
 | `JWT_ENABLED=true` | *(not used)* | JWT is enabled when `OFFICE_JWT_SECRET` is non-empty. |
 | `JWT_HEADER` | *(not used)* | Standard `Authorization` header; same as typical ONLYOFFICE setups. |
-| `JWT_IN_BODY` | *(not used)* | Callback body JWT parsing not implemented yet (Phase 1). |
+| `JWT_IN_BODY` | **`OFFICE_JWT_SECRET`** | When set, outbound callbacks are signed as `{"token":"…"}` and incoming callback bodies are verified the same way. |
 | `DB_*`, `REDIS_*`, `AMQP_*` | *(none)* | Not used — no Postgres/Redis/RabbitMQ. |
 | `WOPI_*` | *(none)* | WOPI not supported. |
 
@@ -74,22 +74,24 @@ Official Document Server uses many variables for PostgreSQL, Redis, RabbitMQ, an
 | Old name | Use instead |
 | -------- | ----------- |
 | `GO_OFFICE_ASSETS` | `OFFICE_ASSETS` |
-| `GO_OFFICE_DEBUG` | `OFFICE_DEBUG` |
+| `GO_OFFICE_DEBUG` | `OFFICE_DEBUG_LOGGING` (legacy: `OFFICE_DEBUG`) |
 
 These are **not** read by current builds. Rename in compose, CI, and shell profiles before upgrading.
 
 ## URL and port compatibility
 
+**Legend:** ✅ supported · ⚠️ partial · ❌ not supported
+
 | Endpoint | ONLYOFFICE Document Server | go-office |
 | -------- | -------------------------- | --------- |
-| Editor `api.js` | `/web-apps/apps/api/documents/api.js` | Same |
-| Coauthoring | `/doc/{key}/c/` or `/{version}/doc/{key}/c/` | Same |
-| Document cache | `/cache/files/{key}/…` | Same |
-| Health (JSON) | varies | `/health` |
-| Health (compat) | `/healthcheck` → `true` | Same |
-| Info | `/info/info.json` | Same (version field) |
-| Site home | welcome page / nginx default | `/` (go-office about page + AGPL attribution) |
-| Demo samples | not included | `/demo/` (disable with `OFFICE_DISABLE_SAMPLES`) |
+| Editor `api.js` | `/web-apps/apps/api/documents/api.js` | ✅ |
+| Coauthoring | `/{version}/doc/{key}/c/` (primary) or `/doc/{key}/c/` | ✅ polling; ❌ WebSocket (501) |
+| Document cache | `/cache/files/{key}/…` | ✅ |
+| Health (JSON) | varies | ✅ (`/health` extended JSON) |
+| Health (compat) | `/healthcheck` → `true` | ✅ |
+| Info | `/info/info.json` | ✅ |
+| Site home | welcome page / nginx default | ✅ (`/` AGPL home page) |
+| Demo samples | not included | ✅ `/demo/` (disable with `OFFICE_DISABLE_SAMPLES`) |
 
 **Default listen port:** `80` inside the `office-server` image (map host port as you did before, e.g. `9052:80`).
 
@@ -116,17 +118,24 @@ These are **not** read by current builds. Rename in compose, CI, and shell profi
 
 Plan accordingly before migrating production **edit-and-save** workflows:
 
+**Legend:** ✅ supported · ⚠️ partial · ❌ not supported
+
 | Feature | ONLYOFFICE Document Server | go-office (current) |
 | ------- | -------------------------- | ------------------- |
-| Save / force-save to integrator | Yes | **Yes** (coauthoring save → reverse x2t → callback → `Storage.Save`) |
-| Multi-user co-editing | Yes | **No** — Phase 3 |
-| WebSocket coauthoring | Yes | Polling only (501 on WS upgrade) |
-| PostgreSQL / Redis / clustering | Yes | **No** (single process) |
-| WOPI | Yes | **No** |
-| Spell checker service | Optional | **No** |
-| Admin panel | Port 9000 | **No** |
+| Save / force-save to integrator | ✅ | ✅ (coauthoring save → reverse x2t → callback → `Storage.Save`) |
+| Multi-user co-editing | ✅ | ❌ — Phase 3 |
+| WebSocket coauthoring | ✅ | ⚠️ Polling only (501 on WS upgrade) |
+| PostgreSQL / Redis / clustering | ✅ | ❌ (single process) |
+| WOPI | ✅ | ❌ |
+| `POST /converter` (conversion API / thumbnails) | ✅ | ❌ — see [api.md](api.md#filebrowser-office-previews) |
+| Callback status 1 / 4 (editing telemetry) | ✅ | ❌ — not emitted outbound (see [api.md](api.md#32-callback--integrator-receives-posts-document-server--your-app)) |
+| `POST /coauthoring/CommandService.ashx` | ✅ | ❌ |
+| `GET /hosting/discovery` (WOPI) | ✅ | ❌ |
+| `/spellchecker/` | ✅ | ❌ |
+| Spell checker service | ⚠️ Optional | ❌ |
+| Admin panel | ✅ | ❌ (port 9000 in full install) |
 
-Opening and viewing documents in the editor works; **persisting edits back to storage** is not complete yet. Validate your use case against [README.md](README.md) roadmap before cutover.
+Opening and viewing documents in the editor works; **saving edits back to storage** is supported via coauthoring flush, reverse x2t, and the integrator callback. Validate your use case against [README.md](README.md) roadmap before cutover.
 
 ## FileBrowser
 
@@ -134,13 +143,18 @@ FileBrowser today expects an external `onlyOfficeUrl` and signs config with `int
 
 - Set `onlyOfficeUrl` to this server’s public URL (e.g. `http://files.example.com:9052/`).
 - Use the **same** secret as `OFFICE_JWT_SECRET`.
+- **Office grid previews** (`POST {onlyOfficeUrl}/converter` for JPG thumbnails) are **not supported** by go-office today. See [api.md](api.md#filebrowser-office-previews) for workarounds.
 - Embedded mode (`//go:build office`) is planned; until then, run `office-server` as a sidecar or standalone container.
 
 ## Troubleshooting
 
 | Symptom | Likely cause |
 | ------- | ------------ |
-| Editor loads but document never opens | x2t/conversion error — check server logs (`OFFICE_DEBUG=1`). |
+| Editor loads but document never opens | x2t/conversion error — check server logs (`OFFICE_DEBUG_LOGGING=1` or `-debug`). go-office must **reach** the `document.url` from inside its container (not just the browser). |
+| `document open failed` / download errors | FileBrowser `document.url` uses an internal hostname (e.g. `http://beta-large/...`) that the go-office container cannot resolve. Put both on the same Docker network or use a URL reachable from go-office. |
+| Wrong `cache/files` URLs / mixed content | Set `OFFICE_PUBLIC_ORIGIN=https://your-public-host` (or ensure reverse proxy sends `X-Forwarded-Proto` / `X-Forwarded-Host`). |
+| `plugins.json` 404 | Fixed in current go-office (`[]` stub). Harmless on older builds. |
+| WebSocket `501` on `/doc/.../c/` | Expected — sdkjs falls back to polling automatically. Not an error. |
 | “Token” / JWT errors | `OFFICE_JWT_SECRET` mismatch with integrator, or secret still named `JWT_SECRET`. |
 | `api.js` 404 | Wrong `documentServerUrl` or `OFFICE_BASE_PATH` does not match how the URL is constructed. |
 | Health check fails | Probe still targeting internal port `8000`; use port `80` on the container. |

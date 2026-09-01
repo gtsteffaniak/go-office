@@ -11,12 +11,12 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/quantumx-apps/go-office/pkg/config"
 	"github.com/quantumx-apps/go-office/internal/convert"
 	"github.com/quantumx-apps/go-office/internal/debuglog"
 	"github.com/quantumx-apps/go-office/internal/session"
 	"github.com/quantumx-apps/go-office/internal/static"
 	"github.com/quantumx-apps/go-office/internal/ws"
+	"github.com/quantumx-apps/go-office/pkg/config"
 )
 
 // Server is an embedded ONLYOFFICE-compatible document server.
@@ -24,10 +24,16 @@ type Server struct {
 	storage Storage
 	opts    Options
 
-	sessions *session.Manager
-	mux      *http.ServeMux
+	sessions     *session.Manager
+	mux          *http.ServeMux
+	coauthoring  *ws.Handler
+	cacheJanitor *cacheJanitor
+	conv         *convert.Converter
+	convOnce     sync.Once
+	convErr      error
 
 	finishOnce sync.Once
+	closeOnce  sync.Once
 }
 
 // New creates a document server. AssetDir may be empty for protocol-only testing.
@@ -41,6 +47,15 @@ func New(store Storage, opts Options) (*Server, error) {
 		opts:     opts,
 		sessions: session.NewManager(),
 		mux:      http.NewServeMux(),
+	}
+	if opts.AssetDir != "" {
+		s.cacheJanitor = newCacheJanitor(
+			s.cacheDir(),
+			opts.CacheTTL,
+			opts.CacheMaxEntries,
+			func(docKey string) { s.sessions.Delete(docKey) },
+		)
+		s.cacheJanitor.start()
 	}
 	s.buildRoutes()
 	return s, nil
@@ -108,9 +123,18 @@ func (s *Server) BuildEditorConfig(ctx context.Context, req config.EditorRequest
 	return config.Build(req, token), nil
 }
 
-// Close releases in-memory session state.
+// Close releases in-memory session state and stops background workers.
 func (s *Server) Close() error {
-	return nil
+	var err error
+	s.closeOnce.Do(func() {
+		if s.coauthoring != nil {
+			s.coauthoring.Stop()
+		}
+		if s.cacheJanitor != nil {
+			s.cacheJanitor.stop()
+		}
+	})
+	return err
 }
 
 func (s *Server) buildRoutes() {
@@ -120,6 +144,7 @@ func (s *Server) buildRoutes() {
 	s.mux.HandleFunc(joinURLPath(prefix, "healthz"), s.handleHealth)
 	s.mux.HandleFunc(joinURLPath(prefix, "healthcheck"), s.handleHealthCheck)
 	s.mux.HandleFunc(joinURLPath(prefix, "info/info.json"), s.handleInfoJSON)
+	s.mux.HandleFunc(joinURLPath(prefix, "plugins.json"), s.handlePluginsJSON)
 
 	if s.opts.AssetDir != "" {
 		webApps := static.Dir(s.opts.AssetDir, "web-apps")
@@ -146,13 +171,14 @@ func (s *Server) buildRoutes() {
 				s.mux.Handle("/fonts/", http.StripPrefix("/fonts/", fonts))
 			}
 			s.mux.HandleFunc("/document_editor_service_worker.js", s.handleServiceWorker)
+			s.mux.HandleFunc("/plugins.json", s.handlePluginsJSON)
 		}
 	}
 
 	cacheDir := s.cacheDir()
 	_ = os.MkdirAll(cacheDir, 0o755)
 	cachePrefix := joinURLPath(prefix, "cache/files")
-	s.mux.Handle(cachePrefix+"/", http.StripPrefix(cachePrefix, http.FileServer(http.Dir(cacheDir))))
+	s.mux.Handle(cachePrefix+"/", http.StripPrefix(cachePrefix, noStoreEditorBin(http.FileServer(http.Dir(cacheDir)))))
 
 	s.mux.HandleFunc("/downloadfile/", s.handleDownloadFile)
 	if base := strings.Trim(strings.TrimSpace(prefix), "/"); base != "" && !mirrorAssetsAtRoot(prefix) {
@@ -163,27 +189,29 @@ func (s *Server) buildRoutes() {
 func (s *Server) registerCoauthoringFallback() {
 	prefix := s.opts.BasePath
 	var opener *ws.Opener
-	if conv, err := convert.New(convert.Options{
-		AssetDir: s.opts.AssetDir,
-		Limit:    s.opts.ConvertLimit,
-	}); err == nil {
+	if conv, err := s.converter(); err == nil {
 		opener = &ws.Opener{
 			Converter: conv,
 			CacheDir:  s.cacheDir(),
 			Logger:    s.opts.Logger,
+			Saver:     s,
 		}
 	} else if s.opts.Debug {
 		s.opts.Logger.Debug("coauthoring converter unavailable", "err", err)
 	}
 	co := ws.NewWithOptions(ws.HandlerOptions{
-		Version:  s.opts.ProtocolVersion,
-		BasePath: s.opts.BasePath,
-		Logger:   s.opts.Logger,
-		Debug:    s.opts.Debug,
-		Opener:   opener,
-		CacheDir: s.cacheDir(),
-		Saver:    s,
+		Version:      s.opts.ProtocolVersion,
+		BasePath:     s.opts.BasePath,
+		Logger:       s.opts.Logger,
+		Debug:        s.opts.Debug,
+		PollHold:     s.opts.PollHold,
+		PublicOrigin: s.opts.PublicOrigin,
+		Opener:       opener,
+		CacheDir:     s.cacheDir(),
+		Saver:        s,
+		SaveDelay:    s.opts.SaveDelay,
 	})
+	s.coauthoring = co
 	docPattern := joinURLPath(prefix, "doc") + "/"
 	s.mux.Handle(docPattern, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rel := stripMountPath(prefix, r.URL.Path)
@@ -212,9 +240,27 @@ func (s *Server) cacheDir() string {
 	return s.opts.AssetDir + string(os.PathSeparator) + "cache"
 }
 
+func (s *Server) converter() (*convert.Converter, error) {
+	s.convOnce.Do(func() {
+		if s.opts.AssetDir == "" {
+			s.convErr = errors.New("office: asset dir is required for conversion")
+			return
+		}
+		s.conv, s.convErr = convert.New(convert.Options{
+			AssetDir: s.opts.AssetDir,
+			Limit:    s.opts.ConvertLimit,
+		})
+	})
+	return s.conv, s.convErr
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte(`{"status":"ok","version":` + strconvQuote(s.opts.ProtocolVersion) + `}`))
+	cacheDir := s.cacheDir()
+	_, _ = w.Write([]byte(`{"status":"ok","version":` + strconvQuote(s.opts.ProtocolVersion) +
+		`,"sessions":` + fmt.Sprintf("%d", s.sessions.Len()) +
+		`,"cacheDirs":` + fmt.Sprintf("%d", cacheDirCount(cacheDir)) +
+		`,"cacheBytes":` + fmt.Sprintf("%d", cacheDirSize(cacheDir)) + `}`))
 }
 
 func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
@@ -225,6 +271,16 @@ func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleInfoJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"version":` + strconvQuote(s.opts.ProtocolVersion) + `}`))
+}
+
+func (s *Server) handlePluginsJSON(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	_, _ = w.Write([]byte("[]"))
 }
 
 func (s *Server) handleServiceWorker(w http.ResponseWriter, r *http.Request) {
@@ -257,4 +313,13 @@ func stripMountPath(prefix, urlPath string) string {
 		return strings.TrimPrefix(urlPath, "/")
 	}
 	return strings.TrimPrefix(strings.TrimPrefix(urlPath, mount), "/")
+}
+
+func noStoreEditorBin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "Editor.bin") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		next.ServeHTTP(w, r)
+	})
 }

@@ -20,6 +20,7 @@ type Opener struct {
 	Converter *convert.Converter
 	CacheDir  string
 	Logger    *slog.Logger
+	Saver     DocumentSaver
 }
 
 func documentOpenPacket(cmdType, status string, data any) (string, error) {
@@ -56,6 +57,10 @@ func (o *Opener) Open(ctx context.Context, origin, basePath, docKey string, cmd 
 	}
 	if ext == "" {
 		ext = "doc"
+	}
+
+	if err := o.flushPending(ctx, docKey, origin); err != nil && o.Logger != nil {
+		o.Logger.Error("flush pending changes before open", "key", docKey, "err", err)
 	}
 
 	tmp, err := os.CreateTemp("", "go-office-src-*."+ext)
@@ -136,6 +141,16 @@ func (o *Opener) openBrowserDocument(cmd openCmd, origin, basePath, docKey, ext,
 	return []string{pkt}, nil
 }
 
+func (o *Opener) flushPending(ctx context.Context, docKey, origin string) error {
+	if o == nil || o.Saver == nil || o.CacheDir == "" || docKey == "" {
+		return nil
+	}
+	if !hasPendingChanges(filepath.Join(o.CacheDir, docKey)) {
+		return nil
+	}
+	return o.Saver.FlushDocument(ctx, docKey, origin, true)
+}
+
 func copyFile(src, dest string) error {
 	in, err := os.Open(src)
 	if err != nil {
@@ -154,6 +169,9 @@ func copyFile(src, dest string) error {
 }
 
 func (o *Opener) errorPackets(cmdType string, err error) ([]string, error) {
+	if o.Logger != nil {
+		o.Logger.Warn("document open failed", "err", err)
+	}
 	pkt, perr := documentOpenPacket(cmdType, "error", err.Error())
 	if perr != nil {
 		return nil, err
@@ -211,4 +229,12 @@ func requestOrigin(r *http.Request) string {
 		return "https://" + r.Host
 	}
 	return "http://" + r.Host
+}
+
+// CoauthoringOrigin returns the public document-server origin for cache URLs.
+func CoauthoringOrigin(publicOrigin string, r *http.Request) string {
+	if o := strings.TrimSpace(publicOrigin); o != "" {
+		return strings.TrimSuffix(o, "/")
+	}
+	return requestOrigin(r)
 }

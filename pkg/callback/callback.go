@@ -50,6 +50,18 @@ func ReadBody(r io.Reader) (Payload, error) {
 	return Parse(body)
 }
 
+// ReadBodyWithSecret parses JSON or JWT-wrapped callback bodies.
+func ReadBodyWithSecret(r io.Reader, secret []byte) (Payload, error) {
+	body, err := io.ReadAll(io.LimitReader(r, 1<<20))
+	if err != nil {
+		return Payload{}, err
+	}
+	if len(secret) > 0 {
+		return ParseRequest(body, secret)
+	}
+	return Parse(body)
+}
+
 // Response writes the standard ONLYOFFICE callback success JSON.
 func WriteOK(w interface{ Write([]byte) (int, error) }) {
 	_, _ = w.Write([]byte(`{"error":0}`))

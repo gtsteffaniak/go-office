@@ -24,6 +24,7 @@ type saveScheduler struct {
 	saver    DocumentSaver
 	cacheDir string
 	logger   *slog.Logger
+	inflight sync.WaitGroup
 }
 
 func newSaveScheduler(cacheDir string, saver DocumentSaver, logger *slog.Logger, delayOverride *time.Duration) *saveScheduler {
@@ -46,19 +47,50 @@ func newSaveScheduler(cacheDir string, saver DocumentSaver, logger *slog.Logger,
 
 func (s *saveScheduler) stop() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for key, t := range s.timers {
 		t.Stop()
 		s.gen[key]++
 	}
 	s.timers = make(map[string]*time.Timer)
+	s.mu.Unlock()
 }
 
-// Stop cancels pending save timers.
-func (h *Handler) Stop() {
-	if h != nil && h.Scheduler != nil {
-		h.Scheduler.stop()
+func (s *saveScheduler) drain(ctx context.Context) error {
+	if s == nil {
+		return nil
 	}
+	done := make(chan struct{})
+	go func() {
+		s.inflight.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Stop cancels pending save timers, waits for in-flight flushes, and clears sessions.
+func (h *Handler) Stop() {
+	if h == nil {
+		return
+	}
+	if h.Scheduler != nil {
+		h.Scheduler.stop()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := h.Scheduler.drain(ctx); err != nil && h.Logger != nil {
+			h.Logger.Debug("coauthoring save drain", "err", err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := waitDocumentOpens(ctx); err != nil && h.Logger != nil {
+		h.Logger.Debug("coauthoring open drain", "err", err)
+	}
+	ClearAllSessions()
 }
 
 func (s *saveScheduler) schedule(docKey, origin string, force bool) {
@@ -85,6 +117,8 @@ func (s *saveScheduler) scheduleDone(docKey, origin string, force bool, onDone f
 		delay = 0
 	}
 	s.timers[docKey] = time.AfterFunc(delay, func() {
+		s.inflight.Add(1)
+		defer s.inflight.Done()
 		s.mu.Lock()
 		delete(s.timers, docKey)
 		if s.gen[docKey] != gen {

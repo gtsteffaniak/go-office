@@ -3,10 +3,9 @@ package office
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
+	"github.com/quantumx-apps/go-office/internal/changes"
 	"github.com/quantumx-apps/go-office/internal/convert"
 )
 
@@ -28,8 +27,7 @@ func (s *Server) FlushDocument(ctx context.Context, docKey, origin string, force
 }
 
 func hasPendingChanges(cacheDir string) bool {
-	entries, err := os.ReadDir(filepath.Join(cacheDir, "changes"))
-	return err == nil && len(entries) > 0
+	return changes.HasPending(cacheDir)
 }
 
 func (s *Server) convertDocument(ctx context.Context, conv *convert.Converter, cacheDir, outPath, ext string) error {

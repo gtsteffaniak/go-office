@@ -21,13 +21,15 @@ import (
 	"strings"
 
 	"github.com/quantumx-apps/go-office/internal/home"
+	"github.com/quantumx-apps/go-office/internal/netutil"
 	"github.com/quantumx-apps/go-office/pkg/config"
 	office "github.com/quantumx-apps/go-office/pkg/office"
 )
 
 // Options configures the local demo UI and API stubs.
 type Options struct {
-	PublicOrigin string // e.g. http://localhost:8080
+	// PublicOrigin overrides request host when set (reverse proxy). Leave empty for same-origin demo.
+	PublicOrigin string
 	DataRoot     string // filesystem root for listing sample documents
 	SamplesDir   string // directory relative to DataRoot (default: sample-files)
 	APIBasePath  string // API routes prefix (default: /api/office)
@@ -153,7 +155,10 @@ func (h *Handler) serveConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	origin := strings.TrimSuffix(h.opts.PublicOrigin, "/")
+	origin := strings.TrimSuffix(netutil.RequestOrigin(r), "/")
+	if o := strings.TrimSpace(h.opts.PublicOrigin); o != "" {
+		origin = strings.TrimSuffix(o, "/")
+	}
 	apiBase := h.opts.APIBasePath
 	fileURL := origin + apiBase + "/demo/file/" + strings.TrimPrefix(file, "/")
 	callbackURL := origin + apiBase + "/demo/callback"
@@ -203,10 +208,12 @@ func (h *Handler) serveViewer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	origin := strings.TrimSuffix(h.opts.PublicOrigin, "/")
-	officeBase := origin + h.office.BasePath()
-	apiBase := origin + h.opts.APIBasePath
-	landingURL := officeBase + "/demo/"
+	officeBase := h.office.BasePath()
+	if officeBase == "/" {
+		officeBase = ""
+	}
+	apiBase := normalizePath(h.opts.APIBasePath)
+	landingURL := office.URLPath(h.office.BasePath(), "demo/")
 
 	data := viewerData{
 		FileJSON:       template.JS(jsonString(file)),
@@ -268,7 +275,10 @@ func (h *Handler) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	origin := strings.TrimSuffix(h.opts.PublicOrigin, "/")
+	origin := strings.TrimSuffix(netutil.RequestOrigin(r), "/")
+	if o := strings.TrimSpace(h.opts.PublicOrigin); o != "" {
+		origin = strings.TrimSuffix(o, "/")
+	}
 	apiBase := h.opts.APIBasePath
 	fileURL := origin + apiBase + "/demo/file/" + strings.TrimPrefix(file, "/")
 	ext := strings.TrimPrefix(strings.ToLower(path.Ext(info.Name)), ".")

@@ -9,11 +9,15 @@ import (
 
 var quotedAbsPathRe = regexp.MustCompile(`"(/[^"]+)"`)
 
+// RewriteAllFontsPaths remaps quoted font paths in AllFonts.js so they resolve under
+// assetDir. allfontsgen bakes in absolute paths from the host that ran fetch-assets.
+func RewriteAllFontsPaths(src []byte, assetDir string) []byte {
+	return rewriteAllFontsPaths(src, assetDir)
+}
+
 // rewriteAllFontsPaths remaps quoted font paths in converter AllFonts.js so they
-// resolve under the current assetDir. allfontsgen bakes in absolute paths from the
-// machine that ran make fonts; Docker copies those files to /app/assets.
-// font_selection.bin and g_fonts_selection_bin are left unchanged (length-changing
-// rewrites corrupt them); ensureStaleFontPrefixAlias covers native lookups.
+// resolve under the current assetDir. font_selection.bin is left unchanged
+// (length-changing rewrites corrupt it).
 func rewriteAllFontsPaths(src []byte, assetDir string) []byte {
 	if len(src) == 0 || assetDir == "" {
 		return src
@@ -101,36 +105,3 @@ func allFontFilePaths(src []byte) []string {
 	return out
 }
 
-func detectBakedAssetPrefix(src []byte) string {
-	for _, p := range allFontFilePaths(src) {
-		const marker = "/core-fonts/"
-		if i := strings.Index(p, marker); i > 0 {
-			return p[:i]
-		}
-	}
-	return ""
-}
-
-// ensureStaleFontPrefixAlias links the allfontsgen-time asset directory to the
-// current assetDir when the baked prefix is missing (typical Docker copy).
-func ensureStaleFontPrefixAlias(original []byte, assetDir string) {
-	old := detectBakedAssetPrefix(original)
-	if old == "" {
-		return
-	}
-	old = filepath.Clean(old)
-	want := filepath.Clean(assetDir)
-	if old == want {
-		return
-	}
-	if _, err := os.Stat(old); err == nil {
-		return
-	}
-	if _, err := os.Stat(assetDir); err != nil {
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(old), 0o755); err != nil {
-		return
-	}
-	_ = os.Symlink(want, old)
-}

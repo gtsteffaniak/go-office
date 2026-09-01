@@ -256,7 +256,7 @@ func TestSaveChangesCSVAppliesCapturedCellEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 	if firstCSVDataCell(body) == before {
-		t.Logf("x2t csv/xlsx bridge did not apply captured A2 blobs (cell still %q); persist debug logs preview/firstDataCell", before)
+		t.Fatalf("csv A2 cell edit was not applied; before=%q after=%q preview=%q", before, firstCSVDataCell(body), truncate(body, 160))
 	}
 }
 
@@ -367,7 +367,7 @@ func TestPrepareX2TRunDirIsolatesSharedAllFonts(t *testing.T) {
 					t.Fatalf("x2t eval symlinks: %v", err)
 				}
 				if resolved != path {
-					t.Fatalf("x2t must be a copied binary in %s, not a symlink to %s", dir, resolved)
+					t.Fatalf("x2t must be hard-linked in %s, not a symlink to %s", dir, resolved)
 				}
 			}
 		}
@@ -456,6 +456,31 @@ func TestToEditorBinSnapshotsFontArtifacts(t *testing.T) {
 
 func TestSaveChangesCSVPlaywrightLiveBlob(t *testing.T) {
 	t.Skip("coauthoring blobs are session-specific; captured Playwright blobs cannot be replayed on a fresh Editor.bin (see TestSaveChangesCSVConcurrentWithDocumentOpens)")
+}
+
+func TestSharedAllFontsUnmodifiedDuringConcurrentSave(t *testing.T) {
+	repo := testutil.RepoRoot(t)
+	assets := filepath.Join(repo, "assets")
+	sharedAllFonts := filepath.Join(assets, "converter", "bin", "AllFonts.js")
+	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
+		t.Skip("x2t not available")
+	}
+	before, err := os.Stat(sharedAllFonts)
+	if err != nil || before.Size() == 0 {
+		t.Skip("AllFonts.js missing")
+	}
+	beforeMod := before.ModTime()
+
+	TestSaveChangesCSVConcurrentWithDocumentOpens(t)
+
+	after, err := os.Stat(sharedAllFonts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(beforeMod) {
+		t.Fatalf("shared %s modtime changed during concurrent save: before=%s after=%s",
+			sharedAllFonts, beforeMod, after.ModTime())
+	}
 }
 
 func TestSaveChangesCSVConcurrentPlaywrightLoad(t *testing.T) {

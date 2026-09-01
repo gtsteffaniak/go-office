@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 
@@ -129,6 +130,13 @@ func (s *Server) Close() error {
 	s.closeOnce.Do(func() {
 		if s.coauthoring != nil {
 			s.coauthoring.Stop()
+		}
+		if conv, convErr := s.converter(); convErr == nil && conv != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if drainErr := conv.Drain(ctx); drainErr != nil {
+				err = drainErr
+			}
 		}
 		if s.cacheJanitor != nil {
 			s.cacheJanitor.stop()

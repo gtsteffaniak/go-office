@@ -1,6 +1,7 @@
 package assetfetch
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -8,12 +9,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
+
+	"github.com/quantumx-apps/go-office/internal/convert"
 )
 
 // GenerateAllFonts builds sdkjs/common/AllFonts.js using the Euro-Office allfontsgen tool.
-// Output paths are absolute for the current OutDir/host. Converter.New remaps them at
-// runtime so Docker copies (e.g. /app/assets) still resolve. --use-system=false keeps
-// faces inside core-fonts instead of /usr/share/fonts.
+// Font paths are rewritten for OutDir immediately after generation so relocated asset
+// trees (e.g. Docker /app/assets) do not need runtime symlinks.
 func GenerateAllFonts(outDir string) error {
 	if err := RequireLinux(); err != nil {
 		return err
@@ -65,7 +67,31 @@ func GenerateAllFonts(outDir string) error {
 	if st, err := os.Stat(allFontsWeb); err != nil || st.Size() == 0 {
 		return fmt.Errorf("assetfetch: AllFonts.js was not created")
 	}
-	fmt.Println("AllFonts.js ready (absolute paths are host-specific; Converter remaps them at runtime)")
+	if err := rewriteAllFontsInTree(outDir); err != nil {
+		return err
+	}
+	fmt.Println("AllFonts.js ready (paths rewritten for " + outDir + ")")
+	return nil
+}
+
+func rewriteAllFontsInTree(outDir string) error {
+	for _, rel := range []string{
+		filepath.Join("converter", "bin", "AllFonts.js"),
+		filepath.Join("sdkjs", "common", "AllFonts.js"),
+	} {
+		path := filepath.Join(outDir, rel)
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("assetfetch: read %s: %w", rel, err)
+		}
+		rewritten := convert.RewriteAllFontsPaths(raw, outDir)
+		if bytes.Equal(raw, rewritten) {
+			continue
+		}
+		if err := os.WriteFile(path, rewritten, 0o644); err != nil {
+			return fmt.Errorf("assetfetch: rewrite %s: %w", rel, err)
+		}
+	}
 	return nil
 }
 

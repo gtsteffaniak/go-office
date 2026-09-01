@@ -108,7 +108,7 @@ func main() {
 		BasePath:        cfg.BasePath,
 		JWTSecret:       []byte(cfg.JWTSecret),
 		ProtocolVersion: cfg.Version,
-		PublicOrigin:    cfg.publicOrigin(),
+		PublicOrigin:    cfg.PublicOrigin,
 		ConvertLimit:    cfg.ConvertLimit,
 		PollHold:        cfg.PollHold,
 		SaveDelay:       cfg.SaveDelay,
@@ -124,7 +124,7 @@ func main() {
 
 	if cfg.samplesEnabled() {
 		if err := demo.Attach(srv, store, demo.Options{
-			PublicOrigin: origin,
+			PublicOrigin: cfg.PublicOrigin,
 			DataRoot:     cfg.DataDir,
 			SamplesDir:   cfg.SamplesDir,
 			APIBasePath:  cfg.APIBase,

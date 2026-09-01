@@ -60,6 +60,11 @@ func getSession(sid, docKey string, build BuildInfo, basePath string) *session {
 
 // ResetSessionsForTest clears in-memory coauthoring sessions (tests only).
 func ResetSessionsForTest() {
+	ClearAllSessions()
+}
+
+// ClearAllSessions drops all in-memory coauthoring sessions.
+func ClearAllSessions() {
 	sessions = sync.Map{}
 }
 
@@ -196,7 +201,9 @@ func (s *session) startOpen(opener DocumentOpener, req authRequest, origin strin
 	open := *req.Open
 	s.mu.Unlock()
 
+	docOpenInflight.Add(1)
 	go func() {
+		defer docOpenInflight.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
 		packets, err := opener.Open(ctx, origin, basePath, docKey, open)

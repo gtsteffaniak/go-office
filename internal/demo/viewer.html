@@ -43,54 +43,85 @@
     var statusEl = document.getElementById("status");
     function setStatus(msg) { statusEl.textContent = msg; }
 
-    var apiScript = document.getElementById("office-api");
-    apiScript.src = officeBase + "/web-apps/apps/api/documents/api.js";
-    apiScript.onload = function () {
-      var configUrl = apiBase + "/demo/config?file=" + encodeURIComponent(SAMPLE_FILE);
-      fetch(configUrl)
-        .then(function (res) {
-          if (!res.ok) throw new Error("config " + res.status);
-          return res.json();
+    function joinPath(base, path) {
+      if (!base) {
+        return path;
+      }
+      return base.replace(/\/$/, "") + "/" + path.replace(/^\//, "");
+    }
+
+    function loadEditor() {
+      var apiScript = document.getElementById("office-api");
+      apiScript.onerror = function () {
+        setStatus("Failed to load api.js — fetch Euro-Office assets first (see README)");
+      };
+      apiScript.onload = function () {
+        var configUrl = joinPath(apiBase, "/demo/config?file=" + encodeURIComponent(SAMPLE_FILE));
+        setStatus("Loading config…");
+        fetch(configUrl, { cache: "no-store" })
+          .then(function (res) {
+            if (!res.ok) throw new Error("config " + res.status);
+            return res.json();
+          })
+          .then(function (config) {
+            document.getElementById("doc-title").textContent = config.document.title;
+            setStatus("Opening " + config.document.title + "…");
+            var baseEvents = config.events || {};
+            config.events = {
+              onDocumentReady: function () {
+                document.body.setAttribute("data-document-ready", "true");
+                if (typeof baseEvents.onDocumentReady === "function") {
+                  baseEvents.onDocumentReady();
+                }
+              },
+              onDocumentStateChange: function (event) {
+                if (event && event.data === true) {
+                  document.body.setAttribute("data-dirty", "true");
+                }
+                if (event && event.data === false && document.body.getAttribute("data-dirty") === "true") {
+                  document.body.setAttribute("data-save-done", String(Date.now()));
+                }
+                if (typeof baseEvents.onDocumentStateChange === "function") {
+                  baseEvents.onDocumentStateChange(event);
+                }
+              },
+              onRequestSaveResult: function (event) {
+                if (event && event.data) {
+                  document.body.setAttribute("data-save-done", String(Date.now()));
+                }
+                if (typeof baseEvents.onRequestSaveResult === "function") {
+                  baseEvents.onRequestSaveResult(event);
+                }
+              },
+            };
+            window.docEditor = new DocsAPI.DocEditor("editor", config);
+            setStatus("Editor ready");
+          })
+          .catch(function (err) {
+            setStatus("Error: " + err.message);
+            console.error(err);
+          });
+      };
+      apiScript.src = joinPath(officeBase, "/web-apps/apps/api/documents/api.js");
+    }
+
+    function boot() {
+      if (!("serviceWorker" in navigator)) {
+        loadEditor();
+        return;
+      }
+      navigator.serviceWorker.getRegistrations()
+        .then(function (regs) {
+          return Promise.all(regs.map(function (reg) { return reg.unregister(); }));
         })
-        .then(function (config) {
-          document.getElementById("doc-title").textContent = config.document.title;
-          setStatus("Opening " + config.document.title + "…");
-          var baseEvents = config.events || {};
-          config.events = {
-            onDocumentReady: function () {
-              document.body.setAttribute("data-document-ready", "true");
-              if (typeof baseEvents.onDocumentReady === "function") {
-                baseEvents.onDocumentReady();
-              }
-            },
-            onDocumentStateChange: function (event) {
-              if (event && event.data === true) {
-                document.body.setAttribute("data-dirty", "true");
-              }
-              if (event && event.data === false && document.body.getAttribute("data-dirty") === "true") {
-                document.body.setAttribute("data-save-done", String(Date.now()));
-              }
-              if (typeof baseEvents.onDocumentStateChange === "function") {
-                baseEvents.onDocumentStateChange(event);
-              }
-            },
-            onRequestSaveResult: function (event) {
-              if (event && event.data) {
-                document.body.setAttribute("data-save-done", String(Date.now()));
-              }
-              if (typeof baseEvents.onRequestSaveResult === "function") {
-                baseEvents.onRequestSaveResult(event);
-              }
-            },
-          };
-          window.docEditor = new DocsAPI.DocEditor("editor", config);
-          setStatus("Editor ready");
-        })
+        .then(loadEditor)
         .catch(function (err) {
-          setStatus("Error: " + err.message);
-          console.error(err);
+          console.warn("service worker unregister failed", err);
+          loadEditor();
         });
-    };
+    }
+
+    boot();
 
     function destroyDemoEditor() {
       var editor = window.docEditor;
@@ -120,9 +151,6 @@
       }
       destroyDemoEditor();
     });
-    apiScript.onerror = function () {
-      setStatus("Failed to load api.js — fetch Euro-Office assets first (see README)");
-    };
   </script>
 </body>
 </html>

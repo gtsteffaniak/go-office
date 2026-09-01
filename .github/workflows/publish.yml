@@ -27,7 +27,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: assets
-          key: euro-office-assets-v5-${{ hashFiles('scripts/euro-office.version') }}
+          key: euro-office-assets-v5-amd64-${{ hashFiles('scripts/euro-office.version') }}
 
       - name: Prepare assets
         run: mkdir -p assets && make ensure-assets

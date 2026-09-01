@@ -154,6 +154,16 @@ check-assets:
 	@chmod +x "$(OFFICE_ASSETS)/converter/bin/"* 2>/dev/null || true
 	@chmod +x "$(X2T_BIN)" || (echo "error: chmod +x failed for $(X2T_BIN)" && exit 1)
 	@test -x "$(X2T_BIN)" || (echo "error: x2t is not executable: $(X2T_BIN)" && ls -la "$(X2T_BIN)" && exit 1)
+	@arch=$$(uname -m); \
+	case "$$arch" in \
+	  aarch64|arm64) want="ARM aarch64" ;; \
+	  x86_64|amd64) want="x86-64" ;; \
+	  *) echo "error: unsupported host arch $$arch for x2t check"; exit 1 ;; \
+	esac; \
+	file "$(X2T_BIN)" | grep -qi "$$want" || ( \
+	  echo "error: x2t architecture mismatch ($$(file "$(X2T_BIN)"))"; \
+	  echo "       delete assets/ and re-run: make ensure-assets"; \
+	  exit 1)
 	@ls -la "$(X2T_BIN)"
 
 test-x2t: build check-samples
@@ -175,7 +185,7 @@ fonts: check-linux
 	$(FETCH_ASSETS_BIN) -fonts -out "$(OFFICE_ASSETS)"
 
 test:
-	$(GO) test ./...
+	$(GO) test -race ./...
 
 PLAYWRIGHT_BASE_IMAGE ?= go-office-playwright-base
 PLAYWRIGHT_TEST_IMAGE ?= go-office-playwright-tests

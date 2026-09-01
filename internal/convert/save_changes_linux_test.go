@@ -367,7 +367,7 @@ func TestPrepareX2TRunDirIsolatesSharedAllFonts(t *testing.T) {
 					t.Fatalf("x2t eval symlinks: %v", err)
 				}
 				if resolved != path {
-					t.Fatalf("x2t must be a copied binary in %s, not a symlink to %s", dir, resolved)
+					t.Fatalf("x2t must be hard-linked in %s, not a symlink to %s", dir, resolved)
 				}
 			}
 		}

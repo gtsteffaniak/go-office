@@ -410,8 +410,9 @@ func (c *Converter) prepareX2TRunDir(cacheDir string) (string, error) {
 		return "", err
 	}
 	// DoctRenderer resolves paths from the x2t binary location (/proc/self/exe).
-	// Symlinks still resolve to converter/bin, so copy the small x2t stub (~64KiB).
-	if err := fsutil.CopyExecutable(filepath.Join(c.binDir, "x2t"), filepath.Join(runDir, "x2t")); err != nil {
+	// Symlinks still resolve to converter/bin, so hard-link the x2t stub into the
+	// run dir (same inode, correct /proc/self/exe) instead of copying bytes.
+	if err := linkExecutable(filepath.Join(c.binDir, "x2t"), filepath.Join(runDir, "x2t")); err != nil {
 		os.RemoveAll(runDir)
 		return "", err
 	}
@@ -423,8 +424,8 @@ func applyChangesFontPaths(runDir string) (fontDir, allFontsPath string) {
 	return runDir, filepath.Join(runDir, "AllFonts.js")
 }
 
-func copyExecutable(src, dst string) error {
-	return fsutil.CopyExecutable(src, dst)
+func linkExecutable(src, dst string) error {
+	return fsutil.LinkExecutable(src, dst)
 }
 
 // stageReverseFonts copies x2t font metadata into an isolated work dir so concurrent

@@ -40,3 +40,13 @@ func CopyExecutable(src, dst string) error {
 	}
 	return out.Close()
 }
+
+// LinkExecutable places src at dst for isolated x2t runs. A hard link keeps the
+// same ELF inode while making /proc/self/exe resolve under the run directory;
+// fall back to a byte copy when hard links are unsupported.
+func LinkExecutable(src, dst string) error {
+	if err := os.Link(src, dst); err == nil {
+		return os.Chmod(dst, 0o755)
+	}
+	return CopyExecutable(src, dst)
+}

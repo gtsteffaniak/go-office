@@ -19,6 +19,7 @@ type DocumentSaver interface {
 type saveScheduler struct {
 	mu       sync.Mutex
 	timers   map[string]*time.Timer
+	gen      map[string]uint64
 	delay    time.Duration
 	saver    DocumentSaver
 	cacheDir string
@@ -35,6 +36,7 @@ func newSaveScheduler(cacheDir string, saver DocumentSaver, logger *slog.Logger,
 	}
 	return &saveScheduler{
 		timers:   make(map[string]*time.Timer),
+		gen:      make(map[string]uint64),
 		delay:    delay,
 		saver:    saver,
 		cacheDir: cacheDir,
@@ -45,8 +47,9 @@ func newSaveScheduler(cacheDir string, saver DocumentSaver, logger *slog.Logger,
 func (s *saveScheduler) stop() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, t := range s.timers {
+	for key, t := range s.timers {
 		t.Stop()
+		s.gen[key]++
 	}
 	s.timers = make(map[string]*time.Timer)
 }
@@ -75,6 +78,8 @@ func (s *saveScheduler) scheduleDone(docKey, origin string, force bool, onDone f
 		t.Stop()
 		delete(s.timers, docKey)
 	}
+	gen := s.gen[docKey] + 1
+	s.gen[docKey] = gen
 	delay := s.delay
 	if force {
 		delay = 0
@@ -82,6 +87,10 @@ func (s *saveScheduler) scheduleDone(docKey, origin string, force bool, onDone f
 	s.timers[docKey] = time.AfterFunc(delay, func() {
 		s.mu.Lock()
 		delete(s.timers, docKey)
+		if s.gen[docKey] != gen {
+			s.mu.Unlock()
+			return
+		}
 		s.mu.Unlock()
 
 		s.logger.Debug("document flush start", "key", docKey, "force", force)

@@ -233,8 +233,10 @@ func requestOrigin(r *http.Request) string {
 
 // CoauthoringOrigin returns the public document-server origin for cache URLs.
 func CoauthoringOrigin(publicOrigin string, r *http.Request) string {
-	if o := strings.TrimSpace(publicOrigin); o != "" {
-		return strings.TrimSuffix(o, "/")
+	if r != nil {
+		if o := strings.TrimSuffix(requestOrigin(r), "/"); o != "" {
+			return o
+		}
 	}
-	return requestOrigin(r)
+	return strings.TrimSuffix(strings.TrimSpace(publicOrigin), "/")
 }

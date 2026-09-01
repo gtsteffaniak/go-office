@@ -32,12 +32,12 @@ func TestPrepareChangesForSaveRewritesJSON(t *testing.T) {
 }
 
 func TestApplyChangesFontPaths(t *testing.T) {
-	c := &Converter{saveFontDir: "/converter/bin"}
-	fontDir, allFonts := c.applyChangesFontPaths()
-	if fontDir != "/converter/bin" {
+	runDir := "/tmp/x2t-run"
+	fontDir, allFonts := applyChangesFontPaths(runDir)
+	if fontDir != runDir {
 		t.Fatalf("fontDir = %q", fontDir)
 	}
-	if allFonts != "/converter/bin/AllFonts.js" {
+	if allFonts != "/tmp/x2t-run/AllFonts.js" {
 		t.Fatalf("allFonts = %q", allFonts)
 	}
 }

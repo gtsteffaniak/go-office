@@ -6,12 +6,13 @@ import (
 )
 
 func TestBuildReverseTaskXMLFromChanges(t *testing.T) {
-	xml := buildReverseTaskXML("/cache/key/Editor.bin", "/cache/key/saved.docx", "/converter/bin", "/themes", "/converter/bin/AllFonts.js", "docx", true, "/cache/key/x2t-save-abc123")
-	if !strings.Contains(xml, "<m_sFontDir>/converter/bin</m_sFontDir>") {
-		t.Fatalf("fromChanges font dir must be converter/bin: %s", xml)
+	runDir := "/cache/key/x2t-run"
+	xml := buildReverseTaskXML("/cache/key/Editor.bin", "/cache/key/saved.docx", runDir, "/themes", runDir+"/AllFonts.js", "docx", true, "/cache/key/x2t-save-abc123")
+	if !strings.Contains(xml, "<m_sFontDir>"+runDir+"</m_sFontDir>") {
+		t.Fatalf("fromChanges font dir must be isolated run dir: %s", xml)
 	}
-	if !strings.Contains(xml, "<m_sAllFontsPath>/converter/bin/AllFonts.js</m_sAllFontsPath>") {
-		t.Fatalf("fromChanges all fonts must be under converter/bin: %s", xml)
+	if !strings.Contains(xml, "<m_sAllFontsPath>"+runDir+"/AllFonts.js</m_sAllFontsPath>") {
+		t.Fatalf("fromChanges all fonts must be under run dir: %s", xml)
 	}
 	if !strings.Contains(xml, "<m_bFromChanges>true</m_bFromChanges>") {
 		t.Fatalf("fromChanges flag missing: %s", xml)

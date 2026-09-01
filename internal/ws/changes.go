@@ -8,9 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode/utf16"
+
+	docchanges "github.com/quantumx-apps/go-office/internal/changes"
 )
 
-const changesFileName = "changes0.json"
+const changesFileName = docchanges.FileName
 
 // appendChanges appends editor change blobs to cacheDir/changes/changes0.json.
 // x2t expects this exact file when m_bFromChanges is true.
@@ -70,8 +72,7 @@ func clearChanges(cacheDir string) {
 }
 
 func hasPendingChanges(cacheDir string) bool {
-	n, err := maxChangeIndex(cacheDir)
-	return err == nil && n > 0
+	return docchanges.HasPending(cacheDir)
 }
 
 func parseChanges(msg map[string]any) []string {

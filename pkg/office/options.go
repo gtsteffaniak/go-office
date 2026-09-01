@@ -2,6 +2,7 @@ package office
 
 import (
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 )
@@ -54,6 +55,9 @@ type Options struct {
 
 	// CacheMaxEntries caps the number of document cache subdirectories (default 256).
 	CacheMaxEntries int
+
+	// HTTPClient performs outbound callback and download requests. Defaults to http.DefaultClient.
+	HTTPClient *http.Client
 
 	Logger *slog.Logger
 }

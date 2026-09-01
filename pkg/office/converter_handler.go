@@ -14,6 +14,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/quantumx-apps/go-office/internal/convert"
+	"github.com/quantumx-apps/go-office/internal/netutil"
 )
 
 const defaultThumbnailWidth = 200
@@ -190,7 +191,7 @@ func (s *Server) handleConverter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	origin := requestOrigin(r)
+	origin := strings.TrimSuffix(netutil.RequestOrigin(r), "/")
 	if o := strings.TrimSpace(s.opts.PublicOrigin); o != "" {
 		origin = strings.TrimSuffix(o, "/")
 	}
@@ -250,18 +251,4 @@ func xmlEscape(s string) string {
 	s = strings.ReplaceAll(s, ">", "&gt;")
 	s = strings.ReplaceAll(s, `"`, "&quot;")
 	return s
-}
-
-func requestOrigin(r *http.Request) string {
-	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
-		host := r.Header.Get("X-Forwarded-Host")
-		if host == "" {
-			host = r.Host
-		}
-		return proto + "://" + host
-	}
-	if r.TLS != nil {
-		return "https://" + r.Host
-	}
-	return "http://" + r.Host
 }

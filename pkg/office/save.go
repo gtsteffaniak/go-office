@@ -85,7 +85,12 @@ func (s *Server) PersistDocument(ctx context.Context, docKey string) error {
 		return err
 	}
 
-	raw, err := os.ReadFile(outPath)
+	f, err := os.Open(outPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(f)
 	if err != nil {
 		return err
 	}
@@ -138,7 +143,7 @@ func (s *Server) downloadAndSave(ctx context.Context, rawURL, storagePath, fileT
 	if err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := s.httpClient().Do(req)
 	if err != nil {
 		return err
 	}
@@ -189,7 +194,7 @@ func (s *Server) NotifyCallback(ctx context.Context, docKey, callbackURL, downlo
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := s.httpClient().Do(req)
 	if err != nil {
 		return err
 	}
@@ -210,7 +215,8 @@ func (s *Server) CacheFileURL(origin, docKey, name string) string {
 	return origin + base + "/cache/files/" + docKey + "/" + name
 }
 
-// Sessions exposes the document session manager (for coauthoring save wiring).
+// Sessions exposes the document session manager for integrators that wire coauthoring saves.
+// Prefer FlushDocument and PersistDocument when possible.
 func (s *Server) Sessions() *session.Manager {
 	return s.sessions
 }

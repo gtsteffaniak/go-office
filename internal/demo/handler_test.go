@@ -85,7 +85,10 @@ func TestDemoLandingAndConfig(t *testing.T) {
 		t.Fatal("expected pagehide/beforeunload teardown hooks")
 	}
 	if !strings.Contains(body, "/api/office") || !strings.Contains(body, "/demo/config") {
-		t.Fatal("expected API config URL in viewer page")
+		t.Fatal("expected relative API config URL in viewer page")
+	}
+	if strings.Contains(body, "http://localhost") || strings.Contains(body, "http://127.0.0.1") {
+		t.Fatal("viewer page should use same-origin relative URLs, not absolute hosts")
 	}
 
 	rec = httptest.NewRecorder()

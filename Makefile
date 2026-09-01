@@ -175,7 +175,7 @@ fonts: check-linux
 	$(FETCH_ASSETS_BIN) -fonts -out "$(OFFICE_ASSETS)"
 
 test:
-	$(GO) test ./...
+	$(GO) test -race ./...
 
 PLAYWRIGHT_BASE_IMAGE ?= go-office-playwright-base
 PLAYWRIGHT_TEST_IMAGE ?= go-office-playwright-tests

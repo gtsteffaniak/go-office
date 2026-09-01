@@ -97,6 +97,41 @@ func pollingGet(t *testing.T, h *ws.Handler, docKey string) string {
 	return rec.Body.String()
 }
 
+func TestHandlerStopDrainsInFlightOpens(t *testing.T) {
+	ws.ResetSessionsForTest()
+	block := make(chan struct{})
+	opener := newHookOpener()
+	opener.blockKey = "blocked"
+	opener.block = block
+	h := ws.NewWithOptions(ws.HandlerOptions{
+		Version:  "9.3.4",
+		CacheDir: t.TempDir(),
+		OpenHook: opener,
+	})
+	h.PollHold = 0
+
+	h.ServePath(httptest.NewRecorder(), authPostRequest("docx", "http://localhost/sample.docx"), "/doc/blocked/c")
+
+	stopped := make(chan struct{})
+	go func() {
+		h.Stop()
+		close(stopped)
+	}()
+
+	select {
+	case <-stopped:
+		t.Fatal("Stop returned while document open still in flight")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(block)
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not return after open completed")
+	}
+}
+
 func TestCrossDocCSVSaveDoesNotBlockDocxOpen(t *testing.T) {
 	ws.ResetSessionsForTest()
 	opener := newHookOpener()

@@ -8,6 +8,11 @@ Euro-Office / ONLYOFFICE editor assets (`web-apps/`, `sdkjs/`, `x2t`) are **not*
 
 ## [0.2.0] - 2026-09-01
 
+**Euro-Office pin:** `9.3.4-hotfix.1`
+
+- **Go module:** `go get github.com/quantumx-apps/go-office@v0.2.0`
+- **Docker:** `docker pull ghcr.io/quantumx-apps/office-server:v0.2.0` or `docker pull ghcr.io/quantumx-apps/office-server:9.3.4-hotfix.1` (images are tagged with both go-office semver and Euro-Office version)
+
 ### Library and assets
 
 - **`office.DiscoverAssets`**, **`office.FetchAssets`**, **`office.EnsureAssets`** — caller-controlled Euro-Office asset discovery and download; `office.New()` never fetches.

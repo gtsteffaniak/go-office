@@ -99,7 +99,7 @@ These are **not** read by current builds. Rename in compose, CI, and shell profi
 
 ## Integrator checklist
 
-1. **Image** — `ghcr.io/quantumx-apps/office-server:latest` or a version tag matching Euro-Office (e.g. `9.3.4-hotfix.1`).
+1. **Image** — `ghcr.io/quantumx-apps/office-server:latest`, a Euro-Office tag (e.g. `9.3.4-hotfix.1`), or a go-office tag (e.g. `v0.2.0`).
 2. **JWT** — Rename `JWT_SECRET` → `OFFICE_JWT_SECRET` with the **same value** on both document server and integrator.
 3. **documentServerUrl** — Unchanged URL shape; must end with `/` and serve `web-apps/…/api.js`.
 4. **document.url / callbackUrl** — Still point at your integrator; go-office fetches documents from those URLs on open.
@@ -183,8 +183,9 @@ Docker images are tagged with:
 
 - `latest` — current `main` build
 - Euro-Office release tag (e.g. `9.3.4-hotfix.1`) — matches bundled `assets/VERSION`
+- go-office release tag (e.g. `v0.2.0`) — on git tag releases; see [RELEASE.md](RELEASE.md) for the Euro-Office pin paired with each tag
 
-Pin the Euro-Office tag in production so `documentServerUrl`, sdkjs, and coauthoring protocol stay aligned.
+Pin the Euro-Office tag when you care about editor/sdkjs protocol alignment. Pin the go-office tag when you care about the server/library release.
 
 ## Further reading
 

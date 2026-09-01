@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
@@ -49,15 +49,51 @@ jobs:
           # shellcheck disable=SC1091
           . ./scripts/euro-office.version
           set +a
-          ver="${EURO_OFFICE_VERSION#v}"
-          tags="${IMAGE}:latest,${IMAGE}:${ver}"
+          euro_ver="${EURO_OFFICE_VERSION#v}"
+          tags=(--tag "${IMAGE}:latest" --tag "${IMAGE}:${euro_ver}")
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            tags="${tags},${IMAGE}:${GITHUB_REF#refs/tags/}"
+            go_tag="${GITHUB_REF#refs/tags/}"
+            tags+=(--tag "${IMAGE}:${go_tag}")
           fi
           docker buildx build \
             --push \
             --file _docker/Dockerfile \
-            --tag "${IMAGE}:latest" \
-            --tag "${IMAGE}:${ver}" \
-            $(if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then echo --tag "${IMAGE}:${GITHUB_REF#refs/tags/}"; fi) \
+            "${tags[@]}" \
             .
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          set -a
+          # shellcheck disable=SC1091
+          . ./scripts/euro-office.version
+          set +a
+          euro_ver="${EURO_OFFICE_VERSION#v}"
+          go_tag="${GITHUB_REF#refs/tags/}"
+          body_file="$(mktemp)"
+          cat >"${body_file}" <<EOF
+          ## go-office ${go_tag}
+
+          **Euro-Office pin:** ${euro_ver}
+
+          ### Docker
+
+          Docker images are tagged with both Euro-Office and go-office versions:
+
+          \`\`\`bash
+          docker pull ghcr.io/quantumx-apps/office-server:${euro_ver}
+          docker pull ghcr.io/quantumx-apps/office-server:${go_tag}
+          \`\`\`
+
+          ### Go module
+
+          \`\`\`bash
+          go get github.com/quantumx-apps/go-office@${go_tag}
+          \`\`\`
+
+          See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${go_tag}/CHANGELOG.md) for full release notes.
+          EOF
+          gh release create "${go_tag}" --title "go-office ${go_tag} (Euro-Office ${euro_ver})" --notes-file "${body_file}"

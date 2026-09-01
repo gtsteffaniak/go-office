@@ -62,12 +62,33 @@ func TestDiscoverAssetsFindsPreferredDir(t *testing.T) {
 
 func TestDiscoverAssetsMissing(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("OFFICE_ASSETS", "/should/not/be/used")
 	_, ok, err := office.DiscoverAssets(office.AssetOptions{Dir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ok {
 		t.Fatal("expected no assets")
+	}
+}
+
+func TestDiscoverAssetsFromEnvWhenDirEmpty(t *testing.T) {
+	dir := t.TempDir()
+	writeMinimalValidAssets(t, dir)
+	t.Setenv("OFFICE_ASSETS", dir)
+
+	bundle, ok, err := office.DiscoverAssets(office.AssetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected assets from OFFICE_ASSETS")
+	}
+	if bundle.Dir != dir {
+		abs, _ := filepath.Abs(dir)
+		if bundle.Dir != abs {
+			t.Fatalf("dir = %q want %q", bundle.Dir, dir)
+		}
 	}
 }
 

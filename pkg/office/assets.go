@@ -93,6 +93,14 @@ func EnsureAssets(ctx context.Context, opts EnsureAssetsOptions) (AssetBundle, e
 }
 
 func assetCandidateDirs(preferred string) []string {
+	if preferred != "" {
+		abs, err := filepath.Abs(preferred)
+		if err != nil {
+			return []string{preferred}
+		}
+		return []string{abs}
+	}
+
 	seen := make(map[string]struct{})
 	var out []string
 	add := func(dir string) {
@@ -110,7 +118,6 @@ func assetCandidateDirs(preferred string) []string {
 		out = append(out, abs)
 	}
 
-	add(preferred)
 	add(AssetDirFromEnv(""))
 	if wd, err := os.Getwd(); err == nil {
 		add(filepath.Join(wd, "assets"))

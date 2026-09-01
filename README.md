@@ -77,6 +77,7 @@ make build-docker
 make run-docker    # http://localhost:8080/
 docker pull ghcr.io/quantumx-apps/office-server:latest
 # or pin: ghcr.io/quantumx-apps/office-server:9.3.4-hotfix.1
+# or pin: ghcr.io/quantumx-apps/office-server:v0.2.0
 ```
 
 The image bundles `go-office`, Euro-Office assets, and `sample-files/`. Container listens on **port 80**. See [migration.md](migration.md).

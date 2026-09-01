@@ -1,11 +1,13 @@
 # Release schedule and version matrix
 
-go-office uses [semantic versioning](https://semver.org/) for the Go module and Docker images. Each release embeds exactly one Euro-Office asset pin (`scripts/euro-office.version` → `pkg/office.ExpectedAssetsVersion`).
+go-office uses [semantic versioning](https://semver.org/) for the Go module. Each release embeds exactly one Euro-Office asset pin (`scripts/euro-office.version` → `pkg/office.ExpectedAssetsVersion`).
+
+**Docker images carry both tag schemes:** Euro-Office version (editor/converter pin) and go-office semver (on git tag releases). Use whichever fits your pinning policy.
 
 ## Version matrix
 
 | go-office tag | Euro-Office pin | Docker tags |
-| ------------- | --------------- | ------------- |
+| ------------- | --------------- | ----------- |
 | v0.1.0 | 9.3.4-hotfix.1 | `latest`, `9.3.4-hotfix.1` |
 | v0.2.0 | 9.3.4-hotfix.1 | `latest`, `9.3.4-hotfix.1`, `v0.2.0` |
 
@@ -21,6 +23,7 @@ Go module: `go get github.com/quantumx-apps/go-office@v0.2.0`
 - **Minor** (`v0.3.0`): new integrator-facing features — quarterly at most while stabilizing
 - **Docker `latest`**: tracks the most recent build from `main`
 - **Docker Euro-Office tag** (`9.3.4-hotfix.1`): tracks the bundled editor/converter version
+- **Docker go-office tag** (`v0.2.0`): set on git tag releases; pairs with the Euro-Office pin in release notes
 
 ## Bumping Euro-Office
 

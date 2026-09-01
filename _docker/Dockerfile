@@ -78,7 +78,8 @@ RUN set -eux; \
 
 ENV OFFICE_ASSETS=/app/assets \
     OFFICE_DATA_DIR=/app \
-    OFFICE_ADDR=:80
+    OFFICE_ADDR=:80 \
+    OFFICE_SKIP_ASSET_FETCH=1
 
 ARG OFFICE_DEBUG_LOGGING=
 ENV OFFICE_DEBUG_LOGGING=${OFFICE_DEBUG_LOGGING}
@@ -89,4 +90,4 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 \
   CMD curl -sf http://127.0.0.1:80/healthcheck || exit 1
 
 ENTRYPOINT ["./go-office"]
-CMD ["-assets", "/app/assets", "-addr", ":80", "-data", "/app", "-samples", "sample-files", "-public", "http://localhost"]
+CMD ["-assets", "/app/assets", "-addr", ":80", "-data", "/app", "-samples", "sample-files", "-public", "http://localhost", "-skip-asset-fetch"]

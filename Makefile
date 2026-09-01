@@ -130,6 +130,7 @@ compile: $(GO_OFFICE_BIN)
 $(GO_OFFICE_BIN): check-linux
 	@echo "==> go-office binary"
 	@mkdir -p "$(BIN_DIR)"
+	$(GO) run ./cmd/gen-assets-version
 	$(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
 
 check-assets:

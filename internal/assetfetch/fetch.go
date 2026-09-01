@@ -1,6 +1,7 @@
 package assetfetch
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 // Options configures Fetch.
 type Options struct {
 	OutDir      string
+	Version     string // pinned release; if empty, loaded from VersionFile
 	VersionFile string
 	Force       bool
 	Client      *http.Client
@@ -19,27 +21,42 @@ type Options struct {
 
 // Fetch downloads and extracts Euro-Office assets into OutDir (Linux only).
 func Fetch(opts Options) error {
+	return FetchContext(context.Background(), opts)
+}
+
+// FetchContext downloads and extracts Euro-Office assets, honouring ctx cancellation.
+func FetchContext(ctx context.Context, opts Options) error {
 	if err := RequireLinux(); err != nil {
 		return err
 	}
 	if opts.OutDir == "" {
 		return fmt.Errorf("assetfetch: OutDir is required")
 	}
-	if opts.VersionFile == "" {
-		return fmt.Errorf("assetfetch: VersionFile is required")
-	}
 	if opts.Client == nil {
 		opts.Client = &http.Client{Timeout: 30 * time.Minute}
 	}
 
-	v, err := LoadVersion(opts.VersionFile)
-	if err != nil {
-		return err
+	version := opts.Version
+	if version == "" {
+		if opts.VersionFile == "" {
+			return fmt.Errorf("assetfetch: Version or VersionFile is required")
+		}
+		var err error
+		version, err = LoadVersion(opts.VersionFile)
+		if err != nil {
+			return err
+		}
 	}
 
+	return withFetchLock(opts.OutDir, func() error {
+		return fetchLocked(ctx, opts, version)
+	})
+}
+
+func fetchLocked(ctx context.Context, opts Options, version string) error {
 	marker := filepath.Join(opts.OutDir, ".extracted")
-	if !opts.Force && isUpToDate(marker, v.Release, opts.OutDir) {
-		fmt.Printf("assets already present for %s (%s)\n", v.Release, opts.OutDir)
+	if !opts.Force && isUpToDate(marker, version, opts.OutDir) {
+		fmt.Printf("assets already present for %s (%s)\n", version, opts.OutDir)
 		if err := ensureConverterExecutables(filepath.Join(opts.OutDir, "converter", "bin")); err != nil {
 			return err
 		}
@@ -63,9 +80,9 @@ func Fetch(opts Options) error {
 	defer os.RemoveAll(tmpRoot)
 
 	debPath := filepath.Join(tmpRoot, "package.deb")
-	url := DebURL(v)
+	url := DebURL(version)
 	fmt.Printf("Downloading %s\n", url)
-	if err := downloadFile(opts.Client, url, debPath); err != nil {
+	if err := downloadFile(ctx, opts.Client, url, debPath); err != nil {
 		return err
 	}
 
@@ -119,7 +136,7 @@ func Fetch(opts Options) error {
 		}
 	}
 
-	if err := writeMetadata(opts.OutDir, v, url); err != nil {
+	if err := writeMetadata(opts.OutDir, version, url); err != nil {
 		return err
 	}
 
@@ -127,7 +144,7 @@ func Fetch(opts Options) error {
 		return err
 	}
 
-	fmt.Printf("Done. Set OFFICE_ASSETS=%s and ProtocolVersion=%s\n", opts.OutDir, v.Protocol)
+	fmt.Printf("Done. Set OFFICE_ASSETS=%s and ProtocolVersion=%s\n", opts.OutDir, version)
 	return nil
 }
 
@@ -150,22 +167,15 @@ func isUpToDate(marker, release, outDir string) bool {
 	if string(b) != release {
 		return false
 	}
-	if needsConverterBin(outDir) || !FontsReady(outDir) {
-		return false
-	}
-	apiJs := filepath.Join(outDir, "web-apps", "apps", "api", "documents", "api.js")
-	apiTpl := filepath.Join(outDir, "web-apps", "apps", "api", "documents", "api.js.tpl")
-	if _, err := os.Stat(apiJs); err == nil {
-		return true
-	}
-	if _, err := os.Stat(apiTpl); err == nil {
-		return true
-	}
-	return false
+	return ValidAssetDir(outDir)
 }
 
-func downloadFile(client *http.Client, url, dest string) error {
-	resp, err := client.Get(url)
+func downloadFile(ctx context.Context, client *http.Client, url, dest string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -229,7 +239,7 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
-func writeMetadata(outDir string, v Version, debURL string) error {
+func writeMetadata(outDir, version, debURL string) error {
 	apiDir := filepath.Join(outDir, "web-apps", "apps", "api", "documents")
 	apiTpl := filepath.Join(apiDir, "api.js.tpl")
 	apiJs := filepath.Join(apiDir, "api.js")
@@ -241,19 +251,19 @@ func writeMetadata(outDir string, v Version, debURL string) error {
 		}
 	}
 
-	if err := os.WriteFile(filepath.Join(outDir, "VERSION"), []byte(v.Protocol), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(outDir, "VERSION"), []byte(version), 0o644); err != nil {
 		return err
 	}
 	provenance := fmt.Sprintf(`source=Euro-Office/DocumentServer
 release=v%s
-protocol=%s
+version=%s
 fetched=%s
 package=%s
 license=AGPL-3.0-only
 homepage=https://github.com/Euro-Office/DocumentServer
-`, v.Release, v.Protocol, time.Now().UTC().Format(time.RFC3339), debURL)
+`, version, version, time.Now().UTC().Format(time.RFC3339), debURL)
 	if err := os.WriteFile(filepath.Join(outDir, "PROVENANCE"), []byte(provenance), 0o644); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(outDir, ".extracted"), []byte(v.Release), 0o644)
+	return os.WriteFile(filepath.Join(outDir, ".extracted"), []byte(version), 0o644)
 }

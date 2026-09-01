@@ -295,8 +295,8 @@
           <tr>
             <td><code>POST /converter</code></td>
             <td>Conversion API</td>
-            <td class="yes">✓</td><td class="no">✗</td>
-            <td class="notes">go-office runs x2t internally on open/save, not as HTTP API.</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Sync conversion; JPG thumbnails. <code>async: true</code> not supported.</td>
           </tr>
           <tr>
             <td>WOPI endpoints</td>
@@ -313,8 +313,8 @@
           <tr>
             <td><code>POST /ConvertService.ashx</code></td>
             <td>Legacy conversion API</td>
-            <td class="yes">✓</td><td class="no">✗</td>
-            <td class="notes">Pre-5.5 path; same as <code>/converter</code>.</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Pre-5.5 path; same handler as <code>/converter</code>.</td>
           </tr>
           <tr>
             <td><code>POST /coauthoring/CommandService.ashx</code></td>
@@ -407,7 +407,7 @@
             <td>Multi-user concurrent editing</td>
             <td><a href="https://api.onlyoffice.com/docs/docs-api/get-started/how-it-works/co-editing/">Co-editing</a></td>
             <td class="yes">✓</td><td class="no">✗</td>
-            <td class="notes">Single session per key; Phase 3.</td>
+            <td class="notes">Single session per key; not supported (deferred).</td>
           </tr>
         </tbody>
       </table>

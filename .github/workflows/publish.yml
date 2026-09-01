@@ -23,20 +23,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Read Euro-Office version tag
-        id: version
-        run: |
-          set -a
-          # shellcheck disable=SC1091
-          . ./scripts/euro-office.version
-          set +a
-          echo "protocol=$EURO_OFFICE_PROTOCOL" >> "$GITHUB_OUTPUT"
-
       - name: Cache Euro-Office assets
         uses: actions/cache@v4
         with:
           path: assets
-          key: euro-office-assets-v4-${{ hashFiles('scripts/euro-office.version') }}
+          key: euro-office-assets-v5-${{ hashFiles('scripts/euro-office.version') }}
 
       - name: Prepare assets
         run: mkdir -p assets && make ensure-assets
@@ -50,11 +41,23 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: _docker/Dockerfile
-          push: true
-          tags: |
-            ghcr.io/quantumx-apps/office-server:latest
-            ghcr.io/quantumx-apps/office-server:${{ steps.version.outputs.protocol }}
+        env:
+          IMAGE: ghcr.io/quantumx-apps/office-server
+        run: |
+          set -euo pipefail
+          set -a
+          # shellcheck disable=SC1091
+          . ./scripts/euro-office.version
+          set +a
+          ver="${EURO_OFFICE_VERSION#v}"
+          tags="${IMAGE}:latest,${IMAGE}:${ver}"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            tags="${tags},${IMAGE}:${GITHUB_REF#refs/tags/}"
+          fi
+          docker buildx build \
+            --push \
+            --file _docker/Dockerfile \
+            --tag "${IMAGE}:latest" \
+            --tag "${IMAGE}:${ver}" \
+            $(if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then echo --tag "${IMAGE}:${GITHUB_REF#refs/tags/}"; fi) \
+            .

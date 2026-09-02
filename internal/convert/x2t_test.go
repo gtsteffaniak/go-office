@@ -81,4 +81,20 @@ func TestBuildOfficeToOfficeXMLXlsxToCSV(t *testing.T) {
 	if !strings.Contains(xml, "<m_sAllFontsPath>") {
 		t.Fatalf("all fonts path missing: %s", xml)
 	}
+	if !strings.Contains(xml, "<m_nCsvDelimiter>4</m_nCsvDelimiter>") {
+		t.Fatalf("csv delimiter missing: %s", xml)
+	}
+}
+
+func TestBuildOfficeToOfficeXMLDocxToRTF(t *testing.T) {
+	xml := buildOfficeToOfficeXML("/cache/changes-applied.docx", "/cache/saved.rtf", "/fonts", "/themes", "/run/AllFonts.js", "docx", "rtf", "/tmp/x2t")
+	if !strings.Contains(xml, "<m_nFormatFrom>65</m_nFormatFrom>") {
+		t.Fatalf("docx formatFrom missing: %s", xml)
+	}
+	if strings.Contains(xml, "<m_nCsvDelimiter>") {
+		t.Fatalf("word bridge must not set csv delimiter: %s", xml)
+	}
+	if strings.Contains(xml, "<m_nCsvTxtEncoding>") {
+		t.Fatalf("word bridge must not set csv encoding: %s", xml)
+	}
 }

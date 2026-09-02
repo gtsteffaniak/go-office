@@ -134,6 +134,165 @@ func TestSaveChangesTxtRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSaveChangesRTFRoundTrip(t *testing.T) {
+	repo := testutil.RepoRoot(t)
+	assets := testutil.AssetsDirOrSkip(t, repo)
+	if !testutil.SampleExists(repo, "sample-files/sample.rtf") {
+		t.Skip("sample rtf missing")
+	}
+	work := testutil.NewWorkspace(t)
+	src := filepath.Join(work.Root, filepath.FromSlash(work.CopySample("sample-files/sample.rtf")))
+	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	err = conv.ToEditorBin(ctx, src, cacheDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changesDir := filepath.Join(cacheDir, "changes")
+	err = os.MkdirAll(changesDir, 0o755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.WriteFile(filepath.Join(changesDir, "changes0.json"), []byte(`["rtf-change"]`), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(cacheDir, "saved.rtf")
+	err = conv.SaveChanges(ctx, cacheDir, outPath, "rtf")
+	if err != nil {
+		t.Fatalf("SaveChanges: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(cacheDir, "changes-applied.docx")); statErr == nil {
+		t.Fatal("rtf save must use direct reverse path, not docx bridge step 2")
+	}
+	body, err := os.ReadFile(outPath)
+	if err != nil || len(body) == 0 {
+		t.Fatalf("saved.rtf missing or empty: %v", err)
+	}
+}
+
+func TestSaveChangesODTRoundTrip(t *testing.T) {
+	repo := testutil.RepoRoot(t)
+	assets := testutil.AssetsDirOrSkip(t, repo)
+	if !testutil.SampleExists(repo, "sample-files/sample.odt") {
+		t.Skip("sample odt missing")
+	}
+	work := testutil.NewWorkspace(t)
+	src := filepath.Join(work.Root, filepath.FromSlash(work.CopySample("sample-files/sample.odt")))
+	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	err = conv.ToEditorBin(ctx, src, cacheDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changesDir := filepath.Join(cacheDir, "changes")
+	err = os.MkdirAll(changesDir, 0o755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.WriteFile(filepath.Join(changesDir, "changes0.json"), []byte(`["odt-change"]`), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(cacheDir, "saved.odt")
+	err = conv.SaveChanges(ctx, cacheDir, outPath, "odt")
+	if err != nil {
+		t.Fatalf("SaveChanges: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(cacheDir, "changes-applied.docx")); statErr == nil {
+		t.Fatal("odt save must use direct reverse path, not docx bridge step 2")
+	}
+	body, err := os.ReadFile(outPath)
+	if err != nil || len(body) == 0 {
+		t.Fatalf("saved.odt missing or empty: %v", err)
+	}
+}
+
+func TestSaveChangesDocOOXMLFallback(t *testing.T) {
+	repo := testutil.RepoRoot(t)
+	assets := testutil.AssetsDirOrSkip(t, repo)
+	if !testutil.SampleExists(repo, "sample-files/sample.doc") {
+		t.Skip("sample doc missing")
+	}
+	work := testutil.NewWorkspace(t)
+	src := filepath.Join(work.Root, filepath.FromSlash(work.CopySample("sample-files/sample.doc")))
+	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	err = conv.ToEditorBin(ctx, src, cacheDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changesDir := filepath.Join(cacheDir, "changes")
+	err = os.MkdirAll(changesDir, 0o755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.WriteFile(filepath.Join(changesDir, "changes0.json"), []byte(`["doc-change"]`), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(cacheDir, "saved.doc")
+	err = conv.SaveChanges(ctx, cacheDir, outPath, "doc")
+	if err != nil {
+		t.Fatalf("SaveChanges: %v", err)
+	}
+	intermediate := filepath.Join(cacheDir, "changes-applied.docx")
+	intermediateBody, err := os.ReadFile(intermediate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outBody, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outBody) == 0 {
+		t.Fatal("saved.doc is empty")
+	}
+	if string(outBody) != string(intermediateBody) {
+		t.Fatal("doc save should fall back to OOXML bytes when x2t cannot write binary Word")
+	}
+}
+
+func TestConvertOfficeDocxToRTF(t *testing.T) {
+	repo := testutil.RepoRoot(t)
+	assets := testutil.AssetsDirOrSkip(t, repo)
+	if !testutil.SampleExists(repo, "sample-files/sample.docx") {
+		t.Skip("sample docx missing")
+	}
+	work := testutil.NewWorkspace(t)
+	docxPath := filepath.Join(work.Root, filepath.FromSlash(work.CopySample("sample-files/sample.docx")))
+	outPath := filepath.Join(t.TempDir(), "saved.rtf")
+	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	err = convert.ExportConvertOfficeInner(conv, ctx, docxPath, outPath, "docx", "rtf", "")
+	if err != nil {
+		t.Fatalf("docx→rtf: %v", err)
+	}
+	body, err := os.ReadFile(outPath)
+	if err != nil || len(body) == 0 {
+		t.Fatalf("saved.rtf missing or empty: %v", err)
+	}
+}
+
 func TestSaveChangesTxtUsesDirectPath(t *testing.T) {
 	repo := testutil.RepoRoot(t)
 	assets := testutil.AssetsDirOrSkip(t, repo)
@@ -358,9 +517,8 @@ func TestPrepareX2TRunDirIsolatesSharedAllFonts(t *testing.T) {
 		}
 		for _, name := range []string{"AllFonts.js", "font_selection.bin", "DoctRenderer.config", "x2t"} {
 			path := filepath.Join(dir, name)
-			st, statErr := os.Stat(path)
-			if statErr != nil || st.Size() == 0 {
-				t.Fatalf("%s missing in %s: %v", name, dir, statErr)
+			if st, err := os.Stat(path); err != nil || st.Size() == 0 {
+				t.Fatalf("%s missing in %s: %v", name, dir, err)
 			}
 			if name == "x2t" {
 				resolved, err := filepath.EvalSymlinks(path)
@@ -512,30 +670,34 @@ func TestSaveChangesCSVConcurrentPlaywrightLoad(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 			defer cancel()
 
-			if convErr := conv.ToEditorBin(ctx, csvPath, cacheDir); convErr != nil {
-				t.Fatalf("ToEditorBin: %v", convErr)
+			err = conv.ToEditorBin(ctx, csvPath, cacheDir)
+	if err != nil {
+				t.Fatalf("ToEditorBin: %v", err)
 			}
 			changesDir := filepath.Join(cacheDir, "changes")
-			if mkdirErr := os.MkdirAll(changesDir, 0o755); mkdirErr != nil {
-				t.Fatal(mkdirErr)
+			err = os.MkdirAll(changesDir, 0o755)
+	if err != nil {
+				t.Fatal(err)
 			}
-			if writeErr := os.WriteFile(filepath.Join(changesDir, "changes0.json"), fixture, 0o644); writeErr != nil {
-				t.Fatal(writeErr)
+			err = os.WriteFile(filepath.Join(changesDir, "changes0.json"), fixture, 0o644)
+	if err != nil {
+				t.Fatal(err)
 			}
 
 			outPath := filepath.Join(cacheDir, "saved.csv")
-			if saveErr := conv.SaveChanges(ctx, cacheDir, outPath, "csv"); saveErr != nil {
-				t.Fatalf("SaveChanges: %v", saveErr)
+			err = conv.SaveChanges(ctx, cacheDir, outPath, "csv")
+	if err != nil {
+				t.Fatalf("SaveChanges: %v", err)
 			}
-			body, readErr := os.ReadFile(outPath)
-			if readErr != nil {
-				t.Fatal(readErr)
+			body, err := os.ReadFile(outPath)
+			if err != nil {
+				t.Fatal(err)
 			}
 			if !strings.Contains(string(body), "Customer Id") {
 				t.Fatalf("csv missing expected content: %q", truncate(body, 120))
 			}
-			if st, statErr := os.Stat(filepath.Join(cacheDir, "changes-applied.xlsx")); statErr != nil || st.Size() == 0 {
-				t.Fatalf("expected xlsx bridge output after apply_changes: %v", statErr)
+			if st, err := os.Stat(filepath.Join(cacheDir, "changes-applied.xlsx")); err != nil || st.Size() == 0 {
+				t.Fatalf("expected xlsx bridge output after apply_changes: %v", err)
 			}
 		})
 	}

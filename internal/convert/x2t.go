@@ -290,6 +290,11 @@ func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, ta
 		return err
 	}
 
+	if legacyWordSaveDirectReverse(ext) {
+		// RTF/ODT: x2t apply_changes can write the target format directly; skip docx bridge step 2.
+		return c.fromEditorInner(ctx, editorBin, destPath, targetExt, true)
+	}
+
 	bridge := saveBridgeExt(ext)
 	if bridge != bridgeNone {
 		if bridge == bridgeXLSX {
@@ -309,6 +314,16 @@ func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, ta
 			slog.Debug("bridge after apply_changes", "path", intermediate, "bytes", st.Size(), "bridge", bridge)
 		}
 		if err := c.convertOfficeInner(ctx, intermediate, destPath, string(bridge), ext, cacheDir); err != nil {
+			// DOC/DOT: x2t cannot write binary Word (exit 80). Persist changes-applied.docx bytes
+			// at the .doc/.dot path — ONLYOFFICE assemblyFormatAsOrigin rollback behavior.
+			if bridge == bridgeDOCX && legacyWordBinaryExt(ext) {
+				slog.Warn("x2t cannot write binary Word; persisting OOXML fallback",
+					"ext", ext, "intermediate", intermediate, "dest", destPath, "err", err)
+				if copyErr := fsutil.CopyFile(intermediate, destPath); copyErr != nil {
+					return fmt.Errorf("convert: %s→%s failed and OOXML fallback copy failed: %w", bridge, ext, copyErr)
+				}
+				return nil
+			}
 			return err
 		}
 		if bridge == bridgeXLSX && (ext == "csv" || ext == "tsv" || ext == "scsv") {
@@ -545,12 +560,6 @@ func (c *Converter) convertOfficeInner(ctx context.Context, srcPath, destPath, f
 		return err
 	}
 
-	runDir, err := c.prepareX2TRunDir(cacheDir)
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(runDir)
-
 	taskFile, err := os.CreateTemp("", "go-office-x2t-fmt-*.xml")
 	if err != nil {
 		return err
@@ -558,10 +567,18 @@ func (c *Converter) convertOfficeInner(ctx context.Context, srcPath, destPath, f
 	taskPath := taskFile.Name()
 	defer os.Remove(taskPath)
 
-	allFontsPath := filepath.Join(runDir, "AllFonts.js")
-	workDir := filepath.Join(runDir, "work")
-	if err = os.MkdirAll(workDir, 0o755); err != nil {
+	workDir, err := os.MkdirTemp("", "go-office-x2t-fmt-*")
+	if err != nil {
 		return err
+	}
+	defer os.RemoveAll(workDir)
+
+	allFontsPath := filepath.Join(c.binDir, "AllFonts.js")
+	if cacheDir != "" {
+		cacheFonts := filepath.Join(cacheDir, "AllFonts.js")
+		if st, statErr := os.Stat(cacheFonts); statErr == nil && st.Size() > 0 {
+			allFontsPath = cacheFonts
+		}
 	}
 	c.logFontSources("office", cacheDir, allFontsPath)
 	xml := buildOfficeToOfficeXML(srcPath, destPath, c.fontDir, c.themeDir, allFontsPath, fromExt, toExt, workDir)
@@ -572,17 +589,13 @@ func (c *Converter) convertOfficeInner(ctx context.Context, srcPath, destPath, f
 	if err = taskFile.Close(); err != nil {
 		return err
 	}
-	out, err := c.runX2t(ctx, taskPath, runDir)
+	// Office-to-office runs from converter/bin; only apply_changes needs an isolated cwd.
+	out, err := c.runX2t(ctx, taskPath, "")
 	if err != nil {
 		return fmt.Errorf("convert: x2t %s→%s: %w: %s", fromExt, toExt, err, strings.TrimSpace(string(out)))
 	}
 	if st, err := os.Stat(destPath); err != nil || st.Size() == 0 {
 		return fmt.Errorf("convert: x2t %s→%s produced no output", fromExt, toExt)
-	}
-	if cacheDir != "" {
-		if err := snapshotFontArtifacts(runDir, cacheDir); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -744,8 +757,17 @@ func buildOfficeToOfficeXML(from, to, fontDir, themeDir, allFonts, fromExt, toEx
 	if tempDir != "" {
 		fmt.Fprintf(&extra, "<m_sTempDir>%s</m_sTempDir>\n", escapeXML(tempDir))
 	}
-	extra.WriteString("<m_nCsvTxtEncoding>46</m_nCsvTxtEncoding>\n")
-	extra.WriteString("<m_nCsvDelimiter>4</m_nCsvDelimiter>\n")
+	if isSpreadsheetExt(fromExt) || isSpreadsheetExt(toExt) {
+		extra.WriteString("<m_nCsvTxtEncoding>46</m_nCsvTxtEncoding>\n")
+		switch toExt {
+		case "tsv":
+			extra.WriteString("<m_nCsvDelimiter>1</m_nCsvDelimiter>\n")
+		case "scsv":
+			extra.WriteString("<m_nCsvDelimiter>2</m_nCsvDelimiter>\n")
+		case "csv", "xlsx", "xls", "ods":
+			extra.WriteString("<m_nCsvDelimiter>4</m_nCsvDelimiter>\n")
+		}
+	}
 	return fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
 <TaskQueueDataConvert xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
 <m_sFileFrom>%s</m_sFileFrom>

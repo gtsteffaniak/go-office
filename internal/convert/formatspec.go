@@ -13,10 +13,14 @@ const (
 )
 
 type formatSpec struct {
-	saveBridge  SaveBridge
-	openPrelude SaveBridge
-	openNormCSV bool
-	directSave  bool
+	saveBridge        SaveBridge
+	openPrelude       SaveBridge
+	openNormCSV       bool
+	directSave        bool
+	// saveDirectReverse: apply_changes writes the target format directly via reverse x2t,
+	// skipping office-to-office step 2. Used for RTF/ODT where x2t supports Editor.bin→target
+	// but docx→target would be redundant or less reliable under concurrent load.
+	saveDirectReverse bool
 }
 
 func normExt(ext string) string {
@@ -31,7 +35,12 @@ func lookupFormat(ext string) formatSpec {
 		return formatSpec{saveBridge: bridgeXLSX, openNormCSV: true}
 	case "xls", "ods":
 		return formatSpec{saveBridge: bridgeXLSX}
-	case "rtf", "doc", "dot", "odt":
+	// RTF/ODT: open still uses doc→docx prelude; save uses direct reverse (see saveDirectReverse).
+	case "rtf", "odt":
+		return formatSpec{saveBridge: bridgeDOCX, openPrelude: bridgeDOCX, saveDirectReverse: true}
+	// DOC/DOT: x2t cannot emit binary Word (exit 80). Open via docx prelude; save applies
+	// changes to changes-applied.docx then falls back to OOXML bytes when docx→doc fails.
+	case "doc", "dot":
 		return formatSpec{saveBridge: bridgeDOCX, openPrelude: bridgeDOCX}
 	case "ppt", "odp":
 		return formatSpec{saveBridge: bridgePPTX}
@@ -66,6 +75,22 @@ func openNeedsDocxPrelude(ext string) bool {
 
 func saveBridgeExt(ext string) SaveBridge {
 	return lookupFormat(ext).saveBridge
+}
+
+func legacyWordSaveDirectReverse(ext string) bool {
+	return lookupFormat(ext).saveDirectReverse
+}
+
+// legacyWordBinaryExt reports formats x2t cannot write (binary Word .doc/.dot exit 80).
+// Save path copies changes-applied.docx as an OOXML fallback — same rollback Document Server
+// uses when assemblyFormatAsOrigin cannot convert back to the original legacy format.
+func legacyWordBinaryExt(ext string) bool {
+	switch normExt(ext) {
+	case "doc", "dot":
+		return true
+	default:
+		return false
+	}
 }
 
 func editorImportSourceHash(contentHash, ext string) string {

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/quantumx-apps/go-office/internal/convert"
 )
 
 const defaultSaveDelay = 5 * time.Second
@@ -133,6 +135,11 @@ func (s *saveScheduler) scheduleDone(docKey, origin string, force bool, onDone f
 		err := s.saver.FlushDocument(ctx, docKey, origin, force)
 		if err != nil {
 			s.logger.Error("document flush failed", "key", docKey, "err", err)
+			// Drop pending changes when x2t cannot succeed (e.g. binary .doc save). Without this,
+			// flush-on-open retries the same failure and saturates the convert pool under parallel tests.
+			if convert.NonRecoverableConvertError(err) {
+				clearChanges(filepath.Join(s.cacheDir, docKey))
+			}
 		} else {
 			s.logger.Debug("document flush ok", "key", docKey, "force", force)
 			clearChanges(filepath.Join(s.cacheDir, docKey))

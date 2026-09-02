@@ -4,34 +4,37 @@ import "testing"
 
 func TestSaveBridgeRouting(t *testing.T) {
 	type row struct {
-		ext    string
-		xlsx   bool
-		docx   bool
-		pptx   bool
-		direct bool
+		ext           string
+		xlsx          bool
+		docx          bool
+		pptx          bool
+		direct        bool
+		directReverse bool
 	}
 	cases := []row{
 		// OOXML — direct apply_changes OK
-		{"docx", false, false, false, true},
-		{"dotx", false, false, false, true},
-		{"dotm", false, false, false, true},
-		{"xlsx", false, false, false, true},
-		{"xlsm", false, false, false, true},
-		{"pptx", false, false, false, true},
-		{"pptm", false, false, false, true},
-		{"txt", false, false, false, true},
-		// Flat / legacy / ODF — bridge required
-		{"csv", true, false, false, false},
-		{"tsv", true, false, false, false},
-		{"scsv", true, false, false, false},
-		{"xls", true, false, false, false},
-		{"ods", true, false, false, false},
-		{"rtf", false, true, false, false},
-		{"doc", false, true, false, false},
-		{"dot", false, true, false, false},
-		{"odt", false, true, false, false},
-		{"ppt", false, false, true, false},
-		{"odp", false, false, true, false},
+		{"docx", false, false, false, true, false},
+		{"dotx", false, false, false, true, false},
+		{"dotm", false, false, false, true, false},
+		{"xlsx", false, false, false, true, false},
+		{"xlsm", false, false, false, true, false},
+		{"pptx", false, false, false, true, false},
+		{"pptm", false, false, false, true, false},
+		{"txt", false, false, false, true, false},
+		// Flat / legacy / ODF — bridge or direct-reverse save
+		{"csv", true, false, false, false, false},
+		{"tsv", true, false, false, false, false},
+		{"scsv", true, false, false, false, false},
+		{"xls", true, false, false, false, false},
+		{"ods", true, false, false, false, false},
+		// RTF/ODT: x2t can apply_changes straight to the target; docx→rtf/odt office step is redundant.
+		{"rtf", false, true, false, false, true},
+		// DOC/DOT: x2t cannot write binary Word (exit 80); save uses docx bridge + OOXML fallback.
+		{"doc", false, true, false, false, false},
+		{"dot", false, true, false, false, false},
+		{"odt", false, true, false, false, true},
+		{"ppt", false, false, true, false, false},
+		{"odp", false, false, true, false, false},
 	}
 	for _, tc := range cases {
 		if got := spreadsheetSaveNeedsXlsxBridge(tc.ext); got != tc.xlsx {
@@ -45,6 +48,9 @@ func TestSaveBridgeRouting(t *testing.T) {
 		}
 		if got := DirectSaveWithChangesOK(tc.ext); got != tc.direct {
 			t.Fatalf("%s direct = %v want %v", tc.ext, got, tc.direct)
+		}
+		if got := legacyWordSaveDirectReverse(tc.ext); got != tc.directReverse {
+			t.Fatalf("%s directReverse = %v want %v", tc.ext, got, tc.directReverse)
 		}
 	}
 }

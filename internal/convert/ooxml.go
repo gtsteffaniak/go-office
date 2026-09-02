@@ -72,15 +72,3 @@ func WritePlainTextFromDocx(docxPath, destPath string) error {
 	}
 	return os.WriteFile(destPath, body, 0o644)
 }
-
-func headPlainTextPreview(docxPath string) string {
-	raw, err := os.ReadFile(docxPath)
-	if err != nil {
-		return ""
-	}
-	text := OOXMLPlainText(raw)
-	if len(text) > 180 {
-		return text[:180]
-	}
-	return text
-}

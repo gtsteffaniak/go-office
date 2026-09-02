@@ -30,7 +30,7 @@ func TestWorkspaceCopySampleIsolated(t *testing.T) {
 	}
 
 	marker := []byte("PLAYWRIGHT_SHOULD_NOT_TOUCH_REPO")
-	if err := os.WriteFile(dst, marker, 0o644); err != nil {
+	if err = os.WriteFile(dst, marker, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	repoData, err := os.ReadFile(src)

@@ -43,7 +43,7 @@ func canonicalizeCSVChangesFile(path string) (int, error) {
 		return 0, err
 	}
 	var blobs []string
-	if err := json.Unmarshal(raw, &blobs); err != nil {
+	if err = json.Unmarshal(raw, &blobs); err != nil {
 		return 0, err
 	}
 	changed := 0

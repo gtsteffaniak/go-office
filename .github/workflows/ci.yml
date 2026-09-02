@@ -20,19 +20,14 @@ jobs:
 
   lint:
     name: golangci-lint
-    runs-on: ubuntu-latest
     timeout-minutes: 10
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
-          cache: true
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: v1.64.8
-
+          go-version: 'stable'
+      - run: go tool golangci-lint run
   integration:
     name: Integration (Euro-Office assets)
     runs-on: ubuntu-latest

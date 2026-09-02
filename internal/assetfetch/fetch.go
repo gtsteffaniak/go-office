@@ -82,12 +82,12 @@ func fetchLocked(ctx context.Context, opts Options, version string) error {
 	debPath := filepath.Join(tmpRoot, "package.deb")
 	url := DebURL(version)
 	fmt.Printf("Downloading %s\n", url)
-	if err := downloadFile(ctx, opts.Client, url, debPath); err != nil {
+	if err = downloadFile(ctx, opts.Client, url, debPath); err != nil {
 		return err
 	}
 
 	extractRoot := filepath.Join(tmpRoot, "root")
-	if err := ExtractDebData(debPath, extractRoot); err != nil {
+	if err = ExtractDebData(debPath, extractRoot); err != nil {
 		return err
 	}
 

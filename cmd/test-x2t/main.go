@@ -39,7 +39,7 @@ func main() {
 	defer os.RemoveAll(outDir)
 
 	ctx := context.Background()
-	if err := conv.ToEditorBin(ctx, *sample, outDir); err != nil {
+	if err = conv.ToEditorBin(ctx, *sample, outDir); err != nil {
 		fmt.Fprintf(os.Stderr, "convert failed: %v\n", err)
 		os.Exit(1)
 	}

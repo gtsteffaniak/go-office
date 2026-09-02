@@ -12,7 +12,10 @@ func withCacheDirLock(dir string, fn func() error) error {
 		return fn()
 	}
 	v, _ := cacheDirLocks.LoadOrStore(dir, &sync.Mutex{})
-	mu := v.(*sync.Mutex)
+	mu, ok := v.(*sync.Mutex)
+	if !ok {
+		return fn()
+	}
 	mu.Lock()
 	defer func() {
 		mu.Unlock()

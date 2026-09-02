@@ -291,9 +291,9 @@ func (h *Handler) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 		URL:        fileURL,
 		Thumbnail:  &office.ConverterThumbnail{Width: 200, Height: 200, Aspect: 2, First: true},
 	}
-	if _, err := h.office.RunConverter(ctx, origin, req); err != nil {
+	if _, runErr := h.office.RunConverter(ctx, origin, req); runErr != nil {
 		if h.opts.Logger != nil {
-			h.opts.Logger.Error("demo thumbnail", "file", file, "err", err)
+			h.opts.Logger.Error("demo thumbnail", "file", file, "err", runErr)
 		}
 		http.Error(w, "thumbnail failed", http.StatusInternalServerError)
 		return

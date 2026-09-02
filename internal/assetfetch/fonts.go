@@ -193,12 +193,12 @@ func ensureFontToolchain(opts Options, version string) error {
 	if opts.Client == nil {
 		opts.Client = &http.Client{Timeout: 30 * time.Minute}
 	}
-	if err := downloadFile(context.Background(), opts.Client, url, debPath); err != nil {
+	if err = downloadFile(context.Background(), opts.Client, url, debPath); err != nil {
 		return err
 	}
 
 	extractRoot := filepath.Join(tmpRoot, "root")
-	if err := ExtractDebData(debPath, extractRoot); err != nil {
+	if err = ExtractDebData(debPath, extractRoot); err != nil {
 		return err
 	}
 	dsRoot, err := FindDocumentServerRoot(extractRoot)

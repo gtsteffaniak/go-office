@@ -149,8 +149,8 @@ func parseByteRange(hdr string, size int) (start, end int, ok bool) {
 	}
 	var err error
 	if parts[0] == "" {
-		suffix, err := strconv.Atoi(parts[1])
-		if err != nil || suffix <= 0 {
+		suffix, parseErr := strconv.Atoi(parts[1])
+		if parseErr != nil || suffix <= 0 {
 			return 0, 0, false
 		}
 		if suffix > size {

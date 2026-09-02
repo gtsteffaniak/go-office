@@ -68,24 +68,3 @@ func connectAuthData(packet string) []byte {
 	}
 	return envelope.Data
 }
-
-func isAuthSocketPacket(packet string) bool {
-	if !strings.HasPrefix(packet, "42") {
-		return false
-	}
-	var parts []json.RawMessage
-	if err := json.Unmarshal([]byte(packet[2:]), &parts); err != nil || len(parts) < 2 {
-		return false
-	}
-	var event string
-	if err := json.Unmarshal(parts[0], &event); err != nil || event != "message" {
-		return false
-	}
-	var msg struct {
-		Type string `json:"type"`
-	}
-	if err := json.Unmarshal(parts[1], &msg); err != nil {
-		return false
-	}
-	return msg.Type == "auth"
-}

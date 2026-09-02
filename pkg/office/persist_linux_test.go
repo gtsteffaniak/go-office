@@ -38,7 +38,7 @@ func TestPersistCSVAppliesPendingChanges(t *testing.T) {
 
 	docKey := "csv-persist-changes"
 	cacheDir := filepath.Join(assets, "cache", docKey)
-	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+	if err = os.MkdirAll(cacheDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(cacheDir) })
@@ -49,7 +49,7 @@ func TestPersistCSVAppliesPendingChanges(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	if err := conv.ToEditorBin(ctx, absCSV, cacheDir); err != nil {
+	if err = conv.ToEditorBin(ctx, absCSV, cacheDir); err != nil {
 		t.Fatal(err)
 	}
 

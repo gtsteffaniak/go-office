@@ -106,24 +106,26 @@ func (c *Converter) toEditorBin(ctx context.Context, sourcePath, outDir string) 
 	}
 	ext := strings.TrimPrefix(strings.ToLower(sourceExt), ".")
 	if ext == "txt" {
-		raw, err := os.ReadFile(sourcePath)
+		var raw []byte
+		raw, err = os.ReadFile(sourcePath)
 		if err != nil {
 			return err
 		}
 		norm := normalizePlainTextBytes(raw)
 		srcHash = sha256Bytes(norm)
 		if !bytes.Equal(raw, norm) {
-			tmp, err := os.CreateTemp("", "go-office-txt-*.txt")
+			var tmp *os.File
+			tmp, err = os.CreateTemp("", "go-office-txt-*.txt")
 			if err != nil {
 				return err
 			}
 			convertPath = tmp.Name()
-			if _, err := tmp.Write(norm); err != nil {
+			if _, err = tmp.Write(norm); err != nil {
 				tmp.Close()
 				_ = os.Remove(convertPath)
 				return err
 			}
-			if err := tmp.Close(); err != nil {
+			if err = tmp.Close(); err != nil {
 				_ = os.Remove(convertPath)
 				return err
 			}
@@ -131,24 +133,26 @@ func (c *Converter) toEditorBin(ctx context.Context, sourcePath, outDir string) 
 		}
 	}
 	if csvNeedsXlsxBridge(ext) {
-		raw, err := os.ReadFile(convertPath)
+		var raw []byte
+		raw, err = os.ReadFile(convertPath)
 		if err != nil {
 			return err
 		}
 		norm := normalizeCSVBytes(raw)
 		srcHash = sha256Bytes(norm)
 		if !bytes.Equal(raw, norm) {
-			tmp, err := os.CreateTemp("", "go-office-csv-*.csv")
+			var tmp *os.File
+			tmp, err = os.CreateTemp("", "go-office-csv-*.csv")
 			if err != nil {
 				return err
 			}
 			convertPath = tmp.Name()
-			if _, err := tmp.Write(norm); err != nil {
+			if _, err = tmp.Write(norm); err != nil {
 				tmp.Close()
 				_ = os.Remove(convertPath)
 				return err
 			}
-			if err := tmp.Close(); err != nil {
+			if err = tmp.Close(); err != nil {
 				_ = os.Remove(convertPath)
 				return err
 			}
@@ -157,14 +161,15 @@ func (c *Converter) toEditorBin(ctx context.Context, sourcePath, outDir string) 
 	}
 	srcHash = editorImportSourceHash(srcHash, ext)
 	if openNeedsDocxPrelude(ext) {
-		docxFile, err := os.CreateTemp("", "go-office-open-*.docx")
+		var docxFile *os.File
+		docxFile, err = os.CreateTemp("", "go-office-open-*.docx")
 		if err != nil {
 			return err
 		}
 		docxPath := docxFile.Name()
 		_ = docxFile.Close()
 		defer os.Remove(docxPath)
-		if err := c.convertOffice(ctx, convertPath, docxPath, ext, "docx", ""); err != nil {
+		if err = c.convertOffice(ctx, convertPath, docxPath, ext, "docx", ""); err != nil {
 			return fmt.Errorf("convert: open %s via docx: %w", ext, err)
 		}
 		slog.Debug("word open via docx bridge", "ext", ext, "docx", docxPath)
@@ -200,15 +205,15 @@ func (c *Converter) toEditorBin(ctx context.Context, sourcePath, outDir string) 
 
 	allFontsPath := filepath.Join(runDir, "AllFonts.js")
 	workDir := filepath.Join(runDir, "work")
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
+	if err = os.MkdirAll(workDir, 0o755); err != nil {
 		return err
 	}
 	xml := buildTaskXML(convertPath, partFile, c.fontDir, c.themeDir, sourceExt, allFontsPath, workDir)
-	if _, err := taskFile.WriteString(xml); err != nil {
+	if _, err = taskFile.WriteString(xml); err != nil {
 		taskFile.Close()
 		return err
 	}
-	if err := taskFile.Close(); err != nil {
+	if err = taskFile.Close(); err != nil {
 		return err
 	}
 
@@ -357,7 +362,6 @@ func (c *Converter) fromEditorInner(ctx context.Context, editorBin, destPath, ta
 	if fromChanges {
 		fontDir = runDir
 		allFontsPath = filepath.Join(runDir, "AllFonts.js")
-		var err error
 		changesTempDir, err = os.MkdirTemp(cacheDir, "x2t-save-*")
 		if err != nil {
 			return err
@@ -375,11 +379,11 @@ func (c *Converter) fromEditorInner(ctx context.Context, editorBin, destPath, ta
 	taskPath := taskFile.Name()
 	defer os.Remove(taskPath)
 
-	if _, err := taskFile.WriteString(xml); err != nil {
+	if _, err = taskFile.WriteString(xml); err != nil {
 		taskFile.Close()
 		return err
 	}
-	if err := taskFile.Close(); err != nil {
+	if err = taskFile.Close(); err != nil {
 		return err
 	}
 
@@ -556,16 +560,16 @@ func (c *Converter) convertOfficeInner(ctx context.Context, srcPath, destPath, f
 
 	allFontsPath := filepath.Join(runDir, "AllFonts.js")
 	workDir := filepath.Join(runDir, "work")
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
+	if err = os.MkdirAll(workDir, 0o755); err != nil {
 		return err
 	}
 	c.logFontSources("office", cacheDir, allFontsPath)
 	xml := buildOfficeToOfficeXML(srcPath, destPath, c.fontDir, c.themeDir, allFontsPath, fromExt, toExt, workDir)
-	if _, err := taskFile.WriteString(xml); err != nil {
+	if _, err = taskFile.WriteString(xml); err != nil {
 		taskFile.Close()
 		return err
 	}
-	if err := taskFile.Close(); err != nil {
+	if err = taskFile.Close(); err != nil {
 		return err
 	}
 	out, err := c.runX2t(ctx, taskPath, runDir)
@@ -622,7 +626,7 @@ func ensureExecutable(path string) error {
 	if mode&0o111 != 0 {
 		return nil
 	}
-	if err := os.Chmod(path, mode.Perm()|0o755); err != nil {
+	if err = os.Chmod(path, mode.Perm()|0o755); err != nil {
 		slog.Error("x2t chmod failed", "path", path, "err", err)
 		return err
 	}

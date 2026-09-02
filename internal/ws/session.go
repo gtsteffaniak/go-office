@@ -44,7 +44,10 @@ func sessionKey(sid, docKey string) string {
 func getSession(sid, docKey string, build BuildInfo, basePath string) *session {
 	key := sessionKey(sid, docKey)
 	if v, ok := sessions.Load(key); ok {
-		s := v.(*session)
+		s, ok := v.(*session)
+		if !ok {
+			return &session{docKey: docKey, build: build, basePath: basePath, indexUser: 1}
+		}
 		if s.build.Release == "" && build.Release != "" {
 			s.build = build
 		}
@@ -55,7 +58,10 @@ func getSession(sid, docKey string, build BuildInfo, basePath string) *session {
 	}
 	s := &session{docKey: docKey, build: build, basePath: basePath, indexUser: 1}
 	actual, _ := sessions.LoadOrStore(key, s)
-	return actual.(*session)
+	if actualSession, ok := actual.(*session); ok {
+		return actualSession
+	}
+	return s
 }
 
 // ResetSessionsForTest clears in-memory coauthoring sessions (tests only).

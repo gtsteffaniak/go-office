@@ -73,15 +73,15 @@ func (c *Converter) ConvertFile(ctx context.Context, req ConvertRequest) error {
 
 	allFontsPath := filepath.Join(runDir, "AllFonts.js")
 	workDir := filepath.Join(runDir, "work")
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
+	if err = os.MkdirAll(workDir, 0o755); err != nil {
 		return err
 	}
 	xml := buildConvertTaskXML(req.SourcePath, req.DestPath, c.fontDir, c.themeDir, fromExt, toExt, formatTo, req.Thumbnail, allFontsPath, workDir)
-	if _, err := taskFile.WriteString(xml); err != nil {
+	if _, err = taskFile.WriteString(xml); err != nil {
 		taskFile.Close()
 		return err
 	}
-	if err := taskFile.Close(); err != nil {
+	if err = taskFile.Close(); err != nil {
 		return err
 	}
 

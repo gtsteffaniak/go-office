@@ -70,7 +70,7 @@ func (o *Opener) Open(ctx context.Context, origin, basePath, docKey string, cmd 
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
 
-	if err := downloadURL(ctx, cmd.URL, tmp); err != nil {
+	if err = downloadURL(ctx, cmd.URL, tmp); err != nil {
 		return o.errorPackets(cmd.Command, err)
 	}
 
@@ -79,13 +79,13 @@ func (o *Opener) Open(ctx context.Context, origin, basePath, docKey string, cmd 
 		return o.openBrowserDocument(cmd, origin, basePath, docKey, ext, tmpPath, outDir)
 	}
 	if o.Converter == nil {
-		pkt, err := documentOpenPacket(cmd.Command, "error", "document converter not configured")
-		if err != nil {
-			return nil, err
+		pkt, pktErr := documentOpenPacket(cmd.Command, "error", "document converter not configured")
+		if pktErr != nil {
+			return nil, pktErr
 		}
 		return []string{pkt}, nil
 	}
-	if err := o.Converter.ToEditorBin(ctx, tmpPath, outDir); err != nil {
+	if err = o.Converter.ToEditorBin(ctx, tmpPath, outDir); err != nil {
 		if o.Logger != nil {
 			o.Logger.Error("document open failed", "key", docKey, "url", cmd.URL, "err", err)
 		}
@@ -95,7 +95,7 @@ func (o *Opener) Open(ctx context.Context, origin, basePath, docKey string, cmd 
 	files := map[string]string{
 		"Editor.bin": fileURL(origin, basePath, docKey, "Editor.bin"),
 	}
-	if entries, err := os.ReadDir(filepath.Join(outDir, "media")); err == nil {
+	if entries, readErr := os.ReadDir(filepath.Join(outDir, "media")); readErr == nil {
 		for _, ent := range entries {
 			if ent.IsDir() {
 				continue

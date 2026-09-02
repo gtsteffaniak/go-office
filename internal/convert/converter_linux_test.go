@@ -30,7 +30,7 @@ func TestConvertFileDocxToJpg(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	if err := c.ConvertFile(ctx, convert.ConvertRequest{
+	if err = c.ConvertFile(ctx, convert.ConvertRequest{
 		SourcePath: src,
 		DestPath:   out,
 		FileType:   "docx",
@@ -63,7 +63,7 @@ func TestConvertFileXlsxToJpg(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	if err := c.ConvertFile(ctx, convert.ConvertRequest{
+	if err = c.ConvertFile(ctx, convert.ConvertRequest{
 		SourcePath: src,
 		DestPath:   out,
 		FileType:   "xlsx",
@@ -89,7 +89,7 @@ func TestConvertFileDotToJpg(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	if err := c.ConvertFile(ctx, convert.ConvertRequest{
+	if err = c.ConvertFile(ctx, convert.ConvertRequest{
 		SourcePath: src,
 		DestPath:   out,
 		FileType:   "dot",

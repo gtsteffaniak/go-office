@@ -16,7 +16,6 @@ type formatSpec struct {
 	saveBridge  SaveBridge
 	openPrelude SaveBridge
 	openNormCSV bool
-	openNormTxt bool
 	directSave  bool
 }
 
@@ -74,9 +73,4 @@ func editorImportSourceHash(contentHash, ext string) string {
 		return contentHash + ":open-docx-v1"
 	}
 	return contentHash
-}
-
-// flatTextNeedsDocxBridge is deprecated; legacy word formats use saveBridge DOCX.
-func flatTextNeedsDocxBridge(ext string) bool {
-	return wordSaveNeedsDocxBridge(ext)
 }

@@ -27,11 +27,17 @@ func TestBuildWordDocument(t *testing.T) {
 	if cfg["documentType"] != "word" {
 		t.Fatalf("documentType = %v", cfg["documentType"])
 	}
-	doc := cfg["document"].(map[string]any)
+	doc, ok := cfg["document"].(map[string]any)
+	if !ok {
+		t.Fatalf("document type = %T", cfg["document"])
+	}
 	if doc["key"] != "abc" {
 		t.Fatalf("key = %v", doc["key"])
 	}
-	perms := doc["permissions"].(map[string]any)
+	perms, ok := doc["permissions"].(map[string]any)
+	if !ok {
+		t.Fatalf("permissions type = %T", doc["permissions"])
+	}
 	if perms["edit"] != true {
 		t.Fatalf("permissions.edit must be boolean true, got %v (%T)", perms["edit"], perms["edit"])
 	}
@@ -54,7 +60,10 @@ func TestInferDocumentType(t *testing.T) {
 
 func TestPDFConfigSkipsCommonBootstrap(t *testing.T) {
 	cfg := config.Build(config.EditorRequest{FileType: "pdf"}, "")
-	doc := cfg["document"].(map[string]any)
+	doc, ok := cfg["document"].(map[string]any)
+	if !ok {
+		t.Fatalf("document type = %T", cfg["document"])
+	}
 	if doc["isForm"] != false {
 		t.Fatalf("isForm = %v, want false", doc["isForm"])
 	}
@@ -65,8 +74,14 @@ func TestPDFConfigSkipsCommonBootstrap(t *testing.T) {
 
 func TestViewModeDisablesEditPermission(t *testing.T) {
 	cfg := config.Build(config.EditorRequest{FileType: "docx", Mode: "view", Permissions: config.Permissions{Edit: "view"}}, "")
-	doc := cfg["document"].(map[string]any)
-	perms := doc["permissions"].(map[string]any)
+	doc, ok := cfg["document"].(map[string]any)
+	if !ok {
+		t.Fatalf("document type = %T", cfg["document"])
+	}
+	perms, ok := doc["permissions"].(map[string]any)
+	if !ok {
+		t.Fatalf("permissions type = %T", doc["permissions"])
+	}
 	if perms["edit"] != false {
 		t.Fatalf("view mode permissions.edit = %v", perms["edit"])
 	}

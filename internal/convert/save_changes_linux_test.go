@@ -512,34 +512,30 @@ func TestSaveChangesCSVConcurrentPlaywrightLoad(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 			defer cancel()
 
-			err = conv.ToEditorBin(ctx, csvPath, cacheDir)
-			if err != nil {
-				t.Fatalf("ToEditorBin: %v", err)
+			if convErr := conv.ToEditorBin(ctx, csvPath, cacheDir); convErr != nil {
+				t.Fatalf("ToEditorBin: %v", convErr)
 			}
 			changesDir := filepath.Join(cacheDir, "changes")
-			err = os.MkdirAll(changesDir, 0o755)
-			if err != nil {
-				t.Fatal(err)
+			if mkdirErr := os.MkdirAll(changesDir, 0o755); mkdirErr != nil {
+				t.Fatal(mkdirErr)
 			}
-			err = os.WriteFile(filepath.Join(changesDir, "changes0.json"), fixture, 0o644)
-			if err != nil {
-				t.Fatal(err)
+			if writeErr := os.WriteFile(filepath.Join(changesDir, "changes0.json"), fixture, 0o644); writeErr != nil {
+				t.Fatal(writeErr)
 			}
 
 			outPath := filepath.Join(cacheDir, "saved.csv")
-			err = conv.SaveChanges(ctx, cacheDir, outPath, "csv")
-			if err != nil {
-				t.Fatalf("SaveChanges: %v", err)
+			if saveErr := conv.SaveChanges(ctx, cacheDir, outPath, "csv"); saveErr != nil {
+				t.Fatalf("SaveChanges: %v", saveErr)
 			}
-			body, err := os.ReadFile(outPath)
-			if err != nil {
-				t.Fatal(err)
+			body, readErr := os.ReadFile(outPath)
+			if readErr != nil {
+				t.Fatal(readErr)
 			}
 			if !strings.Contains(string(body), "Customer Id") {
 				t.Fatalf("csv missing expected content: %q", truncate(body, 120))
 			}
 			if st, statErr := os.Stat(filepath.Join(cacheDir, "changes-applied.xlsx")); statErr != nil || st.Size() == 0 {
-				t.Fatalf("expected xlsx bridge output after apply_changes: %v", err)
+				t.Fatalf("expected xlsx bridge output after apply_changes: %v", statErr)
 			}
 		})
 	}
@@ -599,9 +595,8 @@ func TestSaveChangesCSVConcurrentWithDocumentOpens(t *testing.T) {
 			ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(rel)), ".")
 			if ext == "pdf" {
 				// Browser-native formats skip x2t on open (see ws.Opener.openBrowserDocument).
-				err = os.MkdirAll(cacheDir, 0o755)
-				if err != nil {
-					errCh <- err
+				if mkdirErr := os.MkdirAll(cacheDir, 0o755); mkdirErr != nil {
+					errCh <- mkdirErr
 					return
 				}
 				data, readErr := os.ReadFile(abs)
@@ -609,17 +604,15 @@ func TestSaveChangesCSVConcurrentWithDocumentOpens(t *testing.T) {
 					errCh <- readErr
 					return
 				}
-				err = os.WriteFile(filepath.Join(cacheDir, "origin.pdf"), data, 0o644)
-				if err != nil {
-					errCh <- err
+				if writeErr := os.WriteFile(filepath.Join(cacheDir, "origin.pdf"), data, 0o644); writeErr != nil {
+					errCh <- writeErr
 					return
 				}
 				errCh <- nil
 				return
 			}
-			err = conv.ToEditorBin(ctx, abs, cacheDir)
-			if err != nil {
-				errCh <- fmt.Errorf("open worker %d: %w", n, err)
+			if convErr := conv.ToEditorBin(ctx, abs, cacheDir); convErr != nil {
+				errCh <- fmt.Errorf("open worker %d: %w", n, convErr)
 				return
 			}
 			if st, statErr := os.Stat(filepath.Join(cacheDir, "AllFonts.js")); statErr != nil || st.Size() == 0 {
@@ -635,26 +628,22 @@ func TestSaveChangesCSVConcurrentWithDocumentOpens(t *testing.T) {
 			work := testutil.NewWorkspace(t)
 			csvPath := filepath.Join(work.Root, filepath.FromSlash(work.CopySample("sample-files/sample.csv")))
 			cacheDir := t.TempDir()
-			err = conv.ToEditorBin(ctx, csvPath, cacheDir)
-			if err != nil {
-				errCh <- fmt.Errorf("save worker %d open: %w", n, err)
+			if convErr := conv.ToEditorBin(ctx, csvPath, cacheDir); convErr != nil {
+				errCh <- fmt.Errorf("save worker %d open: %w", n, convErr)
 				return
 			}
 			changesDir := filepath.Join(cacheDir, "changes")
-			err = os.MkdirAll(changesDir, 0o755)
-			if err != nil {
-				errCh <- err
+			if mkdirErr := os.MkdirAll(changesDir, 0o755); mkdirErr != nil {
+				errCh <- mkdirErr
 				return
 			}
-			err = os.WriteFile(filepath.Join(changesDir, "changes0.json"), fixture, 0o644)
-			if err != nil {
-				errCh <- err
+			if writeErr := os.WriteFile(filepath.Join(changesDir, "changes0.json"), fixture, 0o644); writeErr != nil {
+				errCh <- writeErr
 				return
 			}
 			outPath := filepath.Join(cacheDir, "saved.csv")
-			err = conv.SaveChanges(ctx, cacheDir, outPath, "csv")
-			if err != nil {
-				errCh <- fmt.Errorf("save worker %d: %w", n, err)
+			if saveErr := conv.SaveChanges(ctx, cacheDir, outPath, "csv"); saveErr != nil {
+				errCh <- fmt.Errorf("save worker %d: %w", n, saveErr)
 				return
 			}
 			body, readErr := os.ReadFile(outPath)
@@ -667,7 +656,7 @@ func TestSaveChangesCSVConcurrentWithDocumentOpens(t *testing.T) {
 				return
 			}
 			if st, statErr := os.Stat(filepath.Join(cacheDir, "changes-applied.xlsx")); statErr != nil || st.Size() == 0 {
-				errCh <- fmt.Errorf("save worker %d missing xlsx bridge output: %v", n, err)
+				errCh <- fmt.Errorf("save worker %d missing xlsx bridge output: %v", n, statErr)
 				return
 			}
 			errCh <- nil
@@ -675,9 +664,8 @@ func TestSaveChangesCSVConcurrentWithDocumentOpens(t *testing.T) {
 	}
 
 	for i := 0; i < savers+openers; i++ {
-		err = <-errCh
-		if err != nil {
-			t.Fatal(err)
+		if recvErr := <-errCh; recvErr != nil {
+			t.Fatal(recvErr)
 		}
 	}
 }

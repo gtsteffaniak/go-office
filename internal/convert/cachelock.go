@@ -17,9 +17,6 @@ func withCacheDirLock(dir string, fn func() error) error {
 		return fn()
 	}
 	mu.Lock()
-	defer func() {
-		mu.Unlock()
-		cacheDirLocks.Delete(dir)
-	}()
+	defer mu.Unlock()
 	return fn()
 }

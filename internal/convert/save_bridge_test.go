@@ -63,7 +63,10 @@ func TestEditorImportSourceHash(t *testing.T) {
 	if got := editorImportSourceHash(base, "txt"); got != base {
 		t.Fatalf("txt hash = %q want %q", got, base)
 	}
-	if got := editorImportSourceHash(base, "rtf"); got == base {
-		t.Fatal("rtf hash should include open-docx pipeline tag")
+	if got := editorImportSourceHash(base, "rtf"); got != base {
+		t.Fatalf("rtf hash = %q want %q (native import, no docx prelude)", got, base)
+	}
+	if got := editorImportSourceHash(base, "odt"); got == base {
+		t.Fatal("odt hash should include open-docx pipeline tag")
 	}
 }

@@ -75,6 +75,8 @@ func (o *Opener) Open(ctx context.Context, origin, basePath, docKey string, cmd 
 	}
 
 	outDir := filepath.Join(o.CacheDir, docKey)
+	// Drop stale coauthoring blobs from a prior session; authChanges is always empty on connect.
+	clearChanges(outDir)
 	if convert.IsBrowserEditorFormat(ext) {
 		return o.openBrowserDocument(cmd, origin, basePath, docKey, ext, tmpPath, outDir)
 	}

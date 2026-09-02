@@ -337,6 +337,39 @@ func TestSaveChangesTxtUsesDirectPath(t *testing.T) {
 	}
 }
 
+func TestToEditorBinRTFSkipsDocxOpenBridge(t *testing.T) {
+	repo := testutil.RepoRoot(t)
+	assets := testutil.AssetsDirOrSkip(t, repo)
+	if !testutil.SampleExists(repo, "sample-files/sample.rtf") {
+		t.Skip("sample rtf missing")
+	}
+
+	work := testutil.NewWorkspace(t)
+	rtfPath := filepath.Join(work.Root, filepath.FromSlash(work.CopySample("sample-files/sample.rtf")))
+	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	err = conv.ToEditorBin(ctx, rtfPath, cacheDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := os.ReadFile(filepath.Join(cacheDir, "source.sha256"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(hash), ":open-docx-v1") {
+		t.Fatalf("rtf Editor.bin should use native rtf import, not docx bridge: %q", hash)
+	}
+	st, err := os.Stat(filepath.Join(cacheDir, "Editor.bin"))
+	if err != nil || st.Size() == 0 {
+		t.Fatalf("Editor.bin missing or empty: %v", err)
+	}
+}
+
 func TestToEditorBinTxtSkipsDocxOpenBridge(t *testing.T) {
 	repo := testutil.RepoRoot(t)
 	assets := testutil.AssetsDirOrSkip(t, repo)
@@ -671,22 +704,22 @@ func TestSaveChangesCSVConcurrentPlaywrightLoad(t *testing.T) {
 			defer cancel()
 
 			err = conv.ToEditorBin(ctx, csvPath, cacheDir)
-	if err != nil {
+			if err != nil {
 				t.Fatalf("ToEditorBin: %v", err)
 			}
 			changesDir := filepath.Join(cacheDir, "changes")
 			err = os.MkdirAll(changesDir, 0o755)
-	if err != nil {
+			if err != nil {
 				t.Fatal(err)
 			}
 			err = os.WriteFile(filepath.Join(changesDir, "changes0.json"), fixture, 0o644)
-	if err != nil {
+			if err != nil {
 				t.Fatal(err)
 			}
 
 			outPath := filepath.Join(cacheDir, "saved.csv")
 			err = conv.SaveChanges(ctx, cacheDir, outPath, "csv")
-	if err != nil {
+			if err != nil {
 				t.Fatalf("SaveChanges: %v", err)
 			}
 			body, err := os.ReadFile(outPath)

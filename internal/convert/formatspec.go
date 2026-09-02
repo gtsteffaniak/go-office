@@ -35,8 +35,11 @@ func lookupFormat(ext string) formatSpec {
 		return formatSpec{saveBridge: bridgeXLSX, openNormCSV: true}
 	case "xls", "ods":
 		return formatSpec{saveBridge: bridgeXLSX}
-	// RTF/ODT: open still uses doc→docx prelude; save uses direct reverse (see saveDirectReverse).
-	case "rtf", "odt":
+	// RTF: native x2t import avoids docx round-trip that can overflow sdkjs object IDs on large files.
+	case "rtf":
+		return formatSpec{saveBridge: bridgeDOCX, saveDirectReverse: true}
+	// ODT: open via docx prelude; save uses direct reverse (see saveDirectReverse).
+	case "odt":
 		return formatSpec{saveBridge: bridgeDOCX, openPrelude: bridgeDOCX, saveDirectReverse: true}
 	// DOC/DOT: x2t cannot emit binary Word (exit 80). Open via docx prelude; save applies
 	// changes to changes-applied.docx then falls back to OOXML bytes when docx→doc fails.

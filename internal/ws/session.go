@@ -71,7 +71,10 @@ func ResetSessionsForTest() {
 
 // ClearAllSessions drops all in-memory coauthoring sessions.
 func ClearAllSessions() {
-	sessions = sync.Map{}
+	sessions.Range(func(key, _ any) bool {
+		sessions.Delete(key)
+		return true
+	})
 }
 
 func (s *session) enqueue(packets ...string) {

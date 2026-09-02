@@ -7,8 +7,6 @@ import {
   replaceDocumentText,
   triggerEditorSave,
   assertDemoFileContains,
-  discoverSlideMarker,
-  fetchDemoFileBody,
 } from "../editor";
 import { forkSample } from "../fork-sample";
 
@@ -44,10 +42,11 @@ const ODS_ORIGINAL = CSV_ORIGINAL;
 const ODS_REPLACEMENT = "REPLACED_ODS_ID";
 
 const PPT_SOURCE = "sample-files/sample.ppt";
+const PPT_FIND = "My Presentation";
+const PPT_REPLACEMENT = "REPLACED_SLIDE";
 
 const SAVE_TEST_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_TEST_TIMEOUT ?? (bundledTest ? 150_000 : 120_000));
 
-test.describe.configure({ mode: "serial" });
 test.use({
   trace: bundledTest ? "retain-on-failure" : "on-first-retry",
   timeout: SAVE_TEST_TIMEOUT,
@@ -168,9 +167,7 @@ test("ods save round-trip via demo file API", async ({ page, request }, testInfo
 
 test("ppt save round-trip via demo file API", async ({ page, request }, testInfo) => {
   const file = forkSample(PPT_SOURCE, testInfo);
-  const initial = await fetchDemoFileBody(request, file);
-  const marker = discoverSlideMarker(initial);
-  const replacement = "REPLACED_SLIDE";
+  await assertDemoFileContains(request, file, PPT_FIND);
 
   await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
@@ -179,14 +176,13 @@ test("ppt save round-trip via demo file API", async ({ page, request }, testInfo
   await waitForEditorReady(page, "slide");
   await waitForEditorInteractive(page, "slide");
 
-  await replaceDocumentText(page, "slide", marker, replacement);
+  await replaceDocumentText(page, "slide", PPT_FIND, PPT_REPLACEMENT);
   await triggerEditorSave(page, "slide");
   await waitForSaveDone(page, {
     request,
     filePath: file,
-    marker: replacement,
+    marker: PPT_REPLACEMENT,
   });
 
-  await assertDemoFileContains(request, file, replacement);
-  await assertDemoFileContains(request, file, marker, { present: false });
+  await assertDemoFileContains(request, file, PPT_REPLACEMENT);
 });

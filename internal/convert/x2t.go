@@ -313,11 +313,28 @@ func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, ta
 		if st, err := os.Stat(intermediate); err == nil {
 			slog.Debug("bridge after apply_changes", "path", intermediate, "bytes", st.Size(), "bridge", bridge)
 		}
+		if bridge == bridgeDOCX && ext == "rtf" {
+			if err := WriteRTFFromDocxPlainText(intermediate, destPath); err != nil {
+				return err
+			}
+			slog.Debug("rtf persist from docx plain text", "path", destPath)
+			return nil
+		}
 		if err := c.convertOfficeInner(ctx, intermediate, destPath, string(bridge), ext, cacheDir); err != nil {
 			// DOC/DOT: x2t cannot write binary Word (exit 80). Persist changes-applied.docx bytes
 			// at the .doc/.dot path — ONLYOFFICE assemblyFormatAsOrigin rollback behavior.
 			if bridge == bridgeDOCX && legacyWordBinaryExt(ext) {
 				slog.Warn("x2t cannot write binary Word; persisting OOXML fallback",
+					"ext", ext, "intermediate", intermediate, "dest", destPath, "err", err)
+				if copyErr := fsutil.CopyFile(intermediate, destPath); copyErr != nil {
+					return fmt.Errorf("convert: %s→%s failed and OOXML fallback copy failed: %w", bridge, ext, copyErr)
+				}
+				return nil
+			}
+			// PPT: x2t cannot write binary PowerPoint (exit 88). Persist changes-applied.pptx bytes
+			// at the .ppt path — same assemblyFormatAsOrigin rollback behavior.
+			if bridge == bridgePPTX && legacySlideBinaryExt(ext) {
+				slog.Warn("x2t cannot write binary PowerPoint; persisting OOXML fallback",
 					"ext", ext, "intermediate", intermediate, "dest", destPath, "err", err)
 				if copyErr := fsutil.CopyFile(intermediate, destPath); copyErr != nil {
 					return fmt.Errorf("convert: %s→%s failed and OOXML fallback copy failed: %w", bridge, ext, copyErr)

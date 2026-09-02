@@ -180,6 +180,40 @@ func TestSaveSchedulerConcurrentSaveChanges(t *testing.T) {
 	}
 }
 
+func TestSaveSchedulerFlushFailureNotifiesEditor(t *testing.T) {
+	ws.ResetSessionsForTest()
+	saver := &recordingSaver{err: errFlush}
+	delay := 10 * time.Millisecond
+	cacheDir := t.TempDir()
+	h := ws.NewWithOptions(ws.HandlerOptions{
+		Version:   "9.3.4",
+		CacheDir:  cacheDir,
+		Saver:     saver,
+		SaveDelay: &delay,
+	})
+	h.PollHold = 0
+
+	changesDir := filepath.Join(cacheDir, "key", "changes")
+	if err := os.MkdirAll(changesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(changesDir, "changes0.json"), []byte(`["edit"]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	body := `42["message",{"type":"saveChanges","changes":["edit"],"deleteIndex":-1}]`
+	req := httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(body))
+	h.ServePath(httptest.NewRecorder(), req, "/doc/key/c")
+	time.Sleep(delay + 40 * time.Millisecond)
+
+	rec := httptest.NewRecorder()
+	h.ServePath(rec, httptest.NewRequest(http.MethodGet, "/?EIO=4&transport=polling&sid=go-office&t=fail", nil), "/doc/key/c")
+	out := rec.Body.String()
+	if !strings.Contains(out, `"type":"forceSave"`) || !strings.Contains(out, `"success":false`) {
+		t.Fatalf("expected forceSave failure packet after flush error: %q", out)
+	}
+}
+
 func TestSaveSchedulerFlushFailureKeepsChanges(t *testing.T) {
 	saver := &recordingSaver{err: errFlush}
 	delay := 10 * time.Millisecond

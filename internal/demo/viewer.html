@@ -21,6 +21,8 @@
     header a:hover { text-decoration: underline; }
     #editor { height: calc(100% - 48px); }
     #status { color: #555; font-size: 0.9rem; }
+    #status.status-error { color: #b3261e; }
+    #status.status-ok { color: #137333; }
   </style>
   <script id="office-api" type="text/javascript"></script>
 </head>
@@ -41,7 +43,10 @@
     document.getElementById("sample-path").textContent = SAMPLE_FILE;
 
     var statusEl = document.getElementById("status");
-    function setStatus(msg) { statusEl.textContent = msg; }
+    function setStatus(msg, kind) {
+      statusEl.textContent = msg;
+      statusEl.className = kind === "error" ? "status-error" : (kind === "ok" ? "status-ok" : "");
+    }
 
     function joinPath(base, path) {
       if (!base) {
@@ -53,7 +58,7 @@
     function loadEditor() {
       var apiScript = document.getElementById("office-api");
       apiScript.onerror = function () {
-        setStatus("Failed to load api.js — fetch Euro-Office assets first (see README)");
+        setStatus("Failed to load api.js — fetch Euro-Office assets first (see README)", "error");
       };
       apiScript.onload = function () {
         var configUrl = joinPath(apiBase, "/demo/config?file=" + encodeURIComponent(SAMPLE_FILE));
@@ -77,9 +82,7 @@
               onDocumentStateChange: function (event) {
                 if (event && event.data === true) {
                   document.body.setAttribute("data-dirty", "true");
-                }
-                if (event && event.data === false && document.body.getAttribute("data-dirty") === "true") {
-                  document.body.setAttribute("data-save-done", String(Date.now()));
+                  setStatus("Unsaved changes");
                 }
                 if (typeof baseEvents.onDocumentStateChange === "function") {
                   baseEvents.onDocumentStateChange(event);
@@ -88,9 +91,23 @@
               onRequestSaveResult: function (event) {
                 if (event && event.data) {
                   document.body.setAttribute("data-save-done", String(Date.now()));
+                  document.body.removeAttribute("data-dirty");
+                  setStatus("Saved", "ok");
+                } else {
+                  document.body.removeAttribute("data-save-done");
+                  setStatus("Save failed — changes were not stored on the server", "error");
                 }
                 if (typeof baseEvents.onRequestSaveResult === "function") {
                   baseEvents.onRequestSaveResult(event);
+                }
+              },
+              onError: function (event) {
+                var detail = event && event.data;
+                var msg = detail ? String(detail) : "Editor error";
+                setStatus("Error: " + msg, "error");
+                console.error("editor error", event);
+                if (typeof baseEvents.onError === "function") {
+                  baseEvents.onError(event);
                 }
               },
             };
@@ -98,7 +115,7 @@
             setStatus("Editor ready");
           })
           .catch(function (err) {
-            setStatus("Error: " + err.message);
+            setStatus("Error: " + err.message, "error");
             console.error(err);
           });
       };

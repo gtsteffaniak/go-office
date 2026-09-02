@@ -140,12 +140,19 @@ func (s *saveScheduler) scheduleDone(docKey, origin string, force bool, onDone f
 			if convert.NonRecoverableConvertError(err) {
 				clearChanges(filepath.Join(s.cacheDir, docKey))
 			}
+			if onDone != nil {
+				onDone(err)
+			} else {
+				notifyForceSaveResult(docKey, false)
+			}
 		} else {
 			s.logger.Debug("document flush ok", "key", docKey, "force", force)
 			clearChanges(filepath.Join(s.cacheDir, docKey))
-		}
-		if onDone != nil {
-			onDone(err)
+			if onDone != nil {
+				onDone(nil)
+			} else {
+				notifyForceSaveResult(docKey, true)
+			}
 		}
 	})
 }
@@ -327,4 +334,26 @@ func (h *Handler) handleSaveChanges(sess *session, msg map[string]any, docKey st
 	if h.Scheduler != nil {
 		h.Scheduler.schedule(docKey, requestOrigin(r), force)
 	}
+}
+
+func notifyForceSaveResult(docKey string, success bool) {
+	now := time.Now().UnixMilli()
+	sessions.Range(func(key, value any) bool {
+		s, ok := value.(*session)
+		if !ok || s.docKey != docKey {
+			return true
+		}
+		pkt, err := socketMessage(map[string]any{
+			"type": "forceSave",
+			"messages": map[string]any{
+				"type":    forceSaveButton,
+				"time":    now,
+				"success": success,
+			},
+		})
+		if err == nil {
+			s.enqueue(pkt)
+		}
+		return true
+	})
 }

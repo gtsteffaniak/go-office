@@ -27,8 +27,8 @@ func TestSaveBridgeRouting(t *testing.T) {
 		{"scsv", true, false, false, false, false},
 		{"xls", true, false, false, false, false},
 		{"ods", true, false, false, false, false},
-		// RTF/ODT: x2t can apply_changes straight to the target; docx→rtf/odt office step is redundant.
-		{"rtf", false, true, false, false, true},
+		// RTF: save via docx bridge; ODT uses direct reverse apply_changes.
+		{"rtf", false, true, false, false, false},
 		// DOC/DOT: x2t cannot write binary Word (exit 80); save uses docx bridge + OOXML fallback.
 		{"doc", false, true, false, false, false},
 		{"dot", false, true, false, false, false},

@@ -24,8 +24,9 @@ type session struct {
 
 	namespaceAck bool
 	infoSent     bool
-	authSent     bool
-	openStarted  bool
+	authSent       bool
+	openStarted    bool
+	documentOpened bool
 
 	sessionID string
 	indexUser int
@@ -146,6 +147,8 @@ func (s *session) onConnect(authData []byte) {
 	// Engine.IO packet 40 is a new transport session. The demo client always
 	// reuses sid=go-office, so a CSV reload would otherwise skip auth and hang.
 	s.authSent = false
+	s.documentOpened = false
+	s.openStarted = false
 	s.waitGen++
 	if s.waitCh != nil {
 		close(s.waitCh)
@@ -200,7 +203,7 @@ func (s *session) startOpen(opener DocumentOpener, req authRequest, origin strin
 	}
 
 	s.mu.Lock()
-	if s.openStarted {
+	if s.documentOpened || s.openStarted {
 		s.mu.Unlock()
 		return
 	}
@@ -227,6 +230,9 @@ func (s *session) startOpen(opener DocumentOpener, req authRequest, origin strin
 		}
 		if len(packets) > 0 {
 			s.enqueue(packets...)
+			s.mu.Lock()
+			s.documentOpened = true
+			s.mu.Unlock()
 		}
 		s.mu.Lock()
 		s.openStarted = false

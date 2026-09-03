@@ -223,6 +223,9 @@ func (s *Server) registerCoauthoringFallback() {
 		Saver:        s,
 		SaveDelay:    s.opts.SaveDelay,
 	})
+	if opener != nil && co.Scheduler != nil {
+		opener.Saver = co.Scheduler
+	}
 	s.coauthoring = co
 	docPattern := joinURLPath(prefix, "doc") + "/"
 	s.mux.Handle(docPattern, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

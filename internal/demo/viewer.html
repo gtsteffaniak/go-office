@@ -55,6 +55,80 @@
       return base.replace(/\/$/, "") + "/" + path.replace(/^\//, "");
     }
 
+    var autosavePollTimer = null;
+    var saveWatchdogTimer = null;
+    var lastSavedFileBytes = 0;
+    var saveBaselineBytes = 0;
+
+    function demoFileUrl() {
+      return joinPath(apiBase, "/demo/file/" + encodeURIComponent(SAMPLE_FILE));
+    }
+
+    function fetchDemoFileBytes() {
+      return fetch(demoFileUrl(), { cache: "no-store" }).then(function (res) {
+        if (!res.ok) {
+          throw new Error("file " + res.status);
+        }
+        return res.blob().then(function (blob) { return blob.size; });
+      });
+    }
+
+    function clearSaveWatchdog() {
+      if (saveWatchdogTimer) {
+        clearTimeout(saveWatchdogTimer);
+        saveWatchdogTimer = null;
+      }
+    }
+
+    function beginSaveWatchdog() {
+      clearSaveWatchdog();
+      saveWatchdogTimer = setTimeout(function () {
+        if (document.body.hasAttribute("data-dirty")) {
+          setStatus("Save failed — changes were not stored on the server", "error");
+        }
+      }, 12000);
+    }
+
+    function pollSaveComplete() {
+      if (autosavePollTimer) {
+        clearTimeout(autosavePollTimer);
+      }
+      var attempts = 0;
+      var baseline = saveBaselineBytes;
+      function tick() {
+        attempts += 1;
+        fetchDemoFileBytes()
+          .then(function (bytes) {
+            if (bytes !== baseline) {
+              lastSavedFileBytes = bytes;
+              saveBaselineBytes = bytes;
+              clearSaveWatchdog();
+              document.body.setAttribute("data-save-done", String(Date.now()));
+              document.body.removeAttribute("data-dirty");
+              setStatus("Saved", "ok");
+              return;
+            }
+            if (attempts < 24) {
+              autosavePollTimer = setTimeout(tick, 500);
+            } else {
+              clearSaveWatchdog();
+              if (document.body.hasAttribute("data-dirty")) {
+                setStatus("Save failed — file on server was not updated", "error");
+              }
+            }
+          })
+          .catch(function () {
+            if (attempts < 24) {
+              autosavePollTimer = setTimeout(tick, 500);
+            } else {
+              clearSaveWatchdog();
+              setStatus("Save failed — could not verify saved file", "error");
+            }
+          });
+      }
+      autosavePollTimer = setTimeout(tick, 400);
+    }
+
     function loadEditor() {
       var apiScript = document.getElementById("office-api");
       apiScript.onerror = function () {
@@ -71,6 +145,12 @@
           .then(function (config) {
             document.getElementById("doc-title").textContent = config.document.title;
             setStatus("Opening " + config.document.title + "…");
+            fetchDemoFileBytes()
+              .then(function (bytes) {
+                lastSavedFileBytes = bytes;
+                saveBaselineBytes = bytes;
+              })
+              .catch(function () { /* baseline optional */ });
             var baseEvents = config.events || {};
             config.events = {
               onDocumentReady: function () {
@@ -82,23 +162,17 @@
               onDocumentStateChange: function (event) {
                 if (event && event.data === true) {
                   document.body.setAttribute("data-dirty", "true");
+                  document.body.removeAttribute("data-save-done");
+                  clearSaveWatchdog();
                   setStatus("Unsaved changes");
+                } else if (event && event.data === false) {
+                  saveBaselineBytes = lastSavedFileBytes;
+                  setStatus("Saving…");
+                  beginSaveWatchdog();
+                  pollSaveComplete();
                 }
                 if (typeof baseEvents.onDocumentStateChange === "function") {
                   baseEvents.onDocumentStateChange(event);
-                }
-              },
-              onRequestSaveResult: function (event) {
-                if (event && event.data) {
-                  document.body.setAttribute("data-save-done", String(Date.now()));
-                  document.body.removeAttribute("data-dirty");
-                  setStatus("Saved", "ok");
-                } else {
-                  document.body.removeAttribute("data-save-done");
-                  setStatus("Save failed — changes were not stored on the server", "error");
-                }
-                if (typeof baseEvents.onRequestSaveResult === "function") {
-                  baseEvents.onRequestSaveResult(event);
                 }
               },
               onError: function (event) {

@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/quantumx-apps/go-office/internal/ws"
 )
@@ -141,5 +142,44 @@ func TestPollingReloadSameCSVResendsAuth(t *testing.T) {
 	}
 	if !strings.Contains(second, `"result":1`) {
 		t.Fatalf("reload auth result missing: %q", second)
+	}
+}
+
+func TestPollingConnectThenAuthOpensOnce(t *testing.T) {
+	ws.ResetSessionsForTest()
+	opener := newHookOpener()
+	h := ws.NewWithOptions(ws.HandlerOptions{
+		Version:  "9.3.4-hotfix.1",
+		OpenHook: opener,
+	})
+	h.PollHold = 0
+
+	key := "xlsm-key"
+	openBody := `{"c":"open","id":"` + key + `","format":"xlsm","url":"http://localhost/sample.xlsm"}`
+	connectAuth := `40{"data":{"type":"auth","docid":"` + key + `","user":{"id":"demo-user","username":"Demo"},"openCmd":` + openBody + `}}`
+	authMsg := `42["message",{"type":"auth","docid":"` + key + `","user":{"id":"demo-user","username":"Demo"},"openCmd":` + openBody + `}]`
+
+	post := func(body string) {
+		req := httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(body))
+		h.ServePath(httptest.NewRecorder(), req, "/doc/"+key+"/c")
+	}
+	poll := func() string {
+		get := httptest.NewRequest(http.MethodGet, "/?EIO=4&transport=polling&sid=go-office&t=1", nil)
+		rec := httptest.NewRecorder()
+		h.ServePath(rec, get, "/doc/"+key+"/c")
+		return rec.Body.String()
+	}
+
+	post(connectAuth)
+	post(authMsg)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if opener.count(key) >= 1 && strings.Contains(poll(), `"type":"documentOpen"`) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if opener.count(key) != 1 {
+		t.Fatalf("connect+auth should open once, got %d opens", opener.count(key))
 	}
 }

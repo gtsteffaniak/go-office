@@ -297,7 +297,7 @@ func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, ta
 
 	bridge := saveBridgeExt(ext)
 	if bridge != bridgeNone {
-		if bridge == bridgeXLSX {
+		if bridge == bridgeXLSX && csvNeedsXlsxBridge(ext) {
 			n, err := canonicalizeCSVChangeFiles(changesDir)
 			if err != nil {
 				return err

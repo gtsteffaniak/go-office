@@ -3,9 +3,12 @@
 package convert_test
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -210,6 +213,40 @@ func TestWriteRTFFromDocxPlainText(t *testing.T) {
 	}
 }
 
+func TestSaveChangesODSRoundTrip(t *testing.T) {
+	repo := testutil.RepoRoot(t)
+	assets := testutil.AssetsDirOrSkip(t, repo)
+	if !testutil.SampleExists(repo, "sample-files/sample.ods") {
+		t.Skip("sample ods missing")
+	}
+	work := testutil.NewWorkspace(t)
+	src := filepath.Join(work.Root, filepath.FromSlash(work.CopySample("sample-files/sample.ods")))
+	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	err = conv.ToEditorBin(ctx, src, cacheDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(cacheDir, "saved.ods")
+	err = conv.SaveChanges(ctx, cacheDir, outPath, "ods")
+	if err != nil {
+		t.Fatalf("SaveChanges: %v", err)
+	}
+	body, err := os.ReadFile(outPath)
+	if err != nil || len(body) == 0 {
+		t.Fatalf("saved.ods missing or empty: %v", err)
+	}
+	if !zipEntryContains(outPath, "content.xml", "DD37Cf93aecA6Dc") {
+		body, _ := os.ReadFile(outPath)
+		t.Fatalf("ods lost original B2 content after SaveChanges: %q", truncate(body, 200))
+	}
+}
+
 func TestSaveChangesODTRoundTrip(t *testing.T) {
 	repo := testutil.RepoRoot(t)
 	assets := testutil.AssetsDirOrSkip(t, repo)
@@ -299,6 +336,146 @@ func TestSaveChangesPPTRoundTrip(t *testing.T) {
 	if !strings.Contains(string(slideXML), "My Presentation") {
 		t.Fatalf("saved.ppt slide1.xml missing title text: %q", truncate(slideXML, 200))
 	}
+}
+
+func TestSaveReopenTxtAfterSave(t *testing.T) {
+	repo := testutil.RepoRoot(t)
+	assets := testutil.AssetsDirOrSkip(t, repo)
+	if !testutil.SampleExists(repo, "sample-files/sample.txt") {
+		t.Skip("sample txt missing")
+	}
+	work := testutil.NewWorkspace(t)
+	src := filepath.Join(work.Root, filepath.FromSlash(work.CopySample("sample-files/sample.txt")))
+	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if err = conv.ToEditorBin(ctx, src, cacheDir); err != nil {
+		t.Fatal(err)
+	}
+	savedPath := filepath.Join(cacheDir, "saved.txt")
+	if err = conv.FromEditorBin(ctx, cacheDir, savedPath, "txt"); err != nil {
+		t.Fatalf("FromEditorBin: %v", err)
+	}
+	reopenDir := t.TempDir()
+	if err = conv.ToEditorBin(ctx, savedPath, reopenDir); err != nil {
+		t.Fatalf("ToEditorBin saved.txt: %v", err)
+	}
+	outPath := filepath.Join(reopenDir, "reopened.txt")
+	if err = conv.FromEditorBin(ctx, reopenDir, outPath, "txt"); err != nil {
+		t.Fatalf("FromEditorBin after reopen: %v", err)
+	}
+	body, err := os.ReadFile(outPath)
+	if err != nil || len(body) == 0 {
+		t.Fatalf("reopened.txt missing or empty: %v", err)
+	}
+	if !strings.Contains(string(body), "Sample-Files.com") {
+		t.Fatalf("txt reopen lost content: %q", truncate(body, 200))
+	}
+}
+
+func TestSaveReopenRTFAfterSave(t *testing.T) {
+	repo := testutil.RepoRoot(t)
+	assets := testutil.AssetsDirOrSkip(t, repo)
+	if !testutil.SampleExists(repo, "sample-files/sample.rtf") {
+		t.Skip("sample rtf missing")
+	}
+	work := testutil.NewWorkspace(t)
+	src := filepath.Join(work.Root, filepath.FromSlash(work.CopySample("sample-files/sample.rtf")))
+	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if err = conv.ToEditorBin(ctx, src, cacheDir); err != nil {
+		t.Fatal(err)
+	}
+	changesDir := filepath.Join(cacheDir, "changes")
+	if err = os.MkdirAll(changesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(changesDir, "changes0.json"), []byte(`["rtf-change"]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	savedPath := filepath.Join(cacheDir, "saved.rtf")
+	if err = conv.SaveChanges(ctx, cacheDir, savedPath, "rtf"); err != nil {
+		t.Fatalf("SaveChanges: %v", err)
+	}
+	savedBody, err := os.ReadFile(savedPath)
+	if err != nil || !strings.Contains(string(savedBody), "Lorem ipsum") {
+		t.Fatalf("saved.rtf missing plain text before reopen: %v", err)
+	}
+	reopenDir := t.TempDir()
+	if err = conv.ToEditorBin(ctx, savedPath, reopenDir); err != nil {
+		t.Fatalf("ToEditorBin saved.rtf: %v", err)
+	}
+	st, err := os.Stat(filepath.Join(reopenDir, "Editor.bin"))
+	if err != nil || st.Size() == 0 {
+		t.Fatalf("reopen Editor.bin missing or empty: %v", err)
+	}
+}
+
+func TestSaveReopenPPTAfterSave(t *testing.T) {
+	repo := testutil.RepoRoot(t)
+	assets := testutil.AssetsDirOrSkip(t, repo)
+	if !testutil.SampleExists(repo, "sample-files/sample.ppt") {
+		t.Skip("sample ppt missing")
+	}
+	work := testutil.NewWorkspace(t)
+	src := filepath.Join(work.Root, filepath.FromSlash(work.CopySample("sample-files/sample.ppt")))
+	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if err = conv.ToEditorBin(ctx, src, cacheDir); err != nil {
+		t.Fatal(err)
+	}
+	changesDir := filepath.Join(cacheDir, "changes")
+	if err = os.MkdirAll(changesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(changesDir, "changes0.json"), []byte(`["ppt-change"]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	savedPath := filepath.Join(cacheDir, "saved.ppt")
+	if err = conv.SaveChanges(ctx, cacheDir, savedPath, "ppt"); err != nil {
+		t.Fatalf("SaveChanges: %v", err)
+	}
+	if !zipEntryContains(savedPath, "ppt/slides/slide1.xml", "My Presentation") {
+		t.Fatal("saved.ppt missing slide title before reopen")
+	}
+	reopenDir := t.TempDir()
+	if err = conv.ToEditorBin(ctx, savedPath, reopenDir); err != nil {
+		t.Fatalf("ToEditorBin saved.ppt: %v", err)
+	}
+	outPath := filepath.Join(reopenDir, "reopened.pptx")
+	if err = conv.FromEditorBin(ctx, reopenDir, outPath, "pptx"); err != nil {
+		t.Fatalf("FromEditorBin pptx after reopen: %v", err)
+	}
+	slideXML, err := convert.OOXMLPart(mustReadFile(t, outPath), "ppt/slides/slide1.xml")
+	if err != nil {
+		t.Fatalf("reopened.pptx missing slide1.xml: %v", err)
+	}
+	if !strings.Contains(string(slideXML), "My Presentation") {
+		t.Fatalf("ppt reopen lost slide title: %q", truncate(slideXML, 200))
+	}
+}
+
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 func TestSaveChangesDocOOXMLFallback(t *testing.T) {
@@ -944,6 +1121,33 @@ func TestConcurrentToEditorBinSameDir(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(cacheDir, "source.sha256")); err != nil {
 		t.Fatalf("source.sha256 missing after concurrent convert: %v", err)
 	}
+}
+
+func zipEntryContains(path, entry, marker string) bool {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	if err != nil {
+		return false
+	}
+	for _, f := range zr.File {
+		if f.Name != entry {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return false
+		}
+		body, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			return false
+		}
+		return strings.Contains(string(body), marker)
+	}
+	return false
 }
 
 func truncate(b []byte, n int) string {

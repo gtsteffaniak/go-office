@@ -68,6 +68,141 @@ type AscEditor = {
   asc_isDocumentCanSave?: () => boolean;
 };
 
+type AscEditorWindow = {
+  Asc?: { editor?: AscEditor; spreadsheet?: AscEditor; presentation?: AscEditor };
+  editor?: AscEditor;
+};
+
+function cellApiReadyInBrowser(): boolean {
+  const w = window as AscEditorWindow;
+  const api = w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor;
+  return typeof api?.asc_selectRange === "function";
+}
+
+function wordSlideInteractiveInBrowser(kind: SampleFile["editor"]): boolean {
+  const w = window as AscEditorWindow;
+  const api =
+    kind === "slide"
+      ? w.Asc?.presentation ?? w.Asc?.editor ?? w.editor
+      : kind === "word"
+        ? w.Asc?.editor ?? w.Asc?.spreadsheet ?? w.editor
+        : w.Asc?.editor ?? w.Asc?.presentation ?? w.Asc?.spreadsheet ?? w.editor;
+  if (typeof api?.asc_isDocumentCanSave === "function") {
+    return api.asc_isDocumentCanSave();
+  }
+  if (typeof api?.asc_insertText === "function") {
+    return true;
+  }
+  const main = document.querySelector("#id_main, #editor_sdk, #editor-container");
+  if (!main) {
+    return false;
+  }
+  const rect = main.getBoundingClientRect();
+  return rect.width > 50 && rect.height > 50;
+}
+
+function readCellViaBrowser(cellRef: string): string {
+  const w = window as AscEditorWindow;
+  const api = w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor;
+  if (!api?.asc_selectRange) {
+    return "";
+  }
+  api.asc_selectRange(cellRef);
+  return api.asc_getCellText?.() ?? api.asc_getFormula?.() ?? "";
+}
+
+function setCellViaBrowser(arg: { cellRef: string; cellValue: string }): boolean {
+  const w = window as AscEditorWindow;
+  const api = w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor;
+  if (!api?.asc_selectRange) {
+    return false;
+  }
+  api.asc_selectRange(arg.cellRef);
+  if (typeof api.asc_setCellValue === "function") {
+    api.asc_setCellValue(arg.cellValue);
+    return true;
+  }
+  if (typeof api.asc_insertText === "function") {
+    api.asc_insertText(arg.cellValue);
+    api.asc_closeCellEditor?.(true);
+    return true;
+  }
+  return false;
+}
+
+function findTextInBrowser(arg: { needle: string; kind?: SampleFile["editor"] }): boolean {
+  const w = window as AscEditorWindow;
+  const api =
+    arg.kind === "cell"
+      ? w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor
+      : arg.kind === "slide"
+        ? w.Asc?.presentation ?? w.Asc?.editor ?? w.editor
+        : arg.kind === "word"
+          ? w.Asc?.editor ?? w.Asc?.spreadsheet ?? w.editor
+          : w.Asc?.editor ?? w.Asc?.presentation ?? w.Asc?.spreadsheet ?? w.editor;
+  if (!api) {
+    return false;
+  }
+  if (typeof api.asc_findText !== "function") {
+    return false;
+  }
+  try {
+    return Boolean(
+      api.asc_findText(arg.needle) ||
+        api.asc_findText(arg.needle, false, false) ||
+        api.asc_findText(arg.needle, true, false),
+    );
+  } catch {
+    return false;
+  }
+}
+
+function replaceTextInBrowser(arg: { from: string; to: string; kind?: SampleFile["editor"] }): boolean {
+  const w = window as AscEditorWindow;
+  const api =
+    arg.kind === "cell"
+      ? w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor
+      : arg.kind === "slide"
+        ? w.Asc?.presentation ?? w.Asc?.editor ?? w.editor
+        : arg.kind === "word"
+          ? w.Asc?.editor ?? w.Asc?.spreadsheet ?? w.editor
+          : w.Asc?.editor ?? w.Asc?.presentation ?? w.Asc?.spreadsheet ?? w.editor;
+  if (!api?.asc_replaceText) {
+    return false;
+  }
+  const searchProps = { searchString: arg.from, matchCase: false };
+  try {
+    api.asc_replaceText(searchProps, arg.to, true);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function insertTextInBrowser(arg: { chunk: string; kind: SampleFile["editor"] }): boolean {
+  const w = window as AscEditorWindow;
+  const api =
+    arg.kind === "cell"
+      ? w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor
+      : arg.kind === "slide"
+        ? w.Asc?.presentation ?? w.Asc?.editor ?? w.editor
+        : arg.kind === "word"
+          ? w.Asc?.editor ?? w.Asc?.spreadsheet ?? w.editor
+          : w.Asc?.editor ?? w.Asc?.presentation ?? w.Asc?.spreadsheet ?? w.editor;
+  if (!api) {
+    return false;
+  }
+  const methods = ["asc_enterText", "asc_nativeInsertText", "asc_AddText", "asc_insertText", "asc_PasteText", "PasteText"];
+  for (const name of methods) {
+    const fn = (api as Record<string, unknown>)[name];
+    if (typeof fn === "function") {
+      (fn as (value: string) => void).call(api, arg.chunk);
+      return true;
+    }
+  }
+  return false;
+}
+
 export function getEditorFrame(page: Page, editor: SampleFile["editor"]): FrameLocator {
   const app = EDITOR_APP[editor];
   return page.frameLocator(`iframe[src*="/${app}/"]`).first();
@@ -156,11 +291,7 @@ async function isEditorInteractive(
     if (!shellReady) {
       return false;
     }
-    const hasAPI = await frame.locator("body").evaluate(() => {
-      const w = window as { Asc?: { editor?: AscEditor; spreadsheet?: AscEditor }; editor?: AscEditor };
-      const candidates = [w.Asc?.editor, w.Asc?.spreadsheet, w.editor];
-      return candidates.some((api) => typeof api?.asc_selectRange === "function");
-    });
+    const hasAPI = await frame.locator("body").evaluate(cellApiReadyInBrowser);
     if (hasAPI) {
       return true;
     }
@@ -177,22 +308,7 @@ async function isEditorInteractive(
     if (parentReady) {
       return true;
     }
-    return frame.locator("body").evaluate(() => {
-      const w = window as { Asc?: { editor?: AscEditor }; editor?: AscEditor };
-      const api = w.Asc?.editor ?? w.editor;
-      if (typeof api?.asc_isDocumentCanSave === "function") {
-        return api.asc_isDocumentCanSave();
-      }
-      if (typeof api?.asc_insertText === "function") {
-        return true;
-      }
-      const main = document.querySelector("#id_main, #editor_sdk, #editor-container");
-      if (!main) {
-        return false;
-      }
-      const rect = main.getBoundingClientRect();
-      return rect.width > 50 && rect.height > 50;
-    });
+    return frame.locator("body").evaluate(wordSlideInteractiveInBrowser, editor);
   }
 
   const parentReady =
@@ -380,15 +496,7 @@ export function csvCellValue(csv: string, ref: string): string {
 }
 
 async function readCellValue(frame: FrameLocator, ref: string): Promise<string> {
-  const viaSdk = await frame.locator("body").evaluate((_, cellRef: string) => {
-    const w = window as { Asc?: { editor?: AscEditor; spreadsheet?: AscEditor }; editor?: AscEditor };
-    const api = w.Asc?.editor ?? w.Asc?.spreadsheet ?? w.editor;
-    if (!api?.asc_selectRange) {
-      return "";
-    }
-    api.asc_selectRange(cellRef);
-    return api.asc_getCellText?.() ?? api.asc_getFormula?.() ?? "";
-  }, ref);
+  const viaSdk = await frame.locator("body").evaluate(readCellViaBrowser, ref);
   if (viaSdk) {
     return viaSdk;
   }
@@ -398,27 +506,7 @@ async function readCellValue(frame: FrameLocator, ref: string): Promise<string> 
 }
 
 async function setCellValue(frame: FrameLocator, ref: string, value: string): Promise<boolean> {
-  return frame.locator("body").evaluate(
-    ({ cellRef, cellValue }) => {
-      const w = window as { Asc?: { editor?: AscEditor; spreadsheet?: AscEditor }; editor?: AscEditor };
-      const api = w.Asc?.editor ?? w.Asc?.spreadsheet ?? w.editor;
-      if (!api?.asc_selectRange) {
-        return false;
-      }
-      api.asc_selectRange(cellRef);
-      if (typeof api.asc_setCellValue === "function") {
-        api.asc_setCellValue(cellValue);
-        return true;
-      }
-      if (typeof api.asc_insertText === "function") {
-        api.asc_insertText(cellValue);
-        api.asc_closeCellEditor?.(true);
-        return true;
-      }
-      return false;
-    },
-    { cellRef: ref, cellValue: value },
-  );
+  return frame.locator("body").evaluate(setCellViaBrowser, { cellRef: ref, cellValue: value });
 }
 
 export async function assertCellContent(
@@ -462,22 +550,12 @@ export async function assertDocumentContains(
   await expect
     .poll(
       async () => {
-        const viaSdk = await frame.locator("body").evaluate((_, needle: string) => {
-          try {
-            const w = window as { Asc?: { editor?: AscEditor }; editor?: AscEditor };
-            const api = w.Asc?.editor ?? w.editor;
-            if (!api || typeof api.asc_findText !== "function") {
-              return false;
-            }
-            return Boolean(
-              api.asc_findText(needle) ||
-                api.asc_findText(needle, false, false) ||
-                api.asc_findText(needle, true, false),
-            );
-          } catch {
-            return false;
-          }
-        }, text);
+        let viaSdk = false;
+        try {
+          viaSdk = await frame.locator("body").evaluate(findTextInBrowser, { needle: text, kind: editor });
+        } catch {
+          viaSdk = false;
+        }
         if (viaSdk) {
           return true;
         }
@@ -518,102 +596,130 @@ export async function setCellContent(
   await writeFormulaBarValue(frame, value);
 }
 
+async function findDocumentTextViaSdk(
+  frame: FrameLocator,
+  text: string,
+  editor?: SampleFile["editor"],
+): Promise<boolean> {
+  return frame.locator("body").evaluate(findTextInBrowser, { needle: text, kind: editor });
+}
+
 async function replaceDocumentTextViaSdk(
   frame: FrameLocator,
   from: string,
   to: string,
+  editor?: SampleFile["editor"],
 ): Promise<boolean> {
-  return frame.locator("body").evaluate(
-    ({ from: search, to: replace }) => {
-      const w = window as {
-        Asc?: { editor?: AscEditor & { WordControl?: { m_oLogicDocument?: LogicDocument } } };
-        editor?: AscEditor & { WordControl?: { m_oLogicDocument?: LogicDocument } };
-        AscCommon?: {
-          CSearchSettings?: new () => {
-            SetText?: (text: string) => void;
-            put_Text?: (text: string) => void;
-          };
-        };
-      };
-      type LogicDocument = {
-        Search: (props: unknown) => void;
-        SearchEngine?: { CurId?: number };
-      };
+  return frame.locator("body").evaluate(replaceTextInBrowser, { from, to, kind: editor });
+}
 
-      const api = w.Asc?.editor ?? w.editor;
-      const doc = api?.WordControl?.m_oLogicDocument;
-      if (!api?.asc_replaceText || !doc || !w.AscCommon?.CSearchSettings) {
-        return false;
-      }
+async function settleFrame(frame: FrameLocator, ms = 350): Promise<void> {
+  await frame.locator("body").evaluate((delay) => new Promise((r) => setTimeout(r, delay)), ms);
+}
 
-      const makeProps = (text: string) => {
-        const props = new w.AscCommon.CSearchSettings();
-        if (typeof props.SetText === "function") {
-          props.SetText(text);
-        } else if (typeof props.put_Text === "function") {
-          props.put_Text(text);
-        }
-        return props;
-      };
+async function closeSearchBar(frame: FrameLocator): Promise<void> {
+  await frame.locator("#search-bar-close, #search-adv-close").first().click({ timeout: 1_000 }).catch(() => {});
+}
 
-      const hasMatch = (text: string): boolean => {
-        doc.Search(makeProps(text));
-        const curId = doc.SearchEngine?.CurId;
-        return typeof curId === "number" && curId !== -1;
-      };
+async function searchBarHasMatches(frame: FrameLocator): Promise<boolean> {
+  const results = frame.locator("#search-bar-results").first();
+  const text = (await results.textContent({ timeout: 1_000 }).catch(() => "")) ?? "";
+  const match = text.trim().match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (!match) {
+    return false;
+  }
+  const total = Number.parseInt(match[2], 10);
+  return total > 0;
+}
 
-      try {
-        const replaced = (): boolean => hasMatch(replace) || !hasMatch(search);
-        if (!hasMatch(search)) {
-          return replaced();
-        }
-        api.asc_replaceText(makeProps(search), replace, true);
-        return replaced();
-      } catch {
-        return false;
-      }
-    },
-    { from, to },
-  );
+async function findDocumentTextViaSearchUI(frame: FrameLocator, text: string): Promise<boolean> {
+  try {
+    await frame.locator("body").click({ position: { x: 8, y: 8 }, force: true }).catch(() => {});
+    await frame.locator("body").press("Control+f");
+    const searchInput = frame.locator("#search-bar-text").first();
+    await searchInput.waitFor({ state: "visible", timeout: 4_000 });
+    await searchInput.fill(text);
+    await searchInput.press("Enter");
+    await settleFrame(frame, 500);
+    const hasMatch = await searchBarHasMatches(frame);
+    await closeSearchBar(frame);
+    return hasMatch;
+  } catch {
+    await closeSearchBar(frame);
+    return false;
+  }
+}
+
+async function documentContainsText(
+  frame: FrameLocator,
+  text: string,
+  editor: SampleFile["editor"],
+): Promise<boolean> {
+  if (await findDocumentTextViaSdk(frame, text, editor)) {
+    return true;
+  }
+  return await findDocumentTextViaSearchUI(frame, text);
 }
 
 async function replaceDocumentTextViaSearchUI(
   frame: FrameLocator,
   from: string,
   to: string,
+  editor: SampleFile["editor"],
 ): Promise<boolean> {
   try {
+    await frame.locator("body").click({ position: { x: 10, y: 10 }, force: true }).catch(() => {});
     await frame.locator("body").press("Control+f");
     const searchInput = frame.locator("#search-bar-text").first();
-    await searchInput.waitFor({ state: "visible", timeout: 5_000 });
+    await searchInput.waitFor({ state: "visible", timeout: 8_000 });
     await searchInput.fill(from);
     await searchInput.press("Enter");
-    await frame.locator("body").press("Escape");
-
-    const openPanel = frame.locator("#search-bar-open-panel").first();
-    if (await openPanel.isVisible()) {
-      await openPanel.click();
-      const replaceInput = frame
-        .locator("#search-adv-replace-input, #search-adv-replace-text, input[placeholder*='Replace' i]")
-        .first();
-      if ((await replaceInput.count()) > 0) {
-        await replaceInput.fill(to);
-        const replaceAll = frame.locator("#search-adv-replace-all").first();
-        if (await replaceAll.isVisible()) {
-          await replaceAll.click();
-        } else {
-          await frame.locator("#search-adv-replace").first().click();
-        }
-      }
-    } else {
-      await frame.locator("body").pressSequentially(to, { delay: 15 });
+    await settleFrame(frame, 500);
+    if (!(await searchBarHasMatches(frame))) {
+      await closeSearchBar(frame);
+      return false;
     }
 
-    await frame.locator("#search-bar-close, #search-adv-close").first().click({ timeout: 2_000 }).catch(() => {});
-    return replaceDocumentTextViaSdk(frame, from, to);
+    const openPanel = frame.locator("#search-bar-open-panel, #search-bar-open-panel-redact").first();
+    if (await openPanel.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await openPanel.click();
+      await settleFrame(frame, 300);
+    }
+    const replaceInput = frame
+      .locator(
+        "#search-adv-replace-input input, #search-adv-replace-text input, #search-adv-replace-input, #search-adv-replace-text, input[placeholder*='Replace' i]",
+      )
+      .first();
+    if (await replaceInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await replaceInput.fill(to);
+      const replaceAll = frame.locator("#search-adv-replace-all").first();
+      if (await replaceAll.isVisible({ timeout: 1_000 }).catch(() => false)) {
+        await replaceAll.click();
+      } else {
+        await frame.locator("#search-adv-replace").first().click();
+      }
+    } else {
+      await frame.locator("body").pressSequentially(to, { delay: 20 });
+    }
+
+    await settleFrame(frame, 500);
+    await closeSearchBar(frame);
+    return await documentContainsText(frame, to, editor);
   } catch {
+    await closeSearchBar(frame);
     return false;
   }
+}
+
+async function isDocumentDirty(page: Page): Promise<boolean> {
+  return (await page.locator("body").getAttribute("data-dirty")) !== null;
+}
+
+/** Wait until the demo viewer marks the document as having unsaved edits. */
+export async function waitForDocumentDirty(page: Page, timeoutMs = 10_000): Promise<void> {
+  await expect
+    .poll(async () => isDocumentDirty(page), { timeout: timeoutMs })
+    .toBe(true);
 }
 
 /** Replace existing document text (word/slide). Prefer this over appending unique markers for save tests. */
@@ -629,11 +735,17 @@ export async function replaceDocumentText(
   await expect
     .poll(
       async () => {
-        const viaSdk = await replaceDocumentTextViaSdk(frame, from, to);
-        if (viaSdk) {
+        const hasTo = await documentContainsText(frame, to, editor);
+        const hasFrom = await documentContainsText(frame, from, editor);
+        if (hasTo && !hasFrom && (await isDocumentDirty(page))) {
           return true;
         }
-        return replaceDocumentTextViaSearchUI(frame, from, to);
+        if (await replaceDocumentTextViaSdk(frame, from, to, editor)) {
+          await settleFrame(frame, 400);
+        } else {
+          await replaceDocumentTextViaSearchUI(frame, from, to, editor);
+        }
+        return false;
       },
       {
         timeout: CONTENT_FIND_TIMEOUT,
@@ -643,6 +755,16 @@ export async function replaceDocumentText(
     .toBe(true);
 
   await page.waitForTimeout(300);
+}
+
+/** Insert a unique marker into word/slide documents and wait for the dirty flag (save tests). */
+export async function insertSaveMarker(
+  page: Page,
+  editor: SampleFile["editor"],
+  marker: string,
+): Promise<void> {
+  await typeInDocument(page, editor, ` ${marker}`);
+  await waitForDocumentDirty(page);
 }
 
 /** Insert text into the word/slide document (canvas-backed; parent-page Ctrl+S and DOM innerText do not work). */
@@ -668,22 +790,7 @@ export async function typeInDocument(
   }
 
   const frame = getEditorFrame(page, editor);
-  const inserted = await frame.locator("body").evaluate((_, chunk: string) => {
-    const w = window as { Asc?: { editor?: AscEditor; spreadsheet?: AscEditor }; editor?: AscEditor };
-    const api = w.Asc?.editor ?? w.Asc?.spreadsheet ?? w.editor;
-    if (!api) {
-      return false;
-    }
-    const methods = ["asc_enterText", "asc_nativeInsertText", "asc_AddText", "asc_insertText", "asc_PasteText", "PasteText"];
-    for (const name of methods) {
-      const fn = (api as Record<string, unknown>)[name];
-      if (typeof fn === "function") {
-        (fn as (value: string) => void).call(api, chunk);
-        return true;
-      }
-    }
-    return false;
-  }, text);
+  const inserted = await frame.locator("body").evaluate(insertTextInBrowser, { chunk: text, kind: editor });
   if (inserted) {
     await page.waitForTimeout(200);
     return;
@@ -694,16 +801,21 @@ export async function typeInDocument(
   await overlay.pressSequentially(text, { delay: 20 });
 }
 
-const SAVE_BUTTON = "#slot-btn-dt-save, #id-toolbar-btn-save, button.btn-save, .icon-save";
+const SAVE_BUTTON =
+  "#slot-btn-dt-save, #id-toolbar-btn-save, #box-document-title .btn-save, button.btn-save, a.btn-save, .icon-save";
 
 /** Trigger Save inside the editor iframe (parent-page Ctrl+S never reaches the SDK). */
 export async function triggerEditorSave(page: Page, editor: SampleFile["editor"]): Promise<void> {
   const frame = getEditorFrame(page, editor);
+  await frame.locator("body").click({ position: { x: 12, y: 12 }, force: true }).catch(() => {});
+
   const saveBtn = frame.locator(SAVE_BUTTON).first();
   if ((await saveBtn.count()) > 0) {
-    await saveBtn.click({ force: true });
-    return;
+    await saveBtn.click({ force: true, timeout: 5_000 }).catch(() => {});
   }
+
+  await frame.locator("body").press("Control+s");
+  await page.waitForTimeout(200);
   await frame.locator("body").press("Control+s");
 }
 
@@ -827,14 +939,32 @@ export async function waitForSaveDone(
           const res = await options.request.get(
             `/api/office/demo/file/${encodeURIComponent(options.filePath)}`,
           );
-          if (!res.ok()) {
-            return false;
+          if (res.ok() && officeFileContains(Buffer.from(await res.body()), options.marker)) {
+            return true;
           }
-          const body = await res.body();
-          return officeFileContains(body, options.marker);
         }
-        const attr = await page.locator("body").getAttribute("data-save-done");
-        return attr !== null && attr !== "";
+        const saveDone = await page.locator("body").getAttribute("data-save-done");
+        if (saveDone && options.marker && options.filePath && options.request) {
+          const res = await options.request.get(
+            `/api/office/demo/file/${encodeURIComponent(options.filePath)}`,
+          );
+          if (res.ok()) {
+            return officeFileContains(Buffer.from(await res.body()), options.marker);
+          }
+        }
+        if (saveDone && !options.marker) {
+          return true;
+        }
+        const status = await page.locator("#status").textContent();
+        if (status?.includes("Saved") && options.marker && options.filePath && options.request) {
+          const res = await options.request.get(
+            `/api/office/demo/file/${encodeURIComponent(options.filePath)}`,
+          );
+          if (res.ok()) {
+            return officeFileContains(Buffer.from(await res.body()), options.marker);
+          }
+        }
+        return false;
       },
       { timeout: timeoutMs },
     )

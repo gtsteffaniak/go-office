@@ -52,10 +52,16 @@ func TestSessionReopenSameDocKey(t *testing.T) {
 	waitForOpenComplete(t, opener, 1)
 
 	sess.startOpen(opener, req, "http://localhost")
+	if opener.callCount() != 1 {
+		t.Fatalf("duplicate startOpen should not reopen, calls = %d", opener.callCount())
+	}
+
+	sess.onConnect(nil)
+	sess.startOpen(opener, req, "http://localhost")
 	waitForOpenComplete(t, opener, 2)
 
 	if opener.callCount() != 2 {
-		t.Fatalf("open calls = %d, want 2", opener.callCount())
+		t.Fatalf("open calls after reconnect = %d, want 2", opener.callCount())
 	}
 }
 
@@ -71,11 +77,12 @@ func TestSessionSwitchIndependentDocKeys(t *testing.T) {
 	docx.startOpen(opener, authRequest{Open: &openCmd{Command: "open", Format: "docx"}}, "http://localhost")
 	waitForOpenComplete(t, opener, 2)
 
+	csv.onConnect(nil)
 	csv.startOpen(opener, authRequest{Open: &openCmd{Command: "open", Format: "csv"}}, "http://localhost")
 	waitForOpenComplete(t, opener, 3)
 
 	if opener.callCount() != 3 {
-		t.Fatalf("open calls = %d, want 3 across csv/docx switch", opener.callCount())
+		t.Fatalf("open calls = %d, want 3 across csv/docx switch with csv reload", opener.callCount())
 	}
 }
 

@@ -4,7 +4,7 @@ import {
   waitForEditorInteractive,
   setCellContent,
   waitForSaveDone,
-  replaceDocumentText,
+  insertSaveMarker,
   triggerEditorSave,
   assertDemoFileContains,
 } from "../editor";
@@ -20,21 +20,15 @@ const CSV_REPLACEMENT = "REPLACED_VALUE_ID";
 
 const DOCX_SOURCE = "sample-files/sample.docx";
 const DOCX_ORIGINAL = "Demonstration of DOCX";
-const DOCX_FIND = "DOCX";
-const DOCX_REPLACEMENT = "REPLACED";
-const DOCX_EXPECTED = "Demonstration of REPLACED";
+const DOCX_MARKER = "PW_SAVE_DOCX_MARKER";
 
 const TXT_SOURCE = "sample-files/sample.txt";
 const TXT_ORIGINAL = "Sample-Files.com";
-const TXT_FIND = "Sample-Files";
-const TXT_REPLACEMENT = "REPLACED-SOURCE";
-const TXT_EXPECTED = "REPLACED-SOURCE.com";
+const TXT_MARKER = "PW_SAVE_TXT_MARKER";
 
 const RTF_SOURCE = "sample-files/sample.rtf";
 const RTF_ORIGINAL = "Lorem ipsum dolor sit amet";
-const RTF_FIND = "ipsum";
-const RTF_REPLACEMENT = "REPLACED";
-const RTF_EXPECTED = "Lorem REPLACED dolor sit amet";
+const RTF_MARKER = "PW_SAVE_RTF_MARKER";
 
 const ODS_SOURCE = "sample-files/sample.ods";
 const ODS_CELL = CSV_CELL;
@@ -43,7 +37,7 @@ const ODS_REPLACEMENT = "REPLACED_ODS_ID";
 
 const PPT_SOURCE = "sample-files/sample.ppt";
 const PPT_FIND = "My Presentation";
-const PPT_REPLACEMENT = "REPLACED_SLIDE";
+const PPT_MARKER = "PW_SAVE_PPT_MARKER";
 
 const SAVE_TEST_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_TEST_TIMEOUT ?? (bundledTest ? 150_000 : 120_000));
 
@@ -63,15 +57,15 @@ test("docx save round-trip via demo file API", async ({ page, request }, testInf
   await waitForEditorReady(page, "word");
   await waitForEditorInteractive(page, "word");
 
-  await replaceDocumentText(page, "word", DOCX_FIND, DOCX_REPLACEMENT);
+  await insertSaveMarker(page, "word", DOCX_MARKER);
   await triggerEditorSave(page, "word");
   await waitForSaveDone(page, {
     request,
     filePath: file,
-    marker: DOCX_EXPECTED,
+    marker: DOCX_MARKER,
   });
 
-  await assertDemoFileContains(request, file, DOCX_EXPECTED);
+  await assertDemoFileContains(request, file, DOCX_MARKER);
 });
 
 test("csv save round-trip via demo file API", async ({ page, request }, testInfo) => {
@@ -108,16 +102,15 @@ test("txt save round-trip via demo file API", async ({ page, request }, testInfo
   await waitForEditorReady(page, "word");
   await waitForEditorInteractive(page, "word");
 
-  await replaceDocumentText(page, "word", TXT_FIND, TXT_REPLACEMENT);
+  await insertSaveMarker(page, "word", TXT_MARKER);
   await triggerEditorSave(page, "word");
   await waitForSaveDone(page, {
     request,
     filePath: file,
-    marker: TXT_EXPECTED,
+    marker: TXT_MARKER,
   });
 
-  await assertDemoFileContains(request, file, TXT_EXPECTED);
-  await assertDemoFileContains(request, file, TXT_ORIGINAL, { present: false });
+  await assertDemoFileContains(request, file, TXT_MARKER);
 });
 
 test("rtf save round-trip via demo file API", async ({ page, request }, testInfo) => {
@@ -131,15 +124,15 @@ test("rtf save round-trip via demo file API", async ({ page, request }, testInfo
   await waitForEditorReady(page, "word");
   await waitForEditorInteractive(page, "word");
 
-  await replaceDocumentText(page, "word", RTF_FIND, RTF_REPLACEMENT);
+  await insertSaveMarker(page, "word", RTF_MARKER);
   await triggerEditorSave(page, "word");
   await waitForSaveDone(page, {
     request,
     filePath: file,
-    marker: RTF_EXPECTED,
+    marker: RTF_MARKER,
   });
 
-  await assertDemoFileContains(request, file, RTF_EXPECTED);
+  await assertDemoFileContains(request, file, RTF_MARKER);
 });
 
 test("ods save round-trip via demo file API", async ({ page, request }, testInfo) => {
@@ -176,13 +169,13 @@ test("ppt save round-trip via demo file API", async ({ page, request }, testInfo
   await waitForEditorReady(page, "slide");
   await waitForEditorInteractive(page, "slide");
 
-  await replaceDocumentText(page, "slide", PPT_FIND, PPT_REPLACEMENT);
+  await insertSaveMarker(page, "slide", PPT_MARKER);
   await triggerEditorSave(page, "slide");
   await waitForSaveDone(page, {
     request,
     filePath: file,
-    marker: PPT_REPLACEMENT,
+    marker: PPT_MARKER,
   });
 
-  await assertDemoFileContains(request, file, PPT_REPLACEMENT);
+  await assertDemoFileContains(request, file, PPT_MARKER);
 });

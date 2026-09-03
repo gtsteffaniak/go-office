@@ -45,7 +45,7 @@ DOCKER_DEV_RUN = docker run --rm $(DOCKER_DEV_MOUNTS) -w /src
 
 .PHONY: help setup build serve doctor fonts test test-integration clean \
         check-docker docker-dev-image check-go mod-download fetch-assets compile check-assets check-samples test-x2t test-x2t-concurrent \
-        playwright-base playwright-npm test-playwright test-playwright-ui check-sample-matrix extract-sample-manifest \
+        playwright-npm test-playwright test-playwright-ui check-sample-matrix extract-sample-manifest \
         build-docker build-docker-image build-docker-builder run-docker stop-docker ensure-assets \
         build-native serve-native fetch-assets-native compile-native fonts-native \
         test-integration-native test-convert-linux-native test-x2t-native test-x2t-concurrent-native doctor-native
@@ -297,7 +297,6 @@ test:
 lint:
 	$(GO) tool golangci-lint run ./...
 
-PLAYWRIGHT_BASE_IMAGE ?= go-office-playwright-base
 PLAYWRIGHT_TEST_IMAGE ?= go-office-playwright-tests
 PLAYWRIGHT_LOCAL_CONTAINER ?= go-office-playwright-local
 
@@ -353,10 +352,6 @@ test-convert-linux-native: build-native
 test-save-integration: build
 	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test -tags=integration ./integration/... -race -count=1
 
-playwright-base: check-docker
-	@echo "==> Playwright base image"
-	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_BASE_IMAGE)" -f _docker/Dockerfile.playwright-base .
-
 playwright-npm:
 	@echo "==> Playwright npm dependencies"
 	cd frontend && npm install
@@ -372,7 +367,7 @@ test-playwright-ui: build check-sample-matrix check-docker
 	docker rm -f "$(PLAYWRIGHT_LOCAL_CONTAINER)" 2>/dev/null || true
 	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_LOCAL_CONTAINER)" -f _docker/Dockerfile.playwright-local .
 	docker run -d -p 8080:8080 --name "$(PLAYWRIGHT_LOCAL_CONTAINER)" "$(PLAYWRIGHT_LOCAL_CONTAINER)"
-	cd frontend && npm install && npx playwright install --with-deps firefox
+	cd frontend && npm install && npx playwright install chromium
 	@echo "Open Playwright UI — server at http://127.0.0.1:8080/"
 	cd frontend && npx playwright test --ui
 

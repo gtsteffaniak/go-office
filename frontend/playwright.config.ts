@@ -29,16 +29,16 @@ export default defineConfig({
   use: sharedUse,
   projects: [
     {
-      name: "firefox",
+      name: "chromium",
       testIgnore: /save\.spec\.ts$/,
-      use: { ...devices["Desktop Firefox"] },
+      use: { ...devices["Desktop Chrome"] },
     },
     {
-      name: "firefox-save",
+      name: "chromium-save",
       testMatch: /save\.spec\.ts$/,
-      dependencies: ["firefox"],
+      dependencies: ["chromium"],
       workers: 1,
-      use: { ...devices["Desktop Firefox"] },
+      use: { ...devices["Desktop Chrome"] },
     },
   ],
 });

@@ -21,7 +21,6 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.27"
           cache: true
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
@@ -40,7 +39,6 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.27"
           cache: true
 
       - name: Cache Euro-Office assets

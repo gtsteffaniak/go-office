@@ -18,19 +18,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
-        with:
-          cache: true
-
-      - name: Cache Euro-Office assets
-        uses: actions/cache@v4
-        with:
-          path: assets
-          key: euro-office-assets-v6-amd64-${{ hashFiles('scripts/euro-office.version') }}
-
-      - name: Prepare assets
-        run: mkdir -p assets && make ensure-assets
-
       - name: Read Euro-Office version
         id: euro
         run: |

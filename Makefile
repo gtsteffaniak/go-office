@@ -6,7 +6,8 @@
 #   make test     # unit tests (no assets required)
 #
 # On macOS/Windows, targets that need Linux/x2t run inside a Linux dev container
-# (requires Docker). On Linux, targets run natively.
+# (requires Docker). Euro-Office assets persist in Docker volume go-office-assets
+# and are only downloaded when missing. On Linux, assets live in ./assets/.
 #
 # Targets stack: setup → build → serve
 
@@ -38,14 +39,16 @@ DOCKER_BUILD = timeout $(DOCKER_BUILD_TIMEOUT) docker build
 endif
 
 DOCKER_DEV_IMAGE ?= go-office:dev
-DOCKER_DEV_RUN = docker run --rm -v "$(CURDIR):/src" -w /src
+DOCKER_ASSETS_VOLUME ?= go-office-assets
+DOCKER_DEV_MOUNTS = -v "$(CURDIR):/src" -v "$(DOCKER_ASSETS_VOLUME):/src/assets"
+DOCKER_DEV_RUN = docker run --rm $(DOCKER_DEV_MOUNTS) -w /src
 
 .PHONY: help setup build serve doctor fonts test test-integration clean \
         check-docker docker-dev-image check-go mod-download fetch-assets compile check-assets check-samples test-x2t test-x2t-concurrent \
         playwright-base playwright-npm test-playwright test-playwright-ui check-sample-matrix extract-sample-manifest \
         build-docker build-docker-image build-docker-builder run-docker stop-docker ensure-assets \
         build-native serve-native fetch-assets-native compile-native fonts-native \
-        test-integration-native test-x2t-native test-x2t-concurrent-native doctor-native
+        test-integration-native test-convert-linux-native test-x2t-native test-x2t-concurrent-native doctor-native
 
 help:
 	@echo "go-office"
@@ -59,7 +62,8 @@ help:
 	@echo "  make doctor    Diagnose x2t permissions, libs, and sample conversion"
 	@echo "  make fonts     Regenerate AllFonts.js and font_selection.bin (host paths; remapped at runtime)"
 	@echo ""
-	@echo "  make test-integration   Integration tests (runs build first)"
+	@echo "  make test-integration   Integration tests in ./integration/ (runs build first)"
+	@echo "  make test-convert-linux x2t convert tests in ./internal/convert/ (runs build first)"
 	@echo "  make check-sample-matrix  Verify all Playwright sample files exist (git-tracked under sample-files/)"
 	@echo "  make extract-sample-manifest  Regenerate Playwright content expectations from sample-files/"
 	@echo "  make test-playwright    E2E Playwright tests in Docker (runs build first)"
@@ -73,9 +77,13 @@ help:
 	@echo ""
 	@echo "Variables: ADDR=$(ADDR)  OFFICE_ASSETS=$(OFFICE_ASSETS)  SAMPLES_DIR=$(SAMPLES_DIR)"
 	@echo "           DOCKER_IMAGE=$(DOCKER_IMAGE)  DOCKER_PORT=$(DOCKER_PORT)"
+ifeq ($(USE_DOCKER_DEV),1)
+	@echo "           DOCKER_ASSETS_VOLUME=$(DOCKER_ASSETS_VOLUME)  (persistent Euro-Office assets)"
+endif
 	@echo ""
 ifeq ($(USE_DOCKER_DEV),1)
 	@echo "Platform: $(UNAME_S) — Linux/x2t targets run in Docker ($(DOCKER_DEV_IMAGE))"
+	@echo "Euro-Office assets persist in Docker volume $(DOCKER_ASSETS_VOLUME) (fetched once)."
 	@echo "Requires Docker Desktop (or another Docker engine) to be installed and running."
 	@echo ""
 endif
@@ -114,10 +122,10 @@ docker-serve: docker-dev-image
 	@echo ""
 	@echo "Document server (Docker dev) on http://localhost:$(SERVE_PORT)/ (Ctrl+C to stop)"
 	docker run --rm -it -p "$(SERVE_PORT):$(SERVE_PORT)" \
-		-v "$(CURDIR):/src" -w /src \
+		$(DOCKER_DEV_MOUNTS) -w /src \
 		$(DOCKER_DEV_IMAGE) make serve-native ADDR="$(ADDR)"
 
-serve-native: build-native check-samples
+serve-native: ensure-assets compile-native check-samples
 	@echo ""
 	@echo "Document server on http://localhost:$(SERVE_PORT)/ (debug logging enabled, Ctrl+C to stop)"
 	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO_OFFICE_BIN) -assets "$(OFFICE_ASSETS)" -addr "$(ADDR)" -data "." -samples "$(SAMPLES_DIR)" -debug
@@ -171,12 +179,16 @@ else
 endif
 
 fetch-assets-native:
-	@echo "==> Euro-Office assets → $(OFFICE_ASSETS)/"
 	@mkdir -p "$(BIN_DIR)" "$(OFFICE_ASSETS)"
-	$(GO) build -o "$(FETCH_ASSETS_BIN)" ./cmd/fetch-assets
-	$(FETCH_ASSETS_BIN) -out "$(OFFICE_ASSETS)"
-	@test -f "$(ALL_FONTS)" || (echo "error: fetch-assets did not create $(ALL_FONTS)" && exit 1)
-	@test -s "$(FONT_SELECTION)" || (echo "error: fetch-assets did not create $(FONT_SELECTION)" && exit 1)
+	@if [ -f "$(OFFICE_ASSETS)/.extracted" ] && [ -f "$(ALL_FONTS)" ] && [ -s "$(FONT_SELECTION)" ] && [ -f "$(X2T_BIN)" ]; then \
+		echo "==> Euro-Office assets already present in $(OFFICE_ASSETS)/"; \
+	else \
+		echo "==> Euro-Office assets → $(OFFICE_ASSETS)/"; \
+		$(GO) build -o "$(FETCH_ASSETS_BIN)" ./cmd/fetch-assets; \
+		$(FETCH_ASSETS_BIN) -out "$(OFFICE_ASSETS)"; \
+		test -f "$(ALL_FONTS)" || (echo "error: fetch-assets did not create $(ALL_FONTS)" && exit 1); \
+		test -s "$(FONT_SELECTION)" || (echo "error: fetch-assets did not create $(FONT_SELECTION)" && exit 1); \
+	fi
 
 ensure-assets: fetch-assets check-assets
 
@@ -294,13 +306,14 @@ DOCKER_BUILDER_IMAGE ?= go-office:builder
 DOCKER_CONTAINER ?= go-office-serve
 DOCKER_PORT ?= 8080
 DOCKER_PUBLIC ?= http://localhost:$(DOCKER_PORT)
+SKIP_ASSET_FETCH ?= false
 
 build-docker: build-docker-image
 
 build-docker-image: check-docker check-samples
-	@mkdir -p assets
-	@echo "==> Docker image $(DOCKER_IMAGE)"
+	@echo "==> Docker image $(DOCKER_IMAGE)$(if $(filter true,$(SKIP_ASSET_FETCH)), (stub assets),)"
 	$(DOCKER_BUILD) -t "$(DOCKER_IMAGE)" -f _docker/Dockerfile \
+		--build-arg SKIP_ASSET_FETCH=$(SKIP_ASSET_FETCH) \
 		$(if $(OFFICE_DEBUG_LOGGING),--build-arg OFFICE_DEBUG_LOGGING=$(OFFICE_DEBUG_LOGGING),) .
 
 run-docker: stop-docker check-docker
@@ -323,8 +336,19 @@ else
 	@$(MAKE) test-integration-native
 endif
 
+test-convert-linux:
+ifeq ($(USE_DOCKER_DEV),1)
+	@$(MAKE) docker-dev-image
+	$(DOCKER_DEV_RUN) $(DOCKER_DEV_IMAGE) make test-convert-linux-native
+else
+	@$(MAKE) test-convert-linux-native
+endif
+
 test-integration-native: build-native
-	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test -tags=integration ./...
+	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test -tags=integration ./integration/... -count=1
+
+test-convert-linux-native: build-native
+	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test ./internal/convert/... -count=1
 
 test-save-integration: build
 	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test -tags=integration ./integration/... -race -count=1

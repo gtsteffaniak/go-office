@@ -180,7 +180,7 @@ func TestSaveChangesRTFRoundTrip(t *testing.T) {
 	if len(body) > 50_000 {
 		t.Fatalf("rtf save output too large (%d bytes)", len(body))
 	}
-	if !strings.Contains(string(body), "Lorem ipsum") {
+	if !strings.Contains(string(body), "SYSTEM BRIEF") {
 		t.Fatalf("saved.rtf missing plain document text: %q", truncate(body, 200))
 	}
 }
@@ -407,7 +407,7 @@ func TestSaveReopenRTFAfterSave(t *testing.T) {
 		t.Fatalf("SaveChanges: %v", err)
 	}
 	savedBody, err := os.ReadFile(savedPath)
-	if err != nil || !strings.Contains(string(savedBody), "Lorem ipsum") {
+	if err != nil || !strings.Contains(string(savedBody), "SYSTEM BRIEF") {
 		t.Fatalf("saved.rtf missing plain text before reopen: %v", err)
 	}
 	reopenDir := t.TempDir()

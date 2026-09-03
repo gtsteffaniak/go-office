@@ -38,7 +38,7 @@ func TestFileSHA256(t *testing.T) {
 	if err != nil || h1 == "" {
 		t.Fatalf("hash: %q %v", h1, err)
 	}
-	if err := os.WriteFile(p, []byte("a,b\n1,3\n"), 0o644); err != nil {
+	if err = os.WriteFile(p, []byte("a,b\n1,3\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	h2, err := fileSHA256(p)

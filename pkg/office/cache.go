@@ -142,14 +142,6 @@ func cacheDirSize(dir string) int64 {
 	return total
 }
 
-func (s *Server) removeCacheDir(docKey string) {
-	if s.cacheJanitor != nil {
-		s.cacheJanitor.remove(docKey)
-		return
-	}
-	_ = os.RemoveAll(filepath.Join(s.cacheDir(), docKey))
-}
-
 // NewCacheJanitorForTest creates a janitor for unit tests.
 func NewCacheJanitorForTest(dir string, ttl time.Duration, maxDirs int, onRemove func(string)) *cacheJanitor {
 	return newCacheJanitor(dir, ttl, maxDirs, onRemove)

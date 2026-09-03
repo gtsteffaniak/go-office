@@ -81,7 +81,7 @@ func (s *Server) PersistDocument(ctx context.Context, docKey string) error {
 	if s.opts.Logger != nil {
 		s.opts.Logger.Debug("persist convert", "key", docKey, "path", doc.Path, "ext", ext, "pendingChanges", pending)
 	}
-	if err := s.convertDocument(ctx, conv, cacheDir, outPath, ext); err != nil {
+	if err = s.convertDocument(ctx, conv, cacheDir, outPath, ext); err != nil {
 		return err
 	}
 
@@ -179,13 +179,13 @@ func (s *Server) NotifyCallback(ctx context.Context, docKey, callbackURL, downlo
 	}
 	postBody := body
 	if len(s.opts.JWTSecret) > 0 {
-		token, err := callback.SignBody(s.opts.JWTSecret, body)
-		if err != nil {
-			return err
+		token, signErr := callback.SignBody(s.opts.JWTSecret, body)
+		if signErr != nil {
+			return signErr
 		}
-		wrapped, err := json.Marshal(map[string]string{"token": token})
-		if err != nil {
-			return err
+		wrapped, wrapErr := json.Marshal(map[string]string{"token": token})
+		if wrapErr != nil {
+			return wrapErr
 		}
 		postBody = wrapped
 	}

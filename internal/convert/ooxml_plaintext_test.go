@@ -44,11 +44,11 @@ func TestWritePlainTextFromDocx(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(docx, raw, 0o644); err != nil {
+	if err = os.WriteFile(docx, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	out := filepath.Join(dir, "saved.txt")
-	if err := WritePlainTextFromDocx(docx, out); err != nil {
+	if err = WritePlainTextFromDocx(docx, out); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile(out)

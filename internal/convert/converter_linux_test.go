@@ -15,10 +15,7 @@ import (
 
 func TestConvertFileDocxToJpg(t *testing.T) {
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
-	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	if !testutil.SampleExists(repo, "sample-files/sample.docx") {
 		t.Skip("sample docx missing")
 	}
@@ -33,7 +30,7 @@ func TestConvertFileDocxToJpg(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	if err := c.ConvertFile(ctx, convert.ConvertRequest{
+	if err = c.ConvertFile(ctx, convert.ConvertRequest{
 		SourcePath: src,
 		DestPath:   out,
 		FileType:   "docx",
@@ -53,10 +50,7 @@ func TestConvertFileDocxToJpg(t *testing.T) {
 
 func TestConvertFileXlsxToJpg(t *testing.T) {
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
-	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	if !testutil.SampleExists(repo, "sample-files/sample.xlsx") {
 		t.Skip("sample xlsx missing")
 	}
@@ -69,7 +63,7 @@ func TestConvertFileXlsxToJpg(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	if err := c.ConvertFile(ctx, convert.ConvertRequest{
+	if err = c.ConvertFile(ctx, convert.ConvertRequest{
 		SourcePath: src,
 		DestPath:   out,
 		FileType:   "xlsx",
@@ -82,10 +76,7 @@ func TestConvertFileXlsxToJpg(t *testing.T) {
 
 func TestConvertFileDotToJpg(t *testing.T) {
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
-	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	if !testutil.SampleExists(repo, "sample-files/sample.dot") {
 		t.Skip("sample dot missing")
 	}
@@ -98,7 +89,7 @@ func TestConvertFileDotToJpg(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	if err := c.ConvertFile(ctx, convert.ConvertRequest{
+	if err = c.ConvertFile(ctx, convert.ConvertRequest{
 		SourcePath: src,
 		DestPath:   out,
 		FileType:   "dot",

@@ -19,6 +19,8 @@ import (
 type Options struct {
 	AssetDir string
 	Limit    int
+	// Runner overrides the x2t subprocess (tests only).
+	Runner X2TRunner
 }
 
 // Converter runs Euro-Office x2t to produce Editor.bin from office files.
@@ -32,6 +34,7 @@ type Converter struct {
 	fontSelection []byte // converter/bin/font_selection.bin frozen at startup
 	limit         chan struct{}
 	inflight      sync.WaitGroup
+	runner        X2TRunner
 }
 
 // New creates a converter. Returns an error when x2t is missing.
@@ -65,6 +68,10 @@ func New(opts Options) (*Converter, error) {
 	}
 	seedAllFonts := rewriteAllFontsPaths(rawAllFonts, opts.AssetDir)
 	fontSel, _ := os.ReadFile(fontSelPath)
+	runner := opts.Runner
+	if runner == nil {
+		runner = defaultX2TRunner(binDir)
+	}
 	return &Converter{
 		assetDir:      opts.AssetDir,
 		binDir:        binDir,
@@ -74,6 +81,7 @@ func New(opts Options) (*Converter, error) {
 		seedAllFonts:  seedAllFonts,
 		fontSelection: fontSel,
 		limit:         make(chan struct{}, limit),
+		runner:        runner,
 	}, nil
 }
 
@@ -98,24 +106,26 @@ func (c *Converter) toEditorBin(ctx context.Context, sourcePath, outDir string) 
 	}
 	ext := strings.TrimPrefix(strings.ToLower(sourceExt), ".")
 	if ext == "txt" {
-		raw, err := os.ReadFile(sourcePath)
+		var raw []byte
+		raw, err = os.ReadFile(sourcePath)
 		if err != nil {
 			return err
 		}
 		norm := normalizePlainTextBytes(raw)
 		srcHash = sha256Bytes(norm)
 		if !bytes.Equal(raw, norm) {
-			tmp, err := os.CreateTemp("", "go-office-txt-*.txt")
+			var tmp *os.File
+			tmp, err = os.CreateTemp("", "go-office-txt-*.txt")
 			if err != nil {
 				return err
 			}
 			convertPath = tmp.Name()
-			if _, err := tmp.Write(norm); err != nil {
+			if _, err = tmp.Write(norm); err != nil {
 				tmp.Close()
 				_ = os.Remove(convertPath)
 				return err
 			}
-			if err := tmp.Close(); err != nil {
+			if err = tmp.Close(); err != nil {
 				_ = os.Remove(convertPath)
 				return err
 			}
@@ -123,24 +133,26 @@ func (c *Converter) toEditorBin(ctx context.Context, sourcePath, outDir string) 
 		}
 	}
 	if csvNeedsXlsxBridge(ext) {
-		raw, err := os.ReadFile(convertPath)
+		var raw []byte
+		raw, err = os.ReadFile(convertPath)
 		if err != nil {
 			return err
 		}
 		norm := normalizeCSVBytes(raw)
 		srcHash = sha256Bytes(norm)
 		if !bytes.Equal(raw, norm) {
-			tmp, err := os.CreateTemp("", "go-office-csv-*.csv")
+			var tmp *os.File
+			tmp, err = os.CreateTemp("", "go-office-csv-*.csv")
 			if err != nil {
 				return err
 			}
 			convertPath = tmp.Name()
-			if _, err := tmp.Write(norm); err != nil {
+			if _, err = tmp.Write(norm); err != nil {
 				tmp.Close()
 				_ = os.Remove(convertPath)
 				return err
 			}
-			if err := tmp.Close(); err != nil {
+			if err = tmp.Close(); err != nil {
 				_ = os.Remove(convertPath)
 				return err
 			}
@@ -149,14 +161,15 @@ func (c *Converter) toEditorBin(ctx context.Context, sourcePath, outDir string) 
 	}
 	srcHash = editorImportSourceHash(srcHash, ext)
 	if openNeedsDocxPrelude(ext) {
-		docxFile, err := os.CreateTemp("", "go-office-open-*.docx")
+		var docxFile *os.File
+		docxFile, err = os.CreateTemp("", "go-office-open-*.docx")
 		if err != nil {
 			return err
 		}
 		docxPath := docxFile.Name()
 		_ = docxFile.Close()
 		defer os.Remove(docxPath)
-		if err := c.convertOffice(ctx, convertPath, docxPath, ext, "docx", ""); err != nil {
+		if err = c.convertOffice(ctx, convertPath, docxPath, ext, "docx", ""); err != nil {
 			return fmt.Errorf("convert: open %s via docx: %w", ext, err)
 		}
 		slog.Debug("word open via docx bridge", "ext", ext, "docx", docxPath)
@@ -192,15 +205,15 @@ func (c *Converter) toEditorBin(ctx context.Context, sourcePath, outDir string) 
 
 	allFontsPath := filepath.Join(runDir, "AllFonts.js")
 	workDir := filepath.Join(runDir, "work")
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
+	if err = os.MkdirAll(workDir, 0o755); err != nil {
 		return err
 	}
 	xml := buildTaskXML(convertPath, partFile, c.fontDir, c.themeDir, sourceExt, allFontsPath, workDir)
-	if _, err := taskFile.WriteString(xml); err != nil {
+	if _, err = taskFile.WriteString(xml); err != nil {
 		taskFile.Close()
 		return err
 	}
-	if err := taskFile.Close(); err != nil {
+	if err = taskFile.Close(); err != nil {
 		return err
 	}
 
@@ -277,9 +290,14 @@ func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, ta
 		return err
 	}
 
+	if legacyWordSaveDirectReverse(ext) {
+		// RTF/ODT: x2t apply_changes can write the target format directly; skip docx bridge step 2.
+		return c.fromEditorInner(ctx, editorBin, destPath, targetExt, true)
+	}
+
 	bridge := saveBridgeExt(ext)
 	if bridge != bridgeNone {
-		if bridge == bridgeXLSX {
+		if bridge == bridgeXLSX && csvNeedsXlsxBridge(ext) {
 			n, err := canonicalizeCSVChangeFiles(changesDir)
 			if err != nil {
 				return err
@@ -295,7 +313,34 @@ func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, ta
 		if st, err := os.Stat(intermediate); err == nil {
 			slog.Debug("bridge after apply_changes", "path", intermediate, "bytes", st.Size(), "bridge", bridge)
 		}
+		if bridge == bridgeDOCX && ext == "rtf" {
+			if err := WriteRTFFromDocxPlainText(intermediate, destPath); err != nil {
+				return err
+			}
+			slog.Debug("rtf persist from docx plain text", "path", destPath)
+			return nil
+		}
 		if err := c.convertOfficeInner(ctx, intermediate, destPath, string(bridge), ext, cacheDir); err != nil {
+			// DOC/DOT: x2t cannot write binary Word (exit 80). Persist changes-applied.docx bytes
+			// at the .doc/.dot path — ONLYOFFICE assemblyFormatAsOrigin rollback behavior.
+			if bridge == bridgeDOCX && legacyWordBinaryExt(ext) {
+				slog.Warn("x2t cannot write binary Word; persisting OOXML fallback",
+					"ext", ext, "intermediate", intermediate, "dest", destPath, "err", err)
+				if copyErr := fsutil.CopyFile(intermediate, destPath); copyErr != nil {
+					return fmt.Errorf("convert: %s→%s failed and OOXML fallback copy failed: %w", bridge, ext, copyErr)
+				}
+				return nil
+			}
+			// PPT: x2t cannot write binary PowerPoint (exit 88). Persist changes-applied.pptx bytes
+			// at the .ppt path — same assemblyFormatAsOrigin rollback behavior.
+			if bridge == bridgePPTX && legacySlideBinaryExt(ext) {
+				slog.Warn("x2t cannot write binary PowerPoint; persisting OOXML fallback",
+					"ext", ext, "intermediate", intermediate, "dest", destPath, "err", err)
+				if copyErr := fsutil.CopyFile(intermediate, destPath); copyErr != nil {
+					return fmt.Errorf("convert: %s→%s failed and OOXML fallback copy failed: %w", bridge, ext, copyErr)
+				}
+				return nil
+			}
 			return err
 		}
 		if bridge == bridgeXLSX && (ext == "csv" || ext == "tsv" || ext == "scsv") {
@@ -349,7 +394,6 @@ func (c *Converter) fromEditorInner(ctx context.Context, editorBin, destPath, ta
 	if fromChanges {
 		fontDir = runDir
 		allFontsPath = filepath.Join(runDir, "AllFonts.js")
-		var err error
 		changesTempDir, err = os.MkdirTemp(cacheDir, "x2t-save-*")
 		if err != nil {
 			return err
@@ -367,11 +411,11 @@ func (c *Converter) fromEditorInner(ctx context.Context, editorBin, destPath, ta
 	taskPath := taskFile.Name()
 	defer os.Remove(taskPath)
 
-	if _, err := taskFile.WriteString(xml); err != nil {
+	if _, err = taskFile.WriteString(xml); err != nil {
 		taskFile.Close()
 		return err
 	}
-	if err := taskFile.Close(); err != nil {
+	if err = taskFile.Close(); err != nil {
 		return err
 	}
 
@@ -533,12 +577,6 @@ func (c *Converter) convertOfficeInner(ctx context.Context, srcPath, destPath, f
 		return err
 	}
 
-	runDir, err := c.prepareX2TRunDir(cacheDir)
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(runDir)
-
 	taskFile, err := os.CreateTemp("", "go-office-x2t-fmt-*.xml")
 	if err != nil {
 		return err
@@ -546,31 +584,35 @@ func (c *Converter) convertOfficeInner(ctx context.Context, srcPath, destPath, f
 	taskPath := taskFile.Name()
 	defer os.Remove(taskPath)
 
-	allFontsPath := filepath.Join(runDir, "AllFonts.js")
-	workDir := filepath.Join(runDir, "work")
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
+	workDir, err := os.MkdirTemp("", "go-office-x2t-fmt-*")
+	if err != nil {
 		return err
+	}
+	defer os.RemoveAll(workDir)
+
+	allFontsPath := filepath.Join(c.binDir, "AllFonts.js")
+	if cacheDir != "" {
+		cacheFonts := filepath.Join(cacheDir, "AllFonts.js")
+		if st, statErr := os.Stat(cacheFonts); statErr == nil && st.Size() > 0 {
+			allFontsPath = cacheFonts
+		}
 	}
 	c.logFontSources("office", cacheDir, allFontsPath)
 	xml := buildOfficeToOfficeXML(srcPath, destPath, c.fontDir, c.themeDir, allFontsPath, fromExt, toExt, workDir)
-	if _, err := taskFile.WriteString(xml); err != nil {
+	if _, err = taskFile.WriteString(xml); err != nil {
 		taskFile.Close()
 		return err
 	}
-	if err := taskFile.Close(); err != nil {
+	if err = taskFile.Close(); err != nil {
 		return err
 	}
-	out, err := c.runX2t(ctx, taskPath, runDir)
+	// Office-to-office runs from converter/bin; only apply_changes needs an isolated cwd.
+	out, err := c.runX2t(ctx, taskPath, "")
 	if err != nil {
 		return fmt.Errorf("convert: x2t %s→%s: %w: %s", fromExt, toExt, err, strings.TrimSpace(string(out)))
 	}
 	if st, err := os.Stat(destPath); err != nil || st.Size() == 0 {
 		return fmt.Errorf("convert: x2t %s→%s produced no output", fromExt, toExt)
-	}
-	if cacheDir != "" {
-		if err := snapshotFontArtifacts(runDir, cacheDir); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -579,20 +621,26 @@ func (c *Converter) convertOfficeInner(ctx context.Context, srcPath, destPath, f
 // When isolatedDir is set, x2t runs with that cwd and a private DoctRenderer.config so
 // concurrent saves do not share converter/bin/AllFonts.js.
 func (c *Converter) runX2t(ctx context.Context, taskPath string, isolatedDir string) ([]byte, error) {
-	dir := c.binDir
-	if isolatedDir != "" {
-		dir = isolatedDir
+	return c.runner(ctx, taskPath, isolatedDir)
+}
+
+func defaultX2TRunner(binDir string) X2TRunner {
+	return func(ctx context.Context, taskPath string, isolatedDir string) ([]byte, error) {
+		dir := binDir
+		if isolatedDir != "" {
+			dir = isolatedDir
+		}
+		// Always invoke ./x2t relative to dir. Isolated runs use a copied binary so DoctRenderer
+		// picks up the per-run config beside the binary, not converter/bin/AllFonts.js.
+		script := fmt.Sprintf(
+			"chmod +x ./x2t 2>/dev/null; LD_LIBRARY_PATH=%s exec ./x2t %s",
+			shellQuote(binDir),
+			shellQuote(taskPath),
+		)
+		cmd := exec.CommandContext(ctx, "/bin/sh", "-c", script)
+		cmd.Dir = dir
+		return cmd.CombinedOutput()
 	}
-	// Always invoke ./x2t relative to dir. Isolated runs use a copied binary so DoctRenderer
-	// picks up the per-run config beside the binary, not converter/bin/AllFonts.js.
-	script := fmt.Sprintf(
-		"chmod +x ./x2t 2>/dev/null; LD_LIBRARY_PATH=%s exec ./x2t %s",
-		shellQuote(c.binDir),
-		shellQuote(taskPath),
-	)
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", script)
-	cmd.Dir = dir
-	return cmd.CombinedOutput()
 }
 
 func shellQuote(s string) string {
@@ -608,7 +656,7 @@ func ensureExecutable(path string) error {
 	if mode&0o111 != 0 {
 		return nil
 	}
-	if err := os.Chmod(path, mode.Perm()|0o755); err != nil {
+	if err = os.Chmod(path, mode.Perm()|0o755); err != nil {
 		slog.Error("x2t chmod failed", "path", path, "err", err)
 		return err
 	}
@@ -726,8 +774,17 @@ func buildOfficeToOfficeXML(from, to, fontDir, themeDir, allFonts, fromExt, toEx
 	if tempDir != "" {
 		fmt.Fprintf(&extra, "<m_sTempDir>%s</m_sTempDir>\n", escapeXML(tempDir))
 	}
-	extra.WriteString("<m_nCsvTxtEncoding>46</m_nCsvTxtEncoding>\n")
-	extra.WriteString("<m_nCsvDelimiter>4</m_nCsvDelimiter>\n")
+	if isSpreadsheetExt(fromExt) || isSpreadsheetExt(toExt) {
+		extra.WriteString("<m_nCsvTxtEncoding>46</m_nCsvTxtEncoding>\n")
+		switch toExt {
+		case "tsv":
+			extra.WriteString("<m_nCsvDelimiter>1</m_nCsvDelimiter>\n")
+		case "scsv":
+			extra.WriteString("<m_nCsvDelimiter>2</m_nCsvDelimiter>\n")
+		case "csv", "xlsx", "xls", "ods":
+			extra.WriteString("<m_nCsvDelimiter>4</m_nCsvDelimiter>\n")
+		}
+	}
 	return fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
 <TaskQueueDataConvert xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
 <m_sFileFrom>%s</m_sFileFrom>

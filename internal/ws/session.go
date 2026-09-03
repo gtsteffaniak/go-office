@@ -24,8 +24,9 @@ type session struct {
 
 	namespaceAck bool
 	infoSent     bool
-	authSent     bool
-	openStarted  bool
+	authSent       bool
+	openStarted    bool
+	documentOpened bool
 
 	sessionID string
 	indexUser int
@@ -44,7 +45,10 @@ func sessionKey(sid, docKey string) string {
 func getSession(sid, docKey string, build BuildInfo, basePath string) *session {
 	key := sessionKey(sid, docKey)
 	if v, ok := sessions.Load(key); ok {
-		s := v.(*session)
+		s, ok := v.(*session)
+		if !ok {
+			return &session{docKey: docKey, build: build, basePath: basePath, indexUser: 1}
+		}
 		if s.build.Release == "" && build.Release != "" {
 			s.build = build
 		}
@@ -55,7 +59,10 @@ func getSession(sid, docKey string, build BuildInfo, basePath string) *session {
 	}
 	s := &session{docKey: docKey, build: build, basePath: basePath, indexUser: 1}
 	actual, _ := sessions.LoadOrStore(key, s)
-	return actual.(*session)
+	if actualSession, ok := actual.(*session); ok {
+		return actualSession
+	}
+	return s
 }
 
 // ResetSessionsForTest clears in-memory coauthoring sessions (tests only).
@@ -65,7 +72,10 @@ func ResetSessionsForTest() {
 
 // ClearAllSessions drops all in-memory coauthoring sessions.
 func ClearAllSessions() {
-	sessions = sync.Map{}
+	sessions.Range(func(key, _ any) bool {
+		sessions.Delete(key)
+		return true
+	})
 }
 
 func (s *session) enqueue(packets ...string) {
@@ -137,6 +147,8 @@ func (s *session) onConnect(authData []byte) {
 	// Engine.IO packet 40 is a new transport session. The demo client always
 	// reuses sid=go-office, so a CSV reload would otherwise skip auth and hang.
 	s.authSent = false
+	s.documentOpened = false
+	s.openStarted = false
 	s.waitGen++
 	if s.waitCh != nil {
 		close(s.waitCh)
@@ -191,7 +203,7 @@ func (s *session) startOpen(opener DocumentOpener, req authRequest, origin strin
 	}
 
 	s.mu.Lock()
-	if s.openStarted {
+	if s.documentOpened || s.openStarted {
 		s.mu.Unlock()
 		return
 	}
@@ -218,6 +230,9 @@ func (s *session) startOpen(opener DocumentOpener, req authRequest, origin strin
 		}
 		if len(packets) > 0 {
 			s.enqueue(packets...)
+			s.mu.Lock()
+			s.documentOpened = true
+			s.mu.Unlock()
 		}
 		s.mu.Lock()
 		s.openStarted = false

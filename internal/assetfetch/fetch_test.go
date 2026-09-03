@@ -40,9 +40,12 @@ func TestLoadVersionLegacyRelease(t *testing.T) {
 }
 
 func TestDebURL(t *testing.T) {
-	url := assetfetch.DebURL("9.3.4-hotfix.1")
-	if url == "" || !strings.Contains(url, "9.3.4-hotfix.1_amd64.deb") {
-		t.Fatalf("url = %q", url)
+	version := "9.3.4-hotfix.1"
+	url := assetfetch.DebURL(version)
+	arch := assetfetch.DebArch()
+	want := "euro-office-documentserver_" + version + "_" + arch + ".deb"
+	if url == "" || !strings.Contains(url, want) {
+		t.Fatalf("url = %q want substring %q", url, want)
 	}
 }
 

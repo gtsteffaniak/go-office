@@ -48,10 +48,10 @@ func main() {
 		filepath.Join(*assets, "converter", "bin", "font_selection.bin"),
 		filepath.Join(*assets, "converter", "bin", "AllFonts.js"),
 	} {
-		if st, err := os.Stat(path); err != nil {
-			log("font file missing", map[string]any{"path": path, "err": err.Error()})
+		if fileInfo, statErr := os.Stat(path); statErr != nil {
+			log("font file missing", map[string]any{"path": path, "err": statErr.Error()})
 		} else {
-			log("font file", map[string]any{"path": path, "bytes": st.Size()})
+			log("font file", map[string]any{"path": path, "bytes": fileInfo.Size()})
 		}
 	}
 	if !assetfetch.FontsReady(*assets) {
@@ -83,7 +83,7 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	if err := conv.ToEditorBin(ctx, *sample, outDir); err != nil {
+	if err = conv.ToEditorBin(ctx, *sample, outDir); err != nil {
 		log("ToEditorBin failed", map[string]any{"err": err.Error()})
 		writeReport(*report, lines)
 		os.Exit(1)

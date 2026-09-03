@@ -101,11 +101,17 @@ func TestDemoLandingAndConfig(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &cfg); err != nil {
 		t.Fatal(err)
 	}
-	doc := cfg["document"].(map[string]any)
+	doc, ok := cfg["document"].(map[string]any)
+	if !ok {
+		t.Fatalf("document type = %T", cfg["document"])
+	}
 	if doc["fileType"] != "doc" {
 		t.Fatalf("fileType = %v", doc["fileType"])
 	}
-	url := doc["url"].(string)
+	url, ok := doc["url"].(string)
+	if !ok {
+		t.Fatalf("document url type = %T", doc["url"])
+	}
 	if url == "" || !strings.Contains(url, "/api/office/demo/file/") {
 		t.Fatalf("config document url: %+v", doc)
 	}

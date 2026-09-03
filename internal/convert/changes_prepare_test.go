@@ -15,10 +15,10 @@ func TestPrepareChangesForSaveRewritesJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "changes0.json")
-	if err := os.WriteFile(path, raw, 0o644); err != nil {
+	if err = os.WriteFile(path, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := prepareChangesForSave(dir, ""); err != nil {
+	if err = prepareChangesForSave(dir, ""); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(path)

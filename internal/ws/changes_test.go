@@ -19,21 +19,21 @@ func TestAppendChangesUsesChanges0JSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got []string
-	if err := json.Unmarshal(data, &got); err != nil {
+	if err = json.Unmarshal(data, &got); err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 2 || got[0] != "c1" || got[1] != "c2" {
 		t.Fatalf("changes0.json = %#v", got)
 	}
 
-	if _, err := appendChanges(dir, []string{"c3"}); err != nil {
+	if _, appendErr := appendChanges(dir, []string{"c3"}); appendErr != nil {
 		t.Fatal(err)
 	}
 	data, err = os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(data, &got); err != nil {
+	if err = json.Unmarshal(data, &got); err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 3 {

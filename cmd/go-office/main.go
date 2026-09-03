@@ -97,8 +97,9 @@ func main() {
 
 	samplesPath := filepath.Join(cfg.DataDir, filepath.FromSlash(cfg.SamplesDir))
 	if cfg.samplesEnabled() {
-		if fi, err := os.Stat(samplesPath); err != nil || !fi.IsDir() {
-			log.Fatalf("samples directory not found: %s (%v) — use OFFICE_DISABLE_SAMPLES=1 to run without demo", samplesPath, err)
+		fi, statErr := os.Stat(samplesPath)
+		if statErr != nil || !fi.IsDir() {
+			log.Fatalf("samples directory not found: %s (%v) — use OFFICE_DISABLE_SAMPLES=1 to run without demo", samplesPath, statErr)
 		}
 	}
 
@@ -123,14 +124,14 @@ func main() {
 	origin := cfg.publicOrigin()
 
 	if cfg.samplesEnabled() {
-		if err := demo.Attach(srv, store, demo.Options{
+		if attachErr := demo.Attach(srv, store, demo.Options{
 			PublicOrigin: cfg.PublicOrigin,
 			DataRoot:     cfg.DataDir,
 			SamplesDir:   cfg.SamplesDir,
 			APIBasePath:  cfg.APIBase,
 			Logger:       logger,
-		}); err != nil {
-			log.Fatalf("demo: %v", err)
+		}); attachErr != nil {
+			log.Fatalf("demo: %v", attachErr)
 		}
 	}
 

@@ -32,7 +32,7 @@ func (s *Server) RunConverter(ctx context.Context, origin string, req ConverterR
 	convDir := filepath.Join(s.cacheDir(), cacheName)
 	outPath := filepath.Join(convDir, outName)
 
-	if st, err := os.Stat(outPath); err == nil && st.Size() > 0 {
+	if st, statErr := os.Stat(outPath); statErr == nil && st.Size() > 0 {
 		return ConverterResponse{
 			EndConvert: true,
 			FileType:   fileType,
@@ -41,7 +41,7 @@ func (s *Server) RunConverter(ctx context.Context, origin string, req ConverterR
 		}, nil
 	}
 
-	if err := os.MkdirAll(convDir, 0o755); err != nil {
+	if err = os.MkdirAll(convDir, 0o755); err != nil {
 		return ConverterResponse{}, err
 	}
 
@@ -179,9 +179,9 @@ func (s *Server) handleConverter(w http.ResponseWriter, r *http.Request) {
 		writeConverterError(w, r, -4, err.Error())
 		return
 	}
-	if err := VerifyConverterJWT(s.opts.JWTSecret, r.Header.Get("Authorization"), body, req); err != nil {
+	if jwtErr := VerifyConverterJWT(s.opts.JWTSecret, r.Header.Get("Authorization"), body, req); jwtErr != nil {
 		if s.opts.Debug && s.opts.Logger != nil {
-			s.opts.Logger.Debug("converter jwt", "err", err)
+			s.opts.Logger.Debug("converter jwt", "err", jwtErr)
 		}
 		writeConverterError(w, r, -20, "token")
 		return

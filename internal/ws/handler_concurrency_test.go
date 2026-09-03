@@ -220,12 +220,13 @@ func TestHandlerReopenAfterFirstOpenCompletes(t *testing.T) {
 	})
 	h.PollHold = 0
 	docKey := "same-key"
+	docURL := "http://localhost/a.docx"
 
-	h.ServePath(httptest.NewRecorder(), authPostRequest("docx", "http://localhost/a.docx"), "/doc/"+docKey+"/c")
-
+	h.ServePath(httptest.NewRecorder(), authPostRequest("docx", docURL), "/doc/"+docKey+"/c")
 	waitDocumentOpen(t, h, docKey)
 
-	h.ServePath(httptest.NewRecorder(), authPostRequest("docx", "http://localhost/a.docx"), "/doc/"+docKey+"/c")
+	reloadConnect := `40{"data":{"type":"auth","docid":"` + docKey + `","user":{"id":"demo","username":"Demo"},"openCmd":{"c":"open","id":"` + docKey + `","format":"docx","url":"` + docURL + `"}}}`
+	h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(reloadConnect)), "/doc/"+docKey+"/c")
 	waitDocumentOpen(t, h, docKey)
 
 	if opener.count(docKey) < 2 {

@@ -27,6 +27,17 @@ type ConvertRequest struct {
 	Thumbnail  *Thumbnail
 }
 
+// ConvertOffice runs x2t office-to-office conversion (e.g. csv → ods, xlsx → ods).
+func (c *Converter) ConvertOffice(ctx context.Context, srcPath, destPath, fromExt, toExt string) error {
+	if c == nil {
+		return fmt.Errorf("convert: converter is nil")
+	}
+	if srcPath == "" || destPath == "" {
+		return fmt.Errorf("convert: source and dest paths are required")
+	}
+	return c.convertOffice(ctx, srcPath, destPath, fromExt, toExt, "")
+}
+
 // ConvertFile runs x2t to convert SourcePath to DestPath.
 func (c *Converter) ConvertFile(ctx context.Context, req ConvertRequest) error {
 	if c == nil {
@@ -73,15 +84,15 @@ func (c *Converter) ConvertFile(ctx context.Context, req ConvertRequest) error {
 
 	allFontsPath := filepath.Join(runDir, "AllFonts.js")
 	workDir := filepath.Join(runDir, "work")
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
+	if err = os.MkdirAll(workDir, 0o755); err != nil {
 		return err
 	}
 	xml := buildConvertTaskXML(req.SourcePath, req.DestPath, c.fontDir, c.themeDir, fromExt, toExt, formatTo, req.Thumbnail, allFontsPath, workDir)
-	if _, err := taskFile.WriteString(xml); err != nil {
+	if _, err = taskFile.WriteString(xml); err != nil {
 		taskFile.Close()
 		return err
 	}
-	if err := taskFile.Close(); err != nil {
+	if err = taskFile.Close(); err != nil {
 		return err
 	}
 

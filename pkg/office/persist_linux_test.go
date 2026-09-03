@@ -19,10 +19,7 @@ import (
 
 func TestPersistCSVAppliesPendingChanges(t *testing.T) {
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
-	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	if !testutil.SampleExists(repo, "sample-files/sample.csv") {
 		t.Skip("sample csv missing")
 	}
@@ -41,7 +38,7 @@ func TestPersistCSVAppliesPendingChanges(t *testing.T) {
 
 	docKey := "csv-persist-changes"
 	cacheDir := filepath.Join(assets, "cache", docKey)
-	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+	if err = os.MkdirAll(cacheDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(cacheDir) })
@@ -52,7 +49,7 @@ func TestPersistCSVAppliesPendingChanges(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	if err := conv.ToEditorBin(ctx, absCSV, cacheDir); err != nil {
+	if err = conv.ToEditorBin(ctx, absCSV, cacheDir); err != nil {
 		t.Fatal(err)
 	}
 
@@ -92,10 +89,7 @@ func TestPersistCSVAppliesPendingChanges(t *testing.T) {
 
 func TestPersistCSVThenDocxDoesNotBlock(t *testing.T) {
 	repo := testutil.RepoRoot(t)
-	assets := filepath.Join(repo, "assets")
-	if st, err := os.Stat(filepath.Join(assets, "converter", "bin", "x2t")); err != nil || st.IsDir() {
-		t.Skip("x2t not available")
-	}
+	assets := testutil.AssetsDirOrSkip(t, repo)
 	if !testutil.SampleExists(repo, "sample-files/sample.csv") || !testutil.SampleExists(repo, "sample-files/sample.docx") {
 		t.Skip("samples missing")
 	}

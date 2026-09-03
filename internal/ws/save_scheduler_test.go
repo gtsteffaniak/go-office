@@ -49,11 +49,13 @@ func (s *recordingSaver) flushCalls() []flushCall {
 func saveTestHandlerWithSaver(t *testing.T, saver ws.DocumentSaver, delay time.Duration) *ws.Handler {
 	t.Helper()
 	ws.ResetSessionsForTest()
+	fallback := 100 * time.Millisecond
 	h := ws.NewWithOptions(ws.HandlerOptions{
-		Version:   "9.3.4-hotfix.1",
-		CacheDir:  t.TempDir(),
-		Saver:     saver,
-		SaveDelay: &delay,
+		Version:                "9.3.4-hotfix.1",
+		CacheDir:               t.TempDir(),
+		Saver:                  saver,
+		SaveDelay:              &delay,
+		ForceSaveFallbackDelay: &fallback,
 	})
 	h.PollHold = 0
 	return h
@@ -180,6 +182,40 @@ func TestSaveSchedulerConcurrentSaveChanges(t *testing.T) {
 	}
 }
 
+func TestSaveSchedulerFlushFailureNotifiesEditor(t *testing.T) {
+	ws.ResetSessionsForTest()
+	saver := &recordingSaver{err: errFlush}
+	delay := 10 * time.Millisecond
+	cacheDir := t.TempDir()
+	h := ws.NewWithOptions(ws.HandlerOptions{
+		Version:   "9.3.4",
+		CacheDir:  cacheDir,
+		Saver:     saver,
+		SaveDelay: &delay,
+	})
+	h.PollHold = 0
+
+	changesDir := filepath.Join(cacheDir, "key", "changes")
+	if err := os.MkdirAll(changesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(changesDir, "changes0.json"), []byte(`["edit"]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	body := `42["message",{"type":"saveChanges","changes":["edit"],"deleteIndex":-1}]`
+	req := httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(body))
+	h.ServePath(httptest.NewRecorder(), req, "/doc/key/c")
+	time.Sleep(delay + 40 * time.Millisecond)
+
+	rec := httptest.NewRecorder()
+	h.ServePath(rec, httptest.NewRequest(http.MethodGet, "/?EIO=4&transport=polling&sid=go-office&t=fail", nil), "/doc/key/c")
+	out := rec.Body.String()
+	if !strings.Contains(out, `"type":"forceSave"`) || !strings.Contains(out, `"success":false`) {
+		t.Fatalf("expected forceSave failure packet after flush error: %q", out)
+	}
+}
+
 func TestSaveSchedulerFlushFailureKeepsChanges(t *testing.T) {
 	saver := &recordingSaver{err: errFlush}
 	delay := 10 * time.Millisecond
@@ -209,3 +245,72 @@ func TestSaveSchedulerFlushFailureKeepsChanges(t *testing.T) {
 }
 
 var errFlush = errors.New("flush failed")
+
+func TestSaveSchedulerAutosaveEndSaveChangesImmediate(t *testing.T) {
+	saver := &recordingSaver{}
+	delay := time.Hour
+	h := saveTestHandlerWithSaver(t, saver, delay)
+
+	body := `42["message",{"type":"saveChanges","changes":["c1"],"startSaveChanges":true,"endSaveChanges":true,"deleteIndex":-1}]`
+	req := httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(body))
+	h.ServePath(httptest.NewRecorder(), req, "/doc/key1/c")
+
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if len(saver.flushCalls()) >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	calls := saver.flushCalls()
+	if len(calls) != 1 {
+		t.Fatalf("autosave endSaveChanges should flush immediately, got %+v", calls)
+	}
+	if calls[0].force {
+		t.Fatal("autosave flush should not be force=true")
+	}
+}
+
+func TestSaveSchedulerPartialWhileForceArmedNoDebounce(t *testing.T) {
+	ws.ResetSessionsForTest()
+	saver := &recordingSaver{}
+	delay := 30 * time.Millisecond
+	h := saveTestHandlerWithSaver(t, saver, delay)
+
+	h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office",
+		strings.NewReader(`42["message",{"type":"forceSaveStart"}]`)), "/doc/key/c")
+
+	partial := `42["message",{"type":"saveChanges","changes":["c1"],"deleteIndex":-1}]`
+	for i := 0; i < 3; i++ {
+		h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(partial)), "/doc/key/c")
+	}
+	time.Sleep(delay + 40 * time.Millisecond)
+	if len(saver.flushCalls()) != 0 {
+		t.Fatalf("partial saveChanges while force armed should not debounce flush: %+v", saver.flushCalls())
+	}
+}
+
+func TestSaveSchedulerConcurrentFlushCoalesces(t *testing.T) {
+	ws.ResetSessionsForTest()
+	saver := &recordingSaver{block: make(chan struct{})}
+	delay := time.Hour
+	h := saveTestHandlerWithSaver(t, saver, delay)
+
+	body := `42["message",{"type":"saveChanges","changes":["c1"],"reSave":true,"deleteIndex":-1}]`
+	h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(body)), "/doc/key/c")
+	time.Sleep(20 * time.Millisecond)
+	h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(body)), "/doc/key/c")
+
+	close(saver.block)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if len(saver.flushCalls()) >= 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	calls := saver.flushCalls()
+	if len(calls) != 2 {
+		t.Fatalf("expected coalesced follow-up flush after first completes, got %+v", calls)
+	}
+}

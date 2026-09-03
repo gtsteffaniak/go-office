@@ -41,9 +41,10 @@ type HandlerOptions struct {
 	PublicOrigin string
 	Opener       *Opener
 	OpenHook     DocumentOpener
-	CacheDir     string
-	Saver        DocumentSaver
-	SaveDelay    *time.Duration
+	CacheDir              string
+	Saver                 DocumentSaver
+	SaveDelay             *time.Duration
+	ForceSaveFallbackDelay *time.Duration
 }
 
 func New(version string, logger *slog.Logger) *Handler {
@@ -70,7 +71,7 @@ func NewWithOptions(opts HandlerOptions) *Handler {
 	h.Opener = opts.Opener
 	h.openHook = opts.OpenHook
 	if opts.Saver != nil && opts.CacheDir != "" {
-		h.Scheduler = newSaveScheduler(opts.CacheDir, opts.Saver, opts.Logger, opts.SaveDelay)
+		h.Scheduler = newSaveScheduler(opts.CacheDir, opts.Saver, opts.Logger, opts.SaveDelay, opts.ForceSaveFallbackDelay)
 	}
 	return h
 }

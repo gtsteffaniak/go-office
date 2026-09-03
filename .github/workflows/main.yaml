@@ -1,0 +1,75 @@
+name: main release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  push_main_image:
+    name: Push main image
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          cache: true
+
+      - name: Cache Euro-Office assets
+        uses: actions/cache@v4
+        with:
+          path: assets
+          key: euro-office-assets-v6-amd64-${{ hashFiles('scripts/euro-office.version') }}
+
+      - name: Prepare assets
+        run: mkdir -p assets && make ensure-assets
+
+      - name: Read Euro-Office version
+        id: euro
+        run: |
+          set -a
+          # shellcheck disable=SC1091
+          . ./scripts/euro-office.version
+          set +a
+          echo "version=${EURO_OFFICE_VERSION#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/quantumx-apps/office-server
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ steps.euro.outputs.version }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./_docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

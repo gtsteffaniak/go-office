@@ -4,7 +4,7 @@
 #   make build-docker         # same as build-docker-image
 #   make run-docker           # run after build
 #
-# Published as ghcr.io/quantumx-apps/office-server (see .github/workflows/publish.yml).
+# Published as ghcr.io/quantumx-apps/office-server (see .github/workflows/main.yaml and tag.yaml).
 #
 # Stages:
 #   gobuild  — Alpine + Go: static go-office + fetch-assets binaries
@@ -14,8 +14,10 @@
 # Reuses ./assets from the host when present (after make build); otherwise
 # fetches Euro-Office assets during the image build.
 
-FROM golang:1.25-alpine AS gobuild
-RUN apk add --no-cache git ca-certificates
+FROM golang:1.27-bookworm AS gobuild
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 
 COPY go.mod go.sum ./

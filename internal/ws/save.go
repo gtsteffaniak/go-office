@@ -24,6 +24,11 @@ type DocumentSaver interface {
 	FlushDocument(ctx context.Context, docKey, origin string, force bool) error
 }
 
+// DocumentSessionRegistrar records integrator session metadata from coauthoring auth.
+type DocumentSessionRegistrar interface {
+	RegisterDocumentSession(docKey, callbackURL, fileType, documentURL string)
+}
+
 type flushJob struct {
 	origin string
 	force  bool

@@ -59,8 +59,9 @@ func (s *Server) PersistDocument(ctx context.Context, docKey string) error {
 	if !ok {
 		return fmt.Errorf("office: unknown document key %q", docKey)
 	}
-	if doc.Path == "" {
-		return fmt.Errorf("office: no storage path for key %q", docKey)
+	callbackOnly := doc.Path == "" && strings.TrimSpace(doc.CallbackURL) != ""
+	if doc.Path == "" && !callbackOnly {
+		return fmt.Errorf("office: no storage path or callback URL for key %q", docKey)
 	}
 	ext := strings.TrimPrefix(strings.ToLower(doc.FileType), ".")
 	if ext == "" {
@@ -79,7 +80,7 @@ func (s *Server) PersistDocument(ctx context.Context, docKey string) error {
 	outPath := filepath.Join(cacheDir, "saved."+ext)
 	pending := hasPendingChanges(cacheDir)
 	if s.opts.Logger != nil {
-		s.opts.Logger.Debug("persist convert", "key", docKey, "path", doc.Path, "ext", ext, "pendingChanges", pending)
+		s.opts.Logger.Debug("persist convert", "key", docKey, "path", doc.Path, "ext", ext, "pendingChanges", pending, "callbackOnly", callbackOnly)
 	}
 	if err = s.convertDocument(ctx, conv, cacheDir, outPath, ext); err != nil {
 		return err
@@ -109,12 +110,16 @@ func (s *Server) PersistDocument(ctx context.Context, docKey string) error {
 		)
 	}
 
-	if err := s.storage.Save(ctx, doc.Path, bytes.NewReader(raw)); err != nil {
-		return err
-	}
-	s.sessions.UpsertDoc(session.Document{Key: docKey, Path: doc.Path, FileType: ext, UpdatedAt: time.Now().UTC()})
-	if s.opts.Logger != nil {
-		s.opts.Logger.Info("document saved", "key", docKey, "path", doc.Path, "bytes", len(raw))
+	if !callbackOnly {
+		if err := s.storage.Save(ctx, doc.Path, bytes.NewReader(raw)); err != nil {
+			return err
+		}
+		s.sessions.UpsertDoc(session.Document{Key: docKey, Path: doc.Path, FileType: ext, UpdatedAt: time.Now().UTC()})
+		if s.opts.Logger != nil {
+			s.opts.Logger.Info("document saved", "key", docKey, "path", doc.Path, "bytes", len(raw))
+		}
+	} else if s.opts.Logger != nil {
+		s.opts.Logger.Info("document converted for callback", "key", docKey, "bytes", len(raw))
 	}
 	_ = os.Remove(filepath.Join(cacheDir, "source.sha256"))
 	if err := conv.ToEditorBin(ctx, outPath, cacheDir); err != nil {

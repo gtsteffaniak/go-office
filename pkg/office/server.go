@@ -84,6 +84,19 @@ func (s *Server) ResetCoauthoringSession(docKey string) {
 	ws.ClearDocumentSession(docKey)
 }
 
+// RegisterDocumentSession stores integrator metadata from coauthoring auth (external integrators).
+func (s *Server) RegisterDocumentSession(docKey, callbackURL, fileType, documentURL string) {
+	if docKey == "" {
+		return
+	}
+	s.sessions.UpsertDoc(session.Document{
+		Key:         docKey,
+		CallbackURL: callbackURL,
+		FileType:    fileType,
+		URL:         documentURL,
+	})
+}
+
 // Mount registers an additional handler on the document server mux.
 func (s *Server) Mount(pattern string, handler http.Handler) {
 	s.mux.Handle(pattern, handler)

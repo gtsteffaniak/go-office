@@ -19,12 +19,22 @@ type authUser struct {
 }
 
 type authRequest struct {
-	Type      string   `json:"type"`
-	DocID     string   `json:"docid"`
-	User      authUser `json:"user"`
-	Mode      string   `json:"mode"`
-	Open      *openCmd `json:"openCmd"`
-	SessionID string   `json:"sessionId"`
+	Type                string   `json:"type"`
+	DocID               string   `json:"docid"`
+	User                authUser `json:"user"`
+	Mode                string   `json:"mode"`
+	Open                *openCmd `json:"openCmd"`
+	SessionID           string   `json:"sessionId"`
+	DocumentCallbackURL string   `json:"documentCallbackUrl"`
+	CallbackURL         string   `json:"callbackUrl"`
+}
+
+// IntegratorCallbackURL returns the editor callback URL from coauthoring auth.
+func (r authRequest) IntegratorCallbackURL() string {
+	if r.DocumentCallbackURL != "" {
+		return r.DocumentCallbackURL
+	}
+	return r.CallbackURL
 }
 
 func parseAuthPayload(raw []byte) (authRequest, bool) {

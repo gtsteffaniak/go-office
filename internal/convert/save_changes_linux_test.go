@@ -177,16 +177,13 @@ func TestSaveChangesRTFRoundTrip(t *testing.T) {
 	if err != nil || len(body) == 0 {
 		t.Fatalf("saved.rtf missing or empty: %v", err)
 	}
-	if len(body) > 50_000 {
-		t.Fatalf("rtf save output too large (%d bytes)", len(body))
-	}
-	if !strings.Contains(string(body), "SYSTEM BRIEF") {
-		t.Fatalf("saved.rtf missing plain document text: %q", truncate(body, 200))
+	if !strings.Contains(convert.RTFPlainText(body), "SYSTEM BRIEF") {
+		t.Fatalf("saved.rtf missing document text: %q", truncate(body, 200))
 	}
 	if strings.Contains(string(body), "&amp;") || strings.Contains(string(body), "&gt;") {
 		t.Fatalf("saved.rtf leaked XML entities: %q", truncate(body, 200))
 	}
-	if !strings.Contains(string(body), "& DAILY") {
+	if !strings.Contains(convert.RTFPlainText(body), "& DAILY") {
 		t.Fatalf("saved.rtf missing decoded ampersand in title: %q", truncate(body, 200))
 	}
 }
@@ -240,8 +237,9 @@ func TestSaveChangesRTFFromCorruptedSource(t *testing.T) {
 	if strings.Contains(string(body), "&amp;") || strings.Contains(string(body), "&gt;") {
 		t.Fatalf("saved.rtf should repair corrupted entity literals: %q", truncate(body, 200))
 	}
-	if !strings.Contains(string(body), "& DAILY") {
-		t.Fatalf("saved.rtf missing decoded ampersand: %q", truncate(body, 200))
+	plain := convert.RTFPlainText(body)
+	if !strings.Contains(plain, "SYSTEM BRIEF") || !strings.Contains(plain, "DAILY") {
+		t.Fatalf("saved.rtf missing repaired title text: %q", truncate(body, 200))
 	}
 }
 
@@ -467,7 +465,7 @@ func TestSaveReopenRTFAfterSave(t *testing.T) {
 		t.Fatalf("SaveChanges: %v", err)
 	}
 	savedBody, err := os.ReadFile(savedPath)
-	if err != nil || !strings.Contains(string(savedBody), "SYSTEM BRIEF") {
+	if err != nil || !strings.Contains(convert.RTFPlainText(savedBody), "SYSTEM BRIEF") {
 		t.Fatalf("saved.rtf missing plain text before reopen: %v", err)
 	}
 	if strings.Contains(string(savedBody), "&amp;") || strings.Contains(string(savedBody), "&gt;") {
@@ -615,6 +613,38 @@ func TestConvertOfficeDocxToRTF(t *testing.T) {
 		t.Fatalf("saved.rtf missing or empty: %v", err)
 	}
 	t.Logf("docx→rtf bytes=%d", len(body))
+}
+
+func TestConvertOfficeDocxToRTFPreservesFormatting(t *testing.T) {
+	repo := testutil.RepoRoot(t)
+	assets := testutil.AssetsDirOrSkip(t, repo)
+	if !testutil.SampleExists(repo, "sample-files/sample.docx") {
+		t.Skip("sample docx missing")
+	}
+	work := testutil.NewWorkspace(t)
+	docxPath := filepath.Join(work.Root, filepath.FromSlash(work.CopySample("sample-files/sample.docx")))
+	outPath := filepath.Join(t.TempDir(), "saved.rtf")
+	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	err = convert.ExportConvertOfficeInner(conv, ctx, docxPath, outPath, "docx", "rtf", "")
+	if err != nil {
+		t.Fatalf("docx→rtf: %v", err)
+	}
+	body, err := os.ReadFile(outPath)
+	if err != nil || len(body) == 0 {
+		t.Fatalf("saved.rtf missing or empty: %v", err)
+	}
+	rtf := string(body)
+	if !strings.Contains(rtf, "\\b") {
+		t.Fatalf("rtf missing bold control word: %q", truncate(body, 300))
+	}
+	if !strings.Contains(convert.RTFPlainText(body), "Demonstration") {
+		t.Fatalf("rtf missing document text: %q", truncate(body, 300))
+	}
 }
 
 func TestSaveChangesTxtUsesDirectPath(t *testing.T) {

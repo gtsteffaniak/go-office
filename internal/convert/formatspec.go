@@ -35,7 +35,7 @@ func lookupFormat(ext string) formatSpec {
 		return formatSpec{saveBridge: bridgeXLSX, openNormCSV: true}
 	case "xls", "ods":
 		return formatSpec{saveBridge: bridgeXLSX}
-	// RTF: native import on open; save applies changes to docx then plain-text RTF export.
+	// RTF: native import on open; save applies changes to docx then x2t docx→rtf.
 	case "rtf":
 		return formatSpec{saveBridge: bridgeDOCX}
 	// ODT: open via docx prelude; save uses direct reverse (see saveDirectReverse).

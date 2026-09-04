@@ -166,6 +166,16 @@
                   clearSaveWatchdog();
                   setStatus("Unsaved changes");
                 } else if (event && event.data === false) {
+                  clearSaveWatchdog();
+                  if (autosavePollTimer) {
+                    clearTimeout(autosavePollTimer);
+                    autosavePollTimer = null;
+                  }
+                  if (!document.body.hasAttribute("data-dirty")) {
+                    document.body.setAttribute("data-save-done", String(Date.now()));
+                    setStatus("Saved", "ok");
+                    return;
+                  }
                   saveBaselineBytes = lastSavedFileBytes;
                   setStatus("Saving…");
                   beginSaveWatchdog();
@@ -177,9 +187,15 @@
               },
               onError: function (event) {
                 var detail = event && event.data;
-                var msg = detail ? String(detail) : "Editor error";
+                var code = event && event.code;
+                var msg = "Editor error";
+                if (detail != null && detail !== "") {
+                  msg = String(detail);
+                } else if (code != null) {
+                  msg = "error code " + code;
+                }
                 setStatus("Error: " + msg, "error");
-                console.error("editor error", event);
+                console.error("editor onError", { code: code, data: detail, event: event });
                 if (typeof baseEvents.onError === "function") {
                   baseEvents.onError(event);
                 }

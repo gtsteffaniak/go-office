@@ -142,8 +142,8 @@ func TestPollingForceSaveStartNotModified(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServePath(rec, httptest.NewRequest(http.MethodGet, "/?EIO=4&transport=polling&sid=go-office&t=fs", nil), "/doc/csv-key/c")
 	out := rec.Body.String()
-	if !strings.Contains(out, `"type":"forceSave"`) || !strings.Contains(out, `"success":false`) {
-		t.Fatalf("empty force save should report failure: %q", out)
+	if !strings.Contains(out, `"type":"forceSave"`) || !strings.Contains(out, `"success":true`) {
+		t.Fatalf("empty force save should succeed with nothing to flush: %q", out)
 	}
 }
 

@@ -40,6 +40,76 @@ func (o *countingOpener) callCount() int {
 	return len(o.calls)
 }
 
+func TestSessionReconnectSkipsReopen(t *testing.T) {
+	ResetSessionsForTest()
+	opener := &countingOpener{}
+	sess := getSession(defaultSessionID, "doc-key", ParseBuild("9.3.4"), "")
+	req := authRequest{
+		Open: &openCmd{Command: "open", Format: "rtf", URL: "http://localhost/f.rtf"},
+		User: authUser{ID: "demo-user", Username: "Demo"},
+	}
+
+	sess.startOpen(opener, req, "http://localhost")
+	waitForOpenComplete(t, opener, 1)
+	_ = sess.drain()
+
+	sess.mu.Lock()
+	sess.sessionID = "reconnect-session-id"
+	sess.mu.Unlock()
+
+	reconnectReq := authRequest{
+		Type:      "auth",
+		DocID:     "doc-key",
+		SessionID: "reconnect-session-id",
+		User:      authUser{ID: "demo-user", Username: "Demo"},
+		Open:      &openCmd{Command: "open", Format: "rtf", URL: "http://localhost/f.rtf"},
+	}
+	raw := connectAuthData(`40{"data":{"type":"auth","docid":"doc-key","sessionId":"reconnect-session-id","user":{"id":"demo-user","username":"Demo"},"openCmd":{"c":"open","id":"doc-key","format":"rtf","url":"http://localhost/f.rtf"}}}`)
+	sess.onConnect(raw)
+	sess.startOpen(opener, reconnectReq, "http://localhost")
+	time.Sleep(20 * time.Millisecond)
+
+	if opener.callCount() != 1 {
+		t.Fatalf("reconnect should not reopen document, calls = %d", opener.callCount())
+	}
+	packets := sess.drain()
+	if authCount(packets) != 1 {
+		t.Fatalf("reconnect must resend auth, got %d packets=%v", authCount(packets), packets)
+	}
+	for _, p := range packets {
+		if containsType(p, `"type":"documentOpen"`) {
+			t.Fatalf("reconnect should not send documentOpen: %v", packets)
+		}
+	}
+}
+
+func TestSessionReconnectWithoutSessionIDSkipsReopen(t *testing.T) {
+	ResetSessionsForTest()
+	opener := &countingOpener{}
+	sess := getSession(defaultSessionID, "doc-key", ParseBuild("9.3.4"), "")
+	req := authRequest{
+		Open: &openCmd{Command: "open", Format: "rtf", URL: "http://localhost/f.rtf"},
+		User: authUser{ID: "demo-user", Username: "Demo"},
+	}
+
+	sess.startOpen(opener, req, "http://localhost")
+	waitForOpenComplete(t, opener, 1)
+	_ = sess.drain()
+
+	sess.mu.Lock()
+	sess.sessionID = "reconnect-session-id"
+	sess.mu.Unlock()
+
+	raw := connectAuthData(`40{"data":{"type":"auth","docid":"doc-key","user":{"id":"demo-user","username":"Demo"},"openCmd":{"c":"open","id":"doc-key","format":"rtf","url":"http://localhost/f.rtf"}}}`)
+	sess.onConnect(raw)
+	sess.startOpen(opener, authRequest{Open: req.Open}, "http://localhost")
+	time.Sleep(20 * time.Millisecond)
+
+	if opener.callCount() != 1 {
+		t.Fatalf("reconnect without sessionId should not reopen, calls = %d", opener.callCount())
+	}
+}
+
 func TestSessionReopenSameDocKey(t *testing.T) {
 	ResetSessionsForTest()
 	opener := &countingOpener{}
@@ -56,6 +126,8 @@ func TestSessionReopenSameDocKey(t *testing.T) {
 		t.Fatalf("duplicate startOpen should not reopen, calls = %d", opener.callCount())
 	}
 
+	ClearDocumentSession("doc-key")
+	sess = getSession(defaultSessionID, "doc-key", ParseBuild("9.3.4"), "")
 	sess.onConnect(nil)
 	sess.startOpen(opener, req, "http://localhost")
 	waitForOpenComplete(t, opener, 2)

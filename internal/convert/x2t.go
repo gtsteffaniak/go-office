@@ -313,13 +313,6 @@ func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, ta
 		if st, err := os.Stat(intermediate); err == nil {
 			slog.Debug("bridge after apply_changes", "path", intermediate, "bytes", st.Size(), "bridge", bridge)
 		}
-		if bridge == bridgeDOCX && ext == "rtf" {
-			if err := WriteRTFFromDocxPlainText(intermediate, destPath); err != nil {
-				return err
-			}
-			slog.Debug("rtf persist from docx plain text", "path", destPath)
-			return nil
-		}
 		if err := c.convertOfficeInner(ctx, intermediate, destPath, string(bridge), ext, cacheDir); err != nil {
 			// DOC/DOT: x2t cannot write binary Word (exit 80). Persist changes-applied.docx bytes
 			// at the .doc/.dot path — ONLYOFFICE assemblyFormatAsOrigin rollback behavior.

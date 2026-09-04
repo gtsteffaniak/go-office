@@ -19,11 +19,12 @@ type authUser struct {
 }
 
 type authRequest struct {
-	Type  string   `json:"type"`
-	DocID string   `json:"docid"`
-	User  authUser `json:"user"`
-	Mode  string   `json:"mode"`
-	Open  *openCmd `json:"openCmd"`
+	Type      string   `json:"type"`
+	DocID     string   `json:"docid"`
+	User      authUser `json:"user"`
+	Mode      string   `json:"mode"`
+	Open      *openCmd `json:"openCmd"`
+	SessionID string   `json:"sessionId"`
 }
 
 func parseAuthPayload(raw []byte) (authRequest, bool) {

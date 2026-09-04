@@ -116,6 +116,14 @@ func (s *Server) PersistDocument(ctx context.Context, docKey string) error {
 	if s.opts.Logger != nil {
 		s.opts.Logger.Info("document saved", "key", docKey, "path", doc.Path, "bytes", len(raw))
 	}
+	_ = os.Remove(filepath.Join(cacheDir, "source.sha256"))
+	if err := conv.ToEditorBin(ctx, outPath, cacheDir); err != nil {
+		return fmt.Errorf("office: refresh Editor.bin after persist: %w", err)
+	}
+	_ = os.RemoveAll(filepath.Join(cacheDir, "changes"))
+	if s.opts.Logger != nil {
+		s.opts.Logger.Debug("refreshed Editor.bin after persist", "key", docKey, "cache", cacheDir)
+	}
 	return nil
 }
 
@@ -261,8 +269,17 @@ func persistTextPreview(ext string, raw []byte) string {
 			return "cell=" + cell + " " + prev
 		}
 		return prev
-	case "docx", "doc", "odt", "rtf":
+	case "docx", "doc", "odt":
 		text := convert.OOXMLPlainText(raw)
+		if text == "" {
+			return headPreview(raw)
+		}
+		if len(text) > 180 {
+			return text[:180]
+		}
+		return text
+	case "rtf":
+		text := convert.RTFPlainText(raw)
 		if text == "" {
 			return headPreview(raw)
 		}

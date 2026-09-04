@@ -200,9 +200,7 @@ else
 	@$(MAKE) compile-native
 endif
 
-compile-native: $(GO_OFFICE_BIN)
-
-$(GO_OFFICE_BIN):
+compile-native:
 	@echo "==> go-office binary"
 	@mkdir -p "$(BIN_DIR)"
 	$(GO) run ./cmd/gen-assets-version

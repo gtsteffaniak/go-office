@@ -2,10 +2,10 @@ package ws
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,8 +18,6 @@ const defaultSaveDelay = 5 * time.Second
 // Force-save flush is triggered by endSaveChanges; the fallback timer only runs when the editor
 // never sends endSaveChanges (stale pending changes or empty save).
 const defaultForceSaveFallbackDelay = 5 * time.Second
-
-var errForceSaveNotModified = errors.New("force save not modified")
 
 // DocumentSaver flushes coauthoring changes to host storage and notifies callbacks.
 type DocumentSaver interface {
@@ -235,7 +233,11 @@ func (s *saveScheduler) armForceSave(docKey, origin string, onDone func(error)) 
 			return
 		}
 		if !hasPendingChanges(filepath.Join(s.cacheDir, docKey)) {
-			onDone(errForceSaveNotModified)
+			// Editor sent forceSaveStart with nothing to flush (no change blobs arrived).
+			if s.logger != nil {
+				s.logger.Debug("forceSave fallback: no pending changes", "key", docKey)
+			}
+			onDone(nil)
 			return
 		}
 		// Fallback when endSaveChanges never arrives (stale pending changes).
@@ -430,6 +432,9 @@ func (h *Handler) handleSaveMessage(sess *session, msg map[string]any, docKey st
 		return true
 	case "authChangesAck":
 		return true
+	case "clientLog":
+		h.logClientMessage(docKey, msg)
+		return true
 	default:
 		return false
 	}
@@ -488,9 +493,20 @@ func (h *Handler) handleForceSaveStart(sess *session, docKey string, r *http.Req
 		sess.enqueue(start)
 	}
 
+	if h.Scheduler == nil {
+		return
+	}
+
 	origin := requestOrigin(r)
 	onDone := func(flushErr error) {
 		success := flushErr == nil
+		if h.Logger != nil {
+			if flushErr != nil {
+				h.Logger.Info("forceSave result", "key", docKey, "success", false, "err", flushErr)
+			} else {
+				h.Logger.Info("forceSave result", "key", docKey, "success", true, "pending", pending)
+			}
+		}
 		pkt, perr := socketMessage(map[string]any{
 			"type": "forceSave",
 			"messages": map[string]any{
@@ -504,12 +520,35 @@ func (h *Handler) handleForceSaveStart(sess *session, docKey string, r *http.Req
 		}
 	}
 
-	if h.Scheduler != nil && h.Scheduler.takePendingEndSave(docKey) {
+	if h.Scheduler.takePendingEndSave(docKey) {
 		h.Scheduler.scheduleDone(docKey, origin, true, onDone)
 		return
 	}
 
 	h.Scheduler.armForceSave(docKey, origin, onDone)
+}
+
+func (h *Handler) logClientMessage(docKey string, msg map[string]any) {
+	if h.Logger == nil {
+		return
+	}
+	text, _ := msg["msg"].(string)
+	if text == "" {
+		return
+	}
+	level, _ := msg["level"].(string)
+	switch level {
+	case "error":
+		h.Logger.Warn("editor clientLog", "key", docKey, "level", level, "msg", text)
+	case "warn":
+		h.Logger.Warn("editor clientLog", "key", docKey, "level", level, "msg", text)
+	default:
+		if strings.Contains(text, "changesError") || strings.Contains(text, "Error") {
+			h.Logger.Warn("editor clientLog", "key", docKey, "level", level, "msg", text)
+		} else {
+			h.Logger.Debug("editor clientLog", "key", docKey, "level", level, "msg", text)
+		}
+	}
 }
 
 func (h *Handler) handleSaveChanges(sess *session, msg map[string]any, docKey string, r *http.Request) {

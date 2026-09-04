@@ -225,6 +225,7 @@ func TestHandlerReopenAfterFirstOpenCompletes(t *testing.T) {
 	h.ServePath(httptest.NewRecorder(), authPostRequest("docx", docURL), "/doc/"+docKey+"/c")
 	waitDocumentOpen(t, h, docKey)
 
+	ws.ClearDocumentSession(docKey)
 	reloadConnect := `40{"data":{"type":"auth","docid":"` + docKey + `","user":{"id":"demo","username":"Demo"},"openCmd":{"c":"open","id":"` + docKey + `","format":"docx","url":"` + docURL + `"}}}`
 	h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(reloadConnect)), "/doc/"+docKey+"/c")
 	waitDocumentOpen(t, h, docKey)

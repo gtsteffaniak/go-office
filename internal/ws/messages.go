@@ -1,6 +1,10 @@
 package ws
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
 
 // parseSocketMessage decodes a 42["message", payload] packet into payload.
 func parseSocketMessage(packet string) (map[string]any, bool) {
@@ -100,4 +104,32 @@ func packetTypes(packets []string) []string {
 		out = append(out, "other")
 	}
 	return out
+}
+
+func summarizeOutboundPackets(packets []string) string {
+	var parts []string
+	for _, p := range packets {
+		msg, ok := parseSocketMessage(p)
+		if !ok {
+			continue
+		}
+		switch messageType(msg) {
+		case "forceSave":
+			messages, _ := msg["messages"].(map[string]any)
+			success, _ := messages["success"].(bool)
+			parts = append(parts, "forceSave success="+fmt.Sprint(success))
+		case "forceSaveStart":
+			messages, _ := msg["messages"].(map[string]any)
+			code := -1
+			if messages != nil {
+				if c, ok := messages["code"].(float64); ok {
+					code = int(c)
+				}
+			}
+			parts = append(parts, fmt.Sprintf("forceSaveStart code=%d", code))
+		case "documentOpen":
+			parts = append(parts, "documentOpen")
+		}
+	}
+	return strings.Join(parts, "; ")
 }

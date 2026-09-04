@@ -66,6 +66,10 @@ type AscEditor = {
     replaceAll?: boolean,
   ) => boolean | void;
   asc_isDocumentCanSave?: () => boolean;
+  asc_setFontBold?: (value: boolean) => void;
+  asc_setFontItalic?: (value: boolean) => void;
+  asc_putHighlight?: (color: string) => void;
+  asc_putHighlightColor?: (color: string) => void;
 };
 
 type AscEditorWindow = {
@@ -857,6 +861,10 @@ export function officeFileContains(buf: Buffer, marker: string): boolean {
   if (buf.includes(Buffer.from(marker))) {
     return true;
   }
+  const plainRtf = rtfPlainText(text);
+  if (plainRtf.includes(marker)) {
+    return true;
+  }
   for (const entry of ["word/document.xml", "ppt/slides/slide1.xml", "content.xml"]) {
     const xml = zipEntryText(buf, entry);
     if (xml.includes(marker)) {
@@ -891,6 +899,258 @@ function decodeOfficeText(buf: Buffer): string {
     text = text.slice(1);
   }
   return text;
+}
+
+/** Decode x2t RTF plain text, including \\uc1\\uNN* unicode runs. */
+export function rtfPlainText(rtf: string): string {
+  let out = "";
+  let i = 0;
+  let ucSkip = 1;
+  while (i < rtf.length) {
+    if (i + 1 < rtf.length && rtf[i] === "\\") {
+      if (i + 3 < rtf.length && rtf[i + 1] === "'") {
+        const hex = rtf.slice(i + 2, i + 4);
+        const byte = Number.parseInt(hex, 16);
+        if (!Number.isNaN(byte)) {
+          out += String.fromCharCode(byte);
+          i += 4;
+          continue;
+        }
+      }
+      if (i + 3 < rtf.length && rtf[i + 1] === "p" && rtf[i + 2] === "a" && rtf[i + 3] === "r") {
+        out += "\n";
+        i += 4;
+        if (i < rtf.length && rtf[i] === " ") {
+          i++;
+        }
+        continue;
+      }
+      if (i + 2 < rtf.length && rtf[i + 1] === "u" && rtf[i + 2] === "c") {
+        let j = i + 3;
+        const start = j;
+        while (j < rtf.length && rtf[j] >= "0" && rtf[j] <= "9") {
+          j++;
+        }
+        if (j > start) {
+          ucSkip = Number.parseInt(rtf.slice(start, j), 10);
+          if (j < rtf.length && rtf[j] === " ") {
+            j++;
+          }
+          i = j;
+          continue;
+        }
+      }
+      if (rtf[i + 1] === "u") {
+        let j = i + 2;
+        let neg = false;
+        if (j < rtf.length && rtf[j] === "-") {
+          neg = true;
+          j++;
+        }
+        const start = j;
+        while (j < rtf.length && rtf[j] >= "0" && rtf[j] <= "9") {
+          j++;
+        }
+        if (j > start) {
+          let code = Number.parseInt(rtf.slice(start, j), 10);
+          if (neg) {
+            code = 65536 + code;
+          }
+          out += String.fromCharCode(code);
+          if (j < rtf.length && rtf[j] === "?") {
+            j++;
+          }
+          for (let skipped = 0; skipped < ucSkip && j < rtf.length; skipped++) {
+            j++;
+          }
+          i = j;
+          continue;
+        }
+      }
+      let j = i + 1;
+      if (j < rtf.length && rtf[j] === "*") {
+        j++;
+      }
+      while (j < rtf.length && /[A-Za-z]/.test(rtf[j])) {
+        j++;
+      }
+      if (j < rtf.length && rtf[j] === "-") {
+        j++;
+        while (j < rtf.length && rtf[j] >= "0" && rtf[j] <= "9") {
+          j++;
+        }
+      } else if (j < rtf.length && rtf[j] >= "0" && rtf[j] <= "9") {
+        while (j < rtf.length && rtf[j] >= "0" && rtf[j] <= "9") {
+          j++;
+        }
+      }
+      if (j < rtf.length && rtf[j] === " ") {
+        j++;
+      }
+      i = j;
+      continue;
+    }
+    if (rtf[i] === "{" || rtf[i] === "}") {
+      i++;
+      continue;
+    }
+    out += rtf[i];
+    i++;
+  }
+  return out;
+}
+
+function rtfWindowAroundMarker(rtf: string, marker: string, radius = 500): string {
+  const plain = rtfPlainText(rtf);
+  const plainIdx = plain.indexOf(marker);
+  if (plainIdx < 0) {
+    return "";
+  }
+  const ratio = plain.length > 0 ? rtf.length / plain.length : 1;
+  const center = Math.floor(plainIdx * ratio);
+  const start = Math.max(0, center - radius);
+  const end = Math.min(rtf.length, center + marker.length + radius);
+  return rtf.slice(start, end);
+}
+
+export type WordFormatOptions = {
+  bold?: boolean;
+  italic?: boolean;
+  highlight?: boolean;
+};
+
+function applyWordFormatInBrowser(arg: { marker: string; format: WordFormatOptions }): boolean {
+  const w = window as AscEditorWindow;
+  const api = w.Asc?.editor ?? w.editor;
+  if (!api || typeof api.asc_findText !== "function") {
+    return false;
+  }
+  const found = Boolean(
+    api.asc_findText(arg.marker) ||
+      api.asc_findText(arg.marker, false, false) ||
+      api.asc_findText(arg.marker, true, false),
+  );
+  if (!found) {
+    return false;
+  }
+  if (arg.format.bold) {
+    api.asc_setFontBold?.(true);
+  }
+  if (arg.format.italic) {
+    api.asc_setFontItalic?.(true);
+  }
+  if (arg.format.highlight) {
+    if (api.asc_putHighlightColor) {
+      api.asc_putHighlightColor("ffff00");
+    } else {
+      api.asc_putHighlight?.("ffff00");
+    }
+  }
+  return true;
+}
+
+/** Find marker text in a word document and apply formatting via the Asc API. */
+export async function formatWordSelection(
+  page: Page,
+  marker: string,
+  format: WordFormatOptions,
+): Promise<void> {
+  await waitForEditorInteractive(page, "word");
+  const frame = getEditorFrame(page, "word");
+  const applied = await frame.locator("body").evaluate(applyWordFormatInBrowser, { marker, format });
+  if (!applied && format.bold) {
+    await frame.locator("body").press("Control+f");
+    const searchInput = frame.locator("#search-bar-text").first();
+    await searchInput.waitFor({ state: "visible", timeout: 8_000 });
+    await searchInput.fill(marker);
+    await searchInput.press("Enter");
+    await page.waitForTimeout(300);
+    await frame.locator("body").press("Control+b");
+  } else if (!applied && format.italic) {
+    await frame.locator("body").press("Control+f");
+    const searchInput = frame.locator("#search-bar-text").first();
+    await searchInput.waitFor({ state: "visible", timeout: 8_000 });
+    await searchInput.fill(marker);
+    await searchInput.press("Enter");
+    await page.waitForTimeout(300);
+    await frame.locator("body").press("Control+i");
+  } else if (!applied && format.highlight) {
+    await frame.locator("body").press("Control+f");
+    const searchInput = frame.locator("#search-bar-text").first();
+    await searchInput.waitFor({ state: "visible", timeout: 8_000 });
+    await searchInput.fill(marker);
+    await searchInput.press("Enter");
+    await page.waitForTimeout(300);
+    const highlightBtn = frame
+      .locator('#slot-btn-highlight-color, #slot-btn-font-highlight, [id*="highlight"]')
+      .first();
+    if ((await highlightBtn.count()) > 0) {
+      await highlightBtn.click({ force: true });
+      const yellow = frame.locator('[data-color="ffff00"], [data-value="ffff00"], .color-yellow').first();
+      if ((await yellow.count()) > 0) {
+        await yellow.click({ force: true });
+      }
+    }
+  }
+  await frame.locator("#search-bar-close, #search-adv-close").first().click({ timeout: 1_000 }).catch(() => {});
+  await waitForDocumentDirty(page);
+}
+
+export type RtfFormattingAssert = {
+  marker: string;
+  bold?: boolean;
+  italic?: boolean;
+  highlight?: boolean;
+};
+
+export async function assertDemoRtfFormatting(
+  request: APIRequestContext,
+  filePath: string,
+  opts: RtfFormattingAssert,
+): Promise<void> {
+  const buf = await fetchDemoFileBody(request, filePath);
+  const rtf = decodeOfficeText(buf);
+  expect(rtfPlainText(rtf)).toContain(opts.marker);
+  const window = rtfWindowAroundMarker(rtf, opts.marker);
+  expect(window.length).toBeGreaterThan(0);
+  if (opts.bold) {
+    expect(window).toMatch(/\\b(?!ullet)/);
+  }
+  if (opts.italic) {
+    expect(window).toMatch(/\\i(?!nfo)/);
+  }
+  if (opts.highlight) {
+    expect(window.includes("\\highlight") || window.includes("\\cb")).toBe(true);
+  }
+}
+
+/** Poll viewer status for stableMs after save; fail on Error: prefix. */
+export async function assertEditorStable(page: Page, stableMs = 15_000): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < stableMs) {
+    const status = (await page.locator("#status").textContent()) ?? "";
+    expect(status).not.toMatch(/^Error:/);
+    const className = (await page.locator("#status").getAttribute("class")) ?? "";
+    expect(className).not.toContain("status-error");
+    await page.waitForTimeout(500);
+  }
+}
+
+/** Minimal dirty edit before save (word/slide append, cell A1). */
+export async function applyMinimalSaveEdit(
+  page: Page,
+  editor: SampleFile["editor"],
+  marker = "PW_STABLE",
+): Promise<void> {
+  if (editor === "cell") {
+    await setCellContent(page, editor, "A1", marker);
+    return;
+  }
+  if (editor === "word" || editor === "slide") {
+    await insertSaveMarker(page, editor, marker);
+    return;
+  }
+  throw new Error(`unsupported editor for save edit: ${editor}`);
 }
 
 export async function fetchDemoFileBody(

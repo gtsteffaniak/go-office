@@ -78,6 +78,15 @@ func ClearAllSessions() {
 	})
 }
 
+// ClearDocumentSession drops the default demo coauthoring session for a document key.
+// Call when a new editor page loads so polling reconnect is not confused with reload.
+func ClearDocumentSession(docKey string) {
+	if docKey == "" {
+		return
+	}
+	sessions.Delete(sessionKey(defaultSessionID, docKey))
+}
+
 func (s *session) enqueue(packets ...string) {
 	s.mu.Lock()
 	s.outbox = append(s.outbox, packets...)
@@ -140,15 +149,44 @@ func (s *session) waitForPackets(ctx context.Context, hold time.Duration) []stri
 	}
 }
 
+func (s *session) isReconnectAuth(req authRequest) bool {
+	if !s.documentOpened || s.sessionID == "" {
+		return false
+	}
+	if req.SessionID != "" {
+		return req.SessionID == s.sessionID
+	}
+	// Engine.IO packet 40 on polling reconnect often omits sessionId; the editor
+	// still holds the open document and resends sessionId on the follow-up auth.
+	return true
+}
+
+func (s *session) hadDocumentOpen() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.documentOpened
+}
+
 func (s *session) onConnect(authData []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	reconnect := false
+	if len(authData) > 0 {
+		if req, ok := parseAuthPayload(authData); ok {
+			reconnect = s.isReconnectAuth(req)
+		}
+	}
+
 	// Engine.IO packet 40 is a new transport session. The demo client always
 	// reuses sid=go-office, so a CSV reload would otherwise skip auth and hang.
+	// When the client reconnects with the same coauthoring sessionId, resend auth
+	// but do not re-open the document — the editor still holds in-memory state.
 	s.authSent = false
-	s.documentOpened = false
-	s.openStarted = false
+	if !reconnect {
+		s.documentOpened = false
+		s.openStarted = false
+	}
 	s.waitGen++
 	if s.waitCh != nil {
 		close(s.waitCh)
@@ -203,7 +241,7 @@ func (s *session) startOpen(opener DocumentOpener, req authRequest, origin strin
 	}
 
 	s.mu.Lock()
-	if s.documentOpened || s.openStarted {
+	if s.documentOpened || s.openStarted || s.isReconnectAuth(req) {
 		s.mu.Unlock()
 		return
 	}

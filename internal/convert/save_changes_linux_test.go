@@ -183,6 +183,12 @@ func TestSaveChangesRTFRoundTrip(t *testing.T) {
 	if !strings.Contains(string(body), "SYSTEM BRIEF") {
 		t.Fatalf("saved.rtf missing plain document text: %q", truncate(body, 200))
 	}
+	if strings.Contains(string(body), "&amp;") || strings.Contains(string(body), "&gt;") {
+		t.Fatalf("saved.rtf leaked XML entities: %q", truncate(body, 200))
+	}
+	if !strings.Contains(string(body), "& DAILY") {
+		t.Fatalf("saved.rtf missing decoded ampersand in title: %q", truncate(body, 200))
+	}
 }
 
 func TestWriteRTFFromDocxPlainText(t *testing.T) {
@@ -409,6 +415,9 @@ func TestSaveReopenRTFAfterSave(t *testing.T) {
 	savedBody, err := os.ReadFile(savedPath)
 	if err != nil || !strings.Contains(string(savedBody), "SYSTEM BRIEF") {
 		t.Fatalf("saved.rtf missing plain text before reopen: %v", err)
+	}
+	if strings.Contains(string(savedBody), "&amp;") || strings.Contains(string(savedBody), "&gt;") {
+		t.Fatalf("saved.rtf leaked XML entities before reopen: %q", truncate(savedBody, 200))
 	}
 	reopenDir := t.TempDir()
 	if err = conv.ToEditorBin(ctx, savedPath, reopenDir); err != nil {

@@ -5,6 +5,7 @@ import {
   setCellContent,
   waitForSaveDone,
   insertSaveMarker,
+  replaceDocumentText,
   triggerEditorSave,
   assertDemoFileContains,
 } from "../editor";
@@ -27,8 +28,10 @@ const TXT_ORIGINAL = "Sample-Files.com";
 const TXT_MARKER = "PW_SAVE_TXT_MARKER";
 
 const RTF_SOURCE = "sample-files/sample.rtf";
-const RTF_ORIGINAL = "Lorem ipsum dolor sit amet";
-const RTF_MARKER = "PW_SAVE_RTF_MARKER";
+const RTF_ORIGINAL = "SYSTEM BRIEF & DAILY LOG";
+const RTF_FIND = "BRIEF";
+const RTF_REPLACEMENT = "REPORT";
+const RTF_MARKER = "SYSTEM REPORT & DAILY LOG";
 
 const ODS_SOURCE = "sample-files/sample.ods";
 const ODS_CELL = CSV_CELL;
@@ -124,7 +127,7 @@ test("rtf save round-trip via demo file API", async ({ page, request }, testInfo
   await waitForEditorReady(page, "word");
   await waitForEditorInteractive(page, "word");
 
-  await insertSaveMarker(page, "word", RTF_MARKER);
+  await replaceDocumentText(page, "word", RTF_FIND, RTF_REPLACEMENT);
   await triggerEditorSave(page, "word");
   await waitForSaveDone(page, {
     request,
@@ -133,6 +136,9 @@ test("rtf save round-trip via demo file API", async ({ page, request }, testInfo
   });
 
   await assertDemoFileContains(request, file, RTF_MARKER);
+  await assertDemoFileContains(request, file, "&amp;", { present: false });
+  await assertDemoFileContains(request, file, "&gt;", { present: false });
+  await assertDemoFileContains(request, file, "> Reminder");
 });
 
 test("ods save round-trip via demo file API", async ({ page, request }, testInfo) => {

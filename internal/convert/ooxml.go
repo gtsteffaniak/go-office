@@ -3,6 +3,7 @@ package convert
 import (
 	"archive/zip"
 	"bytes"
+	"html"
 	"io"
 	"os"
 	"path/filepath"
@@ -49,7 +50,7 @@ func OOXMLPlainText(raw []byte) string {
 		var b strings.Builder
 		for _, m := range matches {
 			if len(m) > 1 {
-				b.Write(m[1])
+				b.WriteString(html.UnescapeString(string(m[1])))
 			}
 		}
 		if b.Len() > 0 {

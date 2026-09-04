@@ -334,6 +334,16 @@ func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, ta
 				}
 				return nil
 			}
+			// XLS: x2t cannot write binary Excel (exit 88). Persist changes-applied.xlsx bytes
+			// at the .xls path — same assemblyFormatAsOrigin rollback behavior.
+			if bridge == bridgeXLSX && legacySpreadsheetBinaryExt(ext) {
+				slog.Warn("x2t cannot write binary Excel; persisting OOXML fallback",
+					"ext", ext, "intermediate", intermediate, "dest", destPath, "err", err)
+				if copyErr := fsutil.CopyFile(intermediate, destPath); copyErr != nil {
+					return fmt.Errorf("convert: %s→%s failed and OOXML fallback copy failed: %w", bridge, ext, copyErr)
+				}
+				return nil
+			}
 			return err
 		}
 		if bridge == bridgeXLSX && (ext == "csv" || ext == "tsv" || ext == "scsv") {

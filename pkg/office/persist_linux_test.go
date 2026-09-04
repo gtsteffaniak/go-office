@@ -183,10 +183,10 @@ func TestPersistRefreshesEditorBin(t *testing.T) {
 	time.Sleep(1100 * time.Millisecond)
 
 	changesDir := filepath.Join(cacheDir, "changes")
-	if err := os.MkdirAll(changesDir, 0o755); err != nil {
+	if err = os.MkdirAll(changesDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(changesDir, "changes0.json"), []byte(`["txt-change"]`), 0o644); err != nil {
+	if err = os.WriteFile(filepath.Join(changesDir, "changes0.json"), []byte(`["txt-change"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -195,7 +195,7 @@ func TestPersistRefreshesEditorBin(t *testing.T) {
 		Path:     txtRel,
 		FileType: "txt",
 	})
-	if err := srv.PersistDocument(ctx, docKey); err != nil {
+	if err = srv.PersistDocument(ctx, docKey); err != nil {
 		t.Fatal(err)
 	}
 	after, err := os.Stat(filepath.Join(cacheDir, "Editor.bin"))

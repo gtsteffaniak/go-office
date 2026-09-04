@@ -107,6 +107,17 @@ func legacySlideBinaryExt(ext string) bool {
 	}
 }
 
+// legacySpreadsheetBinaryExt reports formats x2t cannot write (binary Excel .xls exit 88).
+// Save path copies changes-applied.xlsx bytes at the legacy path when xlsx→xls fails.
+func legacySpreadsheetBinaryExt(ext string) bool {
+	switch normExt(ext) {
+	case "xls":
+		return true
+	default:
+		return false
+	}
+}
+
 func editorImportSourceHash(contentHash, ext string) string {
 	if openNeedsDocxPrelude(ext) {
 		return contentHash + ":open-docx-v1"

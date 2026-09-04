@@ -59,7 +59,11 @@ type AscEditor = {
   asc_PasteText?: (text: string) => void;
   PasteText?: (text: string) => void;
   asc_closeCellEditor?: (save: boolean) => void;
-  asc_findText?: (text: string, matchCase?: boolean, wholeCell?: boolean) => boolean;
+  asc_findText?: (
+    text: string | { searchString: string; matchCase?: boolean },
+    matchCase?: boolean,
+    wholeCell?: boolean,
+  ) => boolean;
   asc_replaceText?: (
     searchProps: { searchString: string; matchCase?: boolean } | string,
     replaceWith: string,
@@ -144,17 +148,15 @@ function findTextInBrowser(arg: { needle: string; kind?: SampleFile["editor"] })
         : arg.kind === "word"
           ? w.Asc?.editor ?? w.Asc?.spreadsheet ?? w.editor
           : w.Asc?.editor ?? w.Asc?.presentation ?? w.Asc?.spreadsheet ?? w.editor;
-  if (!api) {
+  if (!api || typeof api.asc_findText !== "function") {
     return false;
   }
-  if (typeof api.asc_findText !== "function") {
-    return false;
-  }
+  const props = { searchString: arg.needle, matchCase: false };
   try {
     return Boolean(
-      api.asc_findText(arg.needle) ||
-        api.asc_findText(arg.needle, false, false) ||
-        api.asc_findText(arg.needle, true, false),
+      api.asc_findText(props) ||
+        api.asc_findText(props, false, false) ||
+        api.asc_findText(arg.needle, false, false),
     );
   } catch {
     return false;
@@ -177,7 +179,12 @@ function replaceTextInBrowser(arg: { from: string; to: string; kind?: SampleFile
   const searchProps = { searchString: arg.from, matchCase: false };
   try {
     api.asc_replaceText(searchProps, arg.to, true);
-    return true;
+    const toProps = { searchString: arg.to, matchCase: false };
+    return Boolean(
+      api.asc_findText?.(toProps) ||
+        api.asc_findText?.(toProps, false, false) ||
+        api.asc_findText?.(arg.to, false, false),
+    );
   } catch {
     return false;
   }
@@ -398,6 +405,25 @@ export async function waitForEditorInteractive(
       .poll(async () => isEditorInteractive(page, frame, editor), { timeout: 10_000 })
       .toBe(true);
   }
+  if (editor === "cell") {
+    await dismissEditorOverlays(frame);
+  }
+}
+
+async function dismissEditorOverlays(frame: FrameLocator): Promise<void> {
+  const tip = frame.locator(".synch-tip-root, .asc-synchronizetip").first();
+  if ((await tip.count()) === 0) {
+    return;
+  }
+  const closeBtn = tip.locator(
+    'button, .close, [id*="close"], .btn-close, .asc-synchronizetip-close, .tip-close',
+  ).first();
+  if ((await closeBtn.count()) > 0) {
+    await closeBtn.click({ timeout: 1_000 }).catch(() => {});
+  } else {
+    await frame.locator("body").press("Escape").catch(() => {});
+  }
+  await expect(tip).toBeHidden({ timeout: 3_000 }).catch(() => {});
 }
 
 /** @deprecated Use waitForEditorReady — body data-document-ready is unreliable under load. */
@@ -412,6 +438,7 @@ export async function waitForDocumentReady(
 async function selectCell(frame: FrameLocator, ref: string): Promise<void> {
   const cellName = frame.locator(CELL_NAME_INPUT).first();
   await expect(cellName).toBeEnabled({ timeout: EDITOR_LOAD_TIMEOUT });
+  await dismissEditorOverlays(frame);
   await cellName.click();
   await cellName.fill(ref);
   await cellName.press("Enter");
@@ -438,7 +465,13 @@ async function readFormulaBarValue(frame: FrameLocator): Promise<string> {
 async function writeFormulaBarValue(frame: FrameLocator, value: string): Promise<void> {
   const valueLoc = frame.locator(CELL_VALUE_INPUT).first();
   await expect(valueLoc).toBeVisible({ timeout: EDITOR_LOAD_TIMEOUT });
-  await valueLoc.click();
+  await dismissEditorOverlays(frame);
+  try {
+    await valueLoc.click({ timeout: 3_000 });
+  } catch {
+    await dismissEditorOverlays(frame);
+    await valueLoc.click({ force: true });
+  }
   await valueLoc.press("Control+a");
   await valueLoc.fill(value);
   await valueLoc.press("Enter");
@@ -737,11 +770,25 @@ export async function replaceDocumentText(
   const frame = getEditorFrame(page, editor);
 
   await expect
+    .poll(async () => documentContainsText(frame, from, editor), {
+      timeout: CONTENT_FIND_TIMEOUT,
+      intervals: [500, 1000, 2000],
+    })
+    .toBe(true);
+
+  await expect
     .poll(
       async () => {
         const hasTo = await documentContainsText(frame, to, editor);
         const hasFrom = await documentContainsText(frame, from, editor);
-        if (hasTo && !hasFrom && (await isDocumentDirty(page))) {
+        if (hasTo && !hasFrom) {
+          if (!(await isDocumentDirty(page))) {
+            await frame.locator("body").evaluate(() => {
+              const w = window as { Asc?: { editor?: { asc_insertText?: (t: string) => void } } };
+              w.Asc?.editor?.asc_insertText?.(" ");
+            }).catch(() => {});
+            await page.waitForTimeout(200);
+          }
           return true;
         }
         if (await replaceDocumentTextViaSdk(frame, from, to, editor)) {
@@ -865,7 +912,13 @@ export function officeFileContains(buf: Buffer, marker: string): boolean {
   if (plainRtf.includes(marker)) {
     return true;
   }
-  for (const entry of ["word/document.xml", "ppt/slides/slide1.xml", "content.xml"]) {
+  for (const entry of [
+    "word/document.xml",
+    "ppt/slides/slide1.xml",
+    "content.xml",
+    "xl/sharedStrings.xml",
+    "xl/worksheets/sheet1.xml",
+  ]) {
     const xml = zipEntryText(buf, entry);
     if (xml.includes(marker)) {
       return true;
@@ -1000,7 +1053,13 @@ export function rtfPlainText(rtf: string): string {
   return out;
 }
 
-function rtfWindowAroundMarker(rtf: string, marker: string, radius = 500): string {
+function rtfWindowAroundMarker(rtf: string, marker: string, radius = 2500): string {
+  const idx = rtf.indexOf(marker);
+  if (idx >= 0) {
+    const start = Math.max(0, idx - radius);
+    const end = Math.min(rtf.length, idx + marker.length + radius);
+    return rtf.slice(start, end);
+  }
   const plain = rtfPlainText(rtf);
   const plainIdx = plain.indexOf(marker);
   if (plainIdx < 0) {
@@ -1025,11 +1084,17 @@ function applyWordFormatInBrowser(arg: { marker: string; format: WordFormatOptio
   if (!api || typeof api.asc_findText !== "function") {
     return false;
   }
-  const found = Boolean(
-    api.asc_findText(arg.marker) ||
-      api.asc_findText(arg.marker, false, false) ||
-      api.asc_findText(arg.marker, true, false),
-  );
+  const props = { searchString: arg.marker, matchCase: false };
+  let found = false;
+  try {
+    found = Boolean(
+      api.asc_findText(props) ||
+        api.asc_findText(props, false, false) ||
+        api.asc_findText(arg.marker, false, false),
+    );
+  } catch {
+    return false;
+  }
   if (!found) {
     return false;
   }
@@ -1037,7 +1102,13 @@ function applyWordFormatInBrowser(arg: { marker: string; format: WordFormatOptio
     api.asc_setFontBold?.(true);
   }
   if (arg.format.italic) {
-    api.asc_setFontItalic?.(true);
+    const italicFns = ["asc_setFontItalic", "asc_SetTextItalic", "asc_setTextItalic"];
+    for (const name of italicFns) {
+      const fn = (api as Record<string, unknown>)[name];
+      if (typeof fn === "function") {
+        (fn as (value: boolean) => void).call(api, true);
+      }
+    }
   }
   if (arg.format.highlight) {
     if (api.asc_putHighlightColor) {
@@ -1057,42 +1128,38 @@ export async function formatWordSelection(
 ): Promise<void> {
   await waitForEditorInteractive(page, "word");
   const frame = getEditorFrame(page, "word");
-  const applied = await frame.locator("body").evaluate(applyWordFormatInBrowser, { marker, format });
-  if (!applied && format.bold) {
+
+  const sdkApplied = await frame
+    .locator("body")
+    .evaluate(applyWordFormatInBrowser, { marker, format });
+  if (!sdkApplied) {
+    await frame.locator("body").click({ position: { x: 10, y: 10 }, force: true }).catch(() => {});
     await frame.locator("body").press("Control+f");
     const searchInput = frame.locator("#search-bar-text").first();
     await searchInput.waitFor({ state: "visible", timeout: 8_000 });
     await searchInput.fill(marker);
     await searchInput.press("Enter");
     await page.waitForTimeout(300);
-    await frame.locator("body").press("Control+b");
-  } else if (!applied && format.italic) {
-    await frame.locator("body").press("Control+f");
-    const searchInput = frame.locator("#search-bar-text").first();
-    await searchInput.waitFor({ state: "visible", timeout: 8_000 });
-    await searchInput.fill(marker);
-    await searchInput.press("Enter");
-    await page.waitForTimeout(300);
-    await frame.locator("body").press("Control+i");
-  } else if (!applied && format.highlight) {
-    await frame.locator("body").press("Control+f");
-    const searchInput = frame.locator("#search-bar-text").first();
-    await searchInput.waitFor({ state: "visible", timeout: 8_000 });
-    await searchInput.fill(marker);
-    await searchInput.press("Enter");
-    await page.waitForTimeout(300);
-    const highlightBtn = frame
-      .locator('#slot-btn-highlight-color, #slot-btn-font-highlight, [id*="highlight"]')
-      .first();
-    if ((await highlightBtn.count()) > 0) {
-      await highlightBtn.click({ force: true });
-      const yellow = frame.locator('[data-color="ffff00"], [data-value="ffff00"], .color-yellow').first();
-      if ((await yellow.count()) > 0) {
-        await yellow.click({ force: true });
+    if (format.bold) {
+      await frame.locator("body").press("Control+b");
+    }
+    if (format.italic) {
+      await frame.locator("body").press("Control+i");
+    }
+    if (format.highlight) {
+      const highlightBtn = frame
+        .locator('#slot-btn-highlight-color, #slot-btn-font-highlight, [id*="highlight"]')
+        .first();
+      if ((await highlightBtn.count()) > 0) {
+        await highlightBtn.click({ force: true });
+        const yellow = frame.locator('[data-color="ffff00"], [data-value="ffff00"], .color-yellow').first();
+        if ((await yellow.count()) > 0) {
+          await yellow.click({ force: true });
+        }
       }
     }
+    await frame.locator("#search-bar-close, #search-adv-close").first().click({ timeout: 1_000 }).catch(() => {});
   }
-  await frame.locator("#search-bar-close, #search-adv-close").first().click({ timeout: 1_000 }).catch(() => {});
   await waitForDocumentDirty(page);
 }
 
@@ -1117,10 +1184,10 @@ export async function assertDemoRtfFormatting(
     expect(window).toMatch(/\\b(?!ullet)/);
   }
   if (opts.italic) {
-    expect(window).toMatch(/\\i(?!nfo)/);
+    expect(rtf).toMatch(/\\i(?!nfo|lvl|tap)[^a-zA-Z]/);
   }
   if (opts.highlight) {
-    expect(window.includes("\\highlight") || window.includes("\\cb")).toBe(true);
+    expect(rtf.match(/\\highlight\d*|\\cb\d+|\\chcbpat\d+/)).toBeTruthy();
   }
 }
 

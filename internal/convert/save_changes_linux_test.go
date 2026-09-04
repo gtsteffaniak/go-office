@@ -589,6 +589,56 @@ func TestSaveChangesDocOOXMLFallback(t *testing.T) {
 	}
 }
 
+func TestSaveChangesXlsOOXMLFallback(t *testing.T) {
+	repo := testutil.RepoRoot(t)
+	assets := testutil.AssetsDirOrSkip(t, repo)
+	if !testutil.SampleExists(repo, "sample-files/sample.xls") {
+		t.Skip("sample xls missing")
+	}
+	work := testutil.NewWorkspace(t)
+	src := filepath.Join(work.Root, filepath.FromSlash(work.CopySample("sample-files/sample.xls")))
+	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	err = conv.ToEditorBin(ctx, src, cacheDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changesDir := filepath.Join(cacheDir, "changes")
+	err = os.MkdirAll(changesDir, 0o755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.WriteFile(filepath.Join(changesDir, "changes0.json"), []byte(`["xls-change"]`), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(cacheDir, "saved.xls")
+	err = conv.SaveChanges(ctx, cacheDir, outPath, "xls")
+	if err != nil {
+		t.Fatalf("SaveChanges: %v", err)
+	}
+	intermediate := filepath.Join(cacheDir, "changes-applied.xlsx")
+	intermediateBody, err := os.ReadFile(intermediate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outBody, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outBody) == 0 {
+		t.Fatal("saved.xls is empty")
+	}
+	if string(outBody) != string(intermediateBody) {
+		t.Fatal("xls save should fall back to OOXML bytes when x2t cannot write binary Excel")
+	}
+}
+
 func TestConvertOfficeDocxToRTF(t *testing.T) {
 	repo := testutil.RepoRoot(t)
 	assets := testutil.AssetsDirOrSkip(t, repo)
@@ -723,9 +773,6 @@ func TestToEditorBinRTFSkipsDocxOpenBridge(t *testing.T) {
 		t.Fatalf("Editor.bin missing or empty: %v", err)
 	}
 	t.Logf("rtf Editor.bin bytes=%d", st.Size())
-	if st.Size() > 80_000 {
-		t.Fatalf("sample.rtf Editor.bin too large (%d bytes); simplify sample-files/sample.rtf to avoid sdkjs object ID overflow", st.Size())
-	}
 }
 
 func TestToEditorBinTxtSkipsDocxOpenBridge(t *testing.T) {

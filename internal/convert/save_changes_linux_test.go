@@ -191,6 +191,60 @@ func TestSaveChangesRTFRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSaveChangesRTFFromCorruptedSource(t *testing.T) {
+	repo := testutil.RepoRoot(t)
+	assets := testutil.AssetsDirOrSkip(t, repo)
+	if !testutil.SampleExists(repo, "sample-files/sample.rtf") {
+		t.Skip("sample rtf missing")
+	}
+	work := testutil.NewWorkspace(t)
+	src := filepath.Join(work.Root, filepath.FromSlash(work.CopySample("sample-files/sample.rtf")))
+	raw, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	corrupt := strings.ReplaceAll(string(raw), "SYSTEM BRIEF & DAILY", "SYSTEM BRIEF &amp; DAILY")
+	corrupt = strings.ReplaceAll(corrupt, "> Reminder", "&gt; Reminder")
+	if err = os.WriteFile(src, []byte(corrupt), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	err = conv.ToEditorBin(ctx, src, cacheDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changesDir := filepath.Join(cacheDir, "changes")
+	err = os.MkdirAll(changesDir, 0o755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.WriteFile(filepath.Join(changesDir, "changes0.json"), []byte(`["rtf-change"]`), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(cacheDir, "saved.rtf")
+	err = conv.SaveChanges(ctx, cacheDir, outPath, "rtf")
+	if err != nil {
+		t.Fatalf("SaveChanges: %v", err)
+	}
+	body, err := os.ReadFile(outPath)
+	if err != nil || len(body) == 0 {
+		t.Fatalf("saved.rtf missing or empty: %v", err)
+	}
+	if strings.Contains(string(body), "&amp;") || strings.Contains(string(body), "&gt;") {
+		t.Fatalf("saved.rtf should repair corrupted entity literals: %q", truncate(body, 200))
+	}
+	if !strings.Contains(string(body), "& DAILY") {
+		t.Fatalf("saved.rtf missing decoded ampersand: %q", truncate(body, 200))
+	}
+}
+
 func TestWriteRTFFromDocxPlainText(t *testing.T) {
 	repo := testutil.RepoRoot(t)
 	if !testutil.SampleExists(repo, "sample-files/sample.docx") {

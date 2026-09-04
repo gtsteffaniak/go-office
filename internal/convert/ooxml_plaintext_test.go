@@ -62,6 +62,18 @@ func TestOOXMLPlainTextDecodesEntities(t *testing.T) {
 	}
 }
 
+func TestOOXMLPlainTextDecodesDoubleEncodedEntities(t *testing.T) {
+	raw := writeTestDocxZip(t, `<w:document><w:body>
+<w:p><w:r><w:t>SYSTEM BRIEF &amp;amp; DAILY LOG</w:t></w:r></w:p>
+<w:p><w:r><w:t>&amp;gt; Reminder</w:t></w:r></w:p>
+</w:body></w:document>`)
+	got := OOXMLPlainText(raw)
+	want := "SYSTEM BRIEF & DAILY LOG\n> Reminder"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
 func TestWriteRTFFromDocxPlainTextDecodesEntities(t *testing.T) {
 	dir := t.TempDir()
 	docx := filepath.Join(dir, "applied.docx")

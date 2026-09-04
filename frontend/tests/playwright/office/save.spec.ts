@@ -119,6 +119,8 @@ test("txt save round-trip via demo file API", async ({ page, request }, testInfo
 test("rtf save round-trip via demo file API", async ({ page, request }, testInfo) => {
   const file = forkSample(RTF_SOURCE, testInfo);
   await assertDemoFileContains(request, file, RTF_ORIGINAL);
+  await assertDemoFileContains(request, file, "&amp;", { present: false });
+  await assertDemoFileContains(request, file, "> Reminder");
 
   await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {

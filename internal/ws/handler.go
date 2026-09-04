@@ -29,6 +29,7 @@ type Handler struct {
 	Opener       *Opener
 	openHook     DocumentOpener
 	Scheduler    *saveScheduler
+	saver        DocumentSaver
 }
 
 // HandlerOptions configures a coauthoring handler.
@@ -70,10 +71,28 @@ func NewWithOptions(opts HandlerOptions) *Handler {
 	h.PublicOrigin = opts.PublicOrigin
 	h.Opener = opts.Opener
 	h.openHook = opts.OpenHook
+	h.saver = opts.Saver
 	if opts.Saver != nil && opts.CacheDir != "" {
 		h.Scheduler = newSaveScheduler(opts.CacheDir, opts.Saver, opts.Logger, opts.SaveDelay, opts.ForceSaveFallbackDelay)
 	}
 	return h
+}
+
+func (h *Handler) registerDocumentSession(docKey string, req authRequest) {
+	if h.saver == nil {
+		return
+	}
+	reg, ok := h.saver.(DocumentSessionRegistrar)
+	if !ok {
+		return
+	}
+	fileType := ""
+	documentURL := ""
+	if req.Open != nil {
+		fileType = req.Open.Format
+		documentURL = req.Open.URL
+	}
+	reg.RegisterDocumentSession(docKey, req.IntegratorCallbackURL(), fileType, documentURL)
 }
 
 func (h *Handler) documentOpener() DocumentOpener {
@@ -156,6 +175,7 @@ func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey st
 				hadOpen := sess.hadDocumentOpen()
 				sess.onConnect(connectAuthData(packet))
 				if req, ok := parseAuthPacket(packet); ok {
+					h.registerDocumentSession(docKey, req)
 					if hadOpen {
 						if h.Logger != nil {
 							h.Logger.Info("coauthoring reconnect", "key", docKey, "keptOpen", true)
@@ -166,6 +186,7 @@ func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey st
 				}
 			case strings.HasPrefix(packet, "42"):
 				if req, ok := parseAuthPacket(packet); ok {
+					h.registerDocumentSession(docKey, req)
 					sess.onAuth(req)
 					if !sess.hadDocumentOpen() {
 						sess.startOpen(h.documentOpener(), req, CoauthoringOrigin(h.PublicOrigin, r))

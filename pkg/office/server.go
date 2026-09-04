@@ -178,7 +178,7 @@ func (s *Server) buildRoutes() {
 	if s.opts.AssetDir != "" {
 		webApps := static.Dir(s.opts.AssetDir, "web-apps")
 		sdkjs := static.Dir(s.opts.AssetDir, "sdkjs")
-		fonts := static.Dir(s.opts.AssetDir, "fonts")
+		fonts := static.DirWithPolicy(s.opts.AssetDir, "fonts", true)
 		if webApps != nil {
 			s.mux.Handle(joinURLPath(prefix, "web-apps/"), http.StripPrefix(joinURLPath(prefix, "web-apps"), webApps))
 		}

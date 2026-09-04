@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const defaultPollHold = 20 * time.Second
+const defaultPollHold = 2 * time.Second
 
 // DocumentOpener opens or converts a document for coauthoring.
 type DocumentOpener interface {
@@ -34,17 +34,17 @@ type Handler struct {
 
 // HandlerOptions configures a coauthoring handler.
 type HandlerOptions struct {
-	Version      string
-	BasePath     string
-	Logger       *slog.Logger
-	Debug        bool
-	PollHold     *time.Duration
-	PublicOrigin string
-	Opener       *Opener
-	OpenHook     DocumentOpener
-	CacheDir              string
-	Saver                 DocumentSaver
-	SaveDelay             *time.Duration
+	Version                string
+	BasePath               string
+	Logger                 *slog.Logger
+	Debug                  bool
+	PollHold               *time.Duration
+	PublicOrigin           string
+	Opener                 *Opener
+	OpenHook               DocumentOpener
+	CacheDir               string
+	Saver                  DocumentSaver
+	SaveDelay              *time.Duration
 	ForceSaveFallbackDelay *time.Duration
 }
 

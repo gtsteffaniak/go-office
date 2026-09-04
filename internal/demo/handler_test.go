@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	office "github.com/quantumx-apps/go-office/pkg/office"
 	"github.com/quantumx-apps/go-office/internal/demo"
 	"github.com/quantumx-apps/go-office/internal/home"
+	office "github.com/quantumx-apps/go-office/pkg/office"
 )
 
 type memStore struct {
@@ -87,6 +87,12 @@ func TestDemoLandingAndConfig(t *testing.T) {
 	if !strings.Contains(body, "/api/office") || !strings.Contains(body, "/demo/config") {
 		t.Fatal("expected relative API config URL in viewer page")
 	}
+	if !strings.Contains(body, "/demo/warm?file=") {
+		t.Fatal("expected warm endpoint hook in viewer page")
+	}
+	if !strings.Contains(body, "rel=\"preload\"") {
+		t.Fatal("expected api.js preload in viewer page")
+	}
 	if strings.Contains(body, "http://localhost") || strings.Contains(body, "http://127.0.0.1") {
 		t.Fatal("viewer page should use same-origin relative URLs, not absolute hosts")
 	}
@@ -114,5 +120,34 @@ func TestDemoLandingAndConfig(t *testing.T) {
 	}
 	if url == "" || !strings.Contains(url, "/api/office/demo/file/") {
 		t.Fatalf("config document url: %+v", doc)
+	}
+}
+
+func TestDemoWarmAccepted(t *testing.T) {
+	repoRoot := filepath.Join("..", "..")
+	sample := demo.DefaultSamplesDir + "/sample.doc"
+	samplePath := filepath.Join(repoRoot, filepath.FromSlash(sample))
+	if _, err := os.Stat(samplePath); err != nil {
+		t.Skipf("repository sample not present: %v", err)
+	}
+
+	store := &memStore{root: repoRoot}
+	srv, err := office.New(store, office.Options{BasePath: "/office"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := demo.Attach(srv, store, demo.Options{
+		PublicOrigin: "http://localhost:8080",
+		DataRoot:     repoRoot,
+		SamplesDir:   demo.DefaultSamplesDir,
+		APIBasePath:  home.DefaultAPIBasePath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/office/demo/warm?file="+sample, nil))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("warm status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }

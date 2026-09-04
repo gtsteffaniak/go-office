@@ -28,6 +28,32 @@ func TestEditorBinReusableRequiresMatchingSourceHash(t *testing.T) {
 	}
 }
 
+func TestEditorBinCached(t *testing.T) {
+	dir := t.TempDir()
+	if EditorBinCached(dir) {
+		t.Fatal("empty dir should not be cached")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Editor.bin"), []byte("bin"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !EditorBinCached(dir) {
+		t.Fatal("Editor.bin should be cached")
+	}
+}
+
+func TestBrowserOriginCached(t *testing.T) {
+	dir := t.TempDir()
+	if BrowserOriginCached(dir, "pdf") {
+		t.Fatal("missing origin should not be cached")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "origin.pdf"), []byte("%PDF"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !BrowserOriginCached(dir, "pdf") {
+		t.Fatal("origin.pdf should be cached")
+	}
+}
+
 func TestFileSHA256(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "a.csv")

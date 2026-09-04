@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>go-office demo</title>
+  <link rel="preload" href="{{.APIScriptURL}}" as="script" />
   <style>
     * { box-sizing: border-box; }
     html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; background: #f4f4f4; }
@@ -36,6 +37,7 @@
   <div id="editor"></div>
   <script>
     var SAMPLE_FILE = {{.FileJSON}};
+    var DOCUMENT_KEY = {{.DocumentKeyJSON}};
     var officeBase = {{.OfficeBaseJSON}};
     var apiBase = {{.APIBaseJSON}};
     var landingURL = {{.LandingURLJSON}};
@@ -129,6 +131,11 @@
       autosavePollTimer = setTimeout(tick, 400);
     }
 
+    function warmDocument() {
+      var warmUrl = joinPath(officeBase, "/demo/warm?file=" + encodeURIComponent(SAMPLE_FILE));
+      fetch(warmUrl, { cache: "no-store" }).catch(function () { /* best-effort */ });
+    }
+
     function loadEditor() {
       var apiScript = document.getElementById("office-api");
       apiScript.onerror = function () {
@@ -145,16 +152,16 @@
           .then(function (config) {
             document.getElementById("doc-title").textContent = config.document.title;
             setStatus("Opening " + config.document.title + "…");
-            fetchDemoFileBytes()
-              .then(function (bytes) {
-                lastSavedFileBytes = bytes;
-                saveBaselineBytes = bytes;
-              })
-              .catch(function () { /* baseline optional */ });
             var baseEvents = config.events || {};
             config.events = {
               onDocumentReady: function () {
                 document.body.setAttribute("data-document-ready", "true");
+                fetchDemoFileBytes()
+                  .then(function (bytes) {
+                    lastSavedFileBytes = bytes;
+                    saveBaselineBytes = bytes;
+                  })
+                  .catch(function () { /* baseline optional */ });
                 if (typeof baseEvents.onDocumentReady === "function") {
                   baseEvents.onDocumentReady();
                 }
@@ -213,6 +220,7 @@
     }
 
     function boot() {
+      warmDocument();
       if (!("serviceWorker" in navigator)) {
         loadEditor();
         return;

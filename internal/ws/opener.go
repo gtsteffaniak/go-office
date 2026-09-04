@@ -63,6 +63,17 @@ func (o *Opener) Open(ctx context.Context, origin, basePath, docKey string, cmd 
 		o.Logger.Error("flush pending changes before open", "key", docKey, "err", err)
 	}
 
+	outDir := filepath.Join(o.CacheDir, docKey)
+	// Drop stale coauthoring blobs from a prior session; authChanges is always empty on connect.
+	clearChanges(outDir)
+
+	if packets, ok, err := o.openFromCache(cmd, origin, basePath, docKey, ext, outDir); ok || err != nil {
+		if err != nil {
+			return o.errorPackets(cmd.Command, err)
+		}
+		return packets, nil
+	}
+
 	tmp, err := os.CreateTemp("", "go-office-src-*."+ext)
 	if err != nil {
 		return o.errorPackets(cmd.Command, err)
@@ -74,9 +85,6 @@ func (o *Opener) Open(ctx context.Context, origin, basePath, docKey string, cmd 
 		return o.errorPackets(cmd.Command, err)
 	}
 
-	outDir := filepath.Join(o.CacheDir, docKey)
-	// Drop stale coauthoring blobs from a prior session; authChanges is always empty on connect.
-	clearChanges(outDir)
 	if convert.IsBrowserEditorFormat(ext) {
 		return o.openBrowserDocument(cmd, origin, basePath, docKey, ext, tmpPath, outDir)
 	}
@@ -93,7 +101,41 @@ func (o *Opener) Open(ctx context.Context, origin, basePath, docKey string, cmd 
 		}
 		return o.errorPackets(cmd.Command, err)
 	}
+	return o.editorBinOpenPackets(cmd.Command, origin, basePath, docKey, outDir)
+}
 
+func (o *Opener) openFromCache(cmd openCmd, origin, basePath, docKey, ext, outDir string) ([]string, bool, error) {
+	if convert.IsBrowserEditorFormat(ext) {
+		if !convert.BrowserOriginCached(outDir, ext) {
+			return nil, false, nil
+		}
+		cacheName := "origin." + ext
+		files := map[string]string{
+			cacheName: fileURL(origin, basePath, docKey, cacheName),
+		}
+		pkt, err := documentOpenPacket(cmd.Command, "ok", files)
+		if err != nil {
+			return nil, true, err
+		}
+		if o.Logger != nil {
+			o.Logger.Info("document open ok (cached origin)", "key", docKey, "format", ext)
+		}
+		return []string{pkt}, true, nil
+	}
+	if !convert.EditorBinCached(outDir) {
+		return nil, false, nil
+	}
+	packets, err := o.editorBinOpenPackets(cmd.Command, origin, basePath, docKey, outDir)
+	if err != nil {
+		return nil, true, err
+	}
+	if o.Logger != nil {
+		o.Logger.Info("document open ok (cached editor bin)", "key", docKey)
+	}
+	return packets, true, nil
+}
+
+func (o *Opener) editorBinOpenPackets(cmdType, origin, basePath, docKey, outDir string) ([]string, error) {
 	files := map[string]string{
 		"Editor.bin": fileURL(origin, basePath, docKey, "Editor.bin"),
 	}
@@ -106,8 +148,7 @@ func (o *Opener) Open(ctx context.Context, origin, basePath, docKey string, cmd 
 			files[name] = fileURL(origin, basePath, docKey, name)
 		}
 	}
-
-	pkt, err := documentOpenPacket(cmd.Command, "ok", files)
+	pkt, err := documentOpenPacket(cmdType, "ok", files)
 	if err != nil {
 		return nil, err
 	}

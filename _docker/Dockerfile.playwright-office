@@ -1,13 +1,9 @@
 # Self-contained CI image: Playwright + go-office demo + E2E tests.
 #   make build && make test-playwright
+#
+# Browser/tooling base: ghcr.io/gtsteffaniak/playwright-base:chromium
 
-FROM node:22-bookworm AS playwright-base
-WORKDIR /app/frontend
-RUN npm init -y \
- && npm i @playwright/test@1.49.1 @types/node@22.10.2 typescript@5.7.2 \
- && npx playwright install --with-deps firefox
-
-FROM playwright-base
+FROM ghcr.io/gtsteffaniak/playwright-base:chromium
 WORKDIR /app
 
 LABEL org.opencontainers.image.source="https://github.com/quantumx-apps/go-office" \
@@ -22,8 +18,7 @@ COPY frontend/package.json frontend/package-lock.json* ./
 COPY frontend/playwright.config.ts ./
 COPY frontend/tests/ ./tests/
 
-RUN npm install \
- && npx playwright install --with-deps firefox
+RUN npm install
 
 RUN chmod +x /app/go-office /app/assets/converter/bin/* 2>/dev/null || true
 
@@ -42,9 +37,5 @@ RUN timeout 10m sh -c 'cd /app && ./go-office \
       -data /app \
       -samples sample-files \
       -public http://127.0.0.1:8080 & \
-    for i in $(seq 1 30); do \
-      curl -sf http://127.0.0.1:8080/health >/dev/null && break; \
-      sleep 1; \
-    done && \
-    curl -sf http://127.0.0.1:8080/health >/dev/null && \
+    sleep 5 && \
     cd /app/frontend && npx playwright test'

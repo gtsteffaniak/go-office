@@ -55,6 +55,33 @@ func TestSaveBridgeRouting(t *testing.T) {
 	}
 }
 
+func TestLegacyBinaryExtFallbacks(t *testing.T) {
+	cases := []struct {
+		ext         string
+		wordLegacy  bool
+		slideLegacy bool
+		sheetLegacy bool
+	}{
+		{"doc", true, false, false},
+		{"dot", true, false, false},
+		{"ppt", false, true, false},
+		{"xls", false, false, true},
+		{"xlsx", false, false, false},
+		{"docx", false, false, false},
+	}
+	for _, tc := range cases {
+		if got := legacyWordBinaryExt(tc.ext); got != tc.wordLegacy {
+			t.Fatalf("%s wordLegacy = %v want %v", tc.ext, got, tc.wordLegacy)
+		}
+		if got := legacySlideBinaryExt(tc.ext); got != tc.slideLegacy {
+			t.Fatalf("%s slideLegacy = %v want %v", tc.ext, got, tc.slideLegacy)
+		}
+		if got := legacySpreadsheetBinaryExt(tc.ext); got != tc.sheetLegacy {
+			t.Fatalf("%s sheetLegacy = %v want %v", tc.ext, got, tc.sheetLegacy)
+		}
+	}
+}
+
 func TestEditorImportSourceHash(t *testing.T) {
 	base := "abc123"
 	if got := editorImportSourceHash(base, "docx"); got != base {

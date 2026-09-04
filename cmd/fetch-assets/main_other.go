@@ -9,6 +9,6 @@ import (
 
 func main() {
 	fmt.Fprintln(os.Stderr, "fetch-assets is Linux-only (downloads and unpacks the Euro-Office .deb).")
-	fmt.Fprintln(os.Stderr, "Use WSL, a Linux VM, or GitHub Actions CI to populate ./assets/.")
+	fmt.Fprintln(os.Stderr, "Run: make build  (uses Docker on macOS/Windows when Docker is installed)")
 	os.Exit(1)
 }

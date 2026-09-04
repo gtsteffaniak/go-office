@@ -78,6 +78,12 @@ func (s *Server) Debug() bool {
 	return s.opts.Debug
 }
 
+// ResetCoauthoringSession clears in-memory coauthoring state for a document key.
+// Demo uses this on each viewer page load so transport reconnect is not treated as reload.
+func (s *Server) ResetCoauthoringSession(docKey string) {
+	ws.ClearDocumentSession(docKey)
+}
+
 // Mount registers an additional handler on the document server mux.
 func (s *Server) Mount(pattern string, handler http.Handler) {
 	s.mux.Handle(pattern, handler)

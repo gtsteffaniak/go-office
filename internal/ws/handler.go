@@ -153,14 +153,23 @@ func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey st
 		for _, packet := range parsePostPackets(string(body)) {
 			switch {
 			case strings.HasPrefix(packet, "40"):
+				hadOpen := sess.hadDocumentOpen()
 				sess.onConnect(connectAuthData(packet))
 				if req, ok := parseAuthPacket(packet); ok {
-					sess.startOpen(h.documentOpener(), req, CoauthoringOrigin(h.PublicOrigin, r))
+					if hadOpen {
+						if h.Logger != nil {
+							h.Logger.Info("coauthoring reconnect", "key", docKey, "keptOpen", true)
+						}
+					} else {
+						sess.startOpen(h.documentOpener(), req, CoauthoringOrigin(h.PublicOrigin, r))
+					}
 				}
 			case strings.HasPrefix(packet, "42"):
 				if req, ok := parseAuthPacket(packet); ok {
 					sess.onAuth(req)
-					sess.startOpen(h.documentOpener(), req, CoauthoringOrigin(h.PublicOrigin, r))
+					if !sess.hadDocumentOpen() {
+						sess.startOpen(h.documentOpener(), req, CoauthoringOrigin(h.PublicOrigin, r))
+					}
 					continue
 				}
 				if msg, ok := parseSocketMessage(packet); ok {
@@ -180,7 +189,7 @@ func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey st
 	sess := getSession(sid, docKey, h.Build, h.BasePath)
 	if packets := sess.waitForPackets(r.Context(), h.pollHoldDuration()); len(packets) > 0 {
 		if h.Debug && h.Logger != nil {
-			h.Logger.Debug("coauthoring send", "key", docKey, "sid", sid, "types", packetTypes(packets))
+			h.Logger.Debug("coauthoring send", "key", docKey, "sid", sid, "types", packetTypes(packets), "detail", summarizeOutboundPackets(packets))
 		}
 		_, _ = w.Write([]byte(joinPackets(packets)))
 		return

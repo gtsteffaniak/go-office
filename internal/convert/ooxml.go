@@ -3,6 +3,7 @@ package convert
 import (
 	"archive/zip"
 	"bytes"
+	"html"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,6 +12,19 @@ import (
 )
 
 var ooxmlTextRe = regexp.MustCompile(`<w:t[^>]*>([^<]*)</w:t>`)
+
+// decodeOOXMLText reverses XML entity encoding from w:t node text. Iterates because
+// documents opened from RTF files that contain literal "&amp;" produce double-encoded
+// OOXML (&amp;amp;) in the docx bridge intermediate.
+func decodeOOXMLText(s string) string {
+	for {
+		next := html.UnescapeString(s)
+		if next == s {
+			return s
+		}
+		s = next
+	}
+}
 
 // OOXMLPart returns a named entry from an OOXML zip (docx/xlsx/pptx).
 func OOXMLPart(raw []byte, name string) ([]byte, error) {
@@ -49,7 +63,7 @@ func OOXMLPlainText(raw []byte) string {
 		var b strings.Builder
 		for _, m := range matches {
 			if len(m) > 1 {
-				b.Write(m[1])
+				b.WriteString(decodeOOXMLText(string(m[1])))
 			}
 		}
 		if b.Len() > 0 {

@@ -1,11 +1,15 @@
-# Reusable Alpine + Go builder for static go-office binaries.
+# Linux Go toolchain image for go-office development and cross-host builds.
 #
-#   make build-docker-builder
+#   make docker-dev-image     # build (macOS/Windows Makefile targets)
+#   make build-docker-builder # same image, alternate target name
 #
-# Euro-Office assets and x2t still come from the Debian assets stage in
-# _docker/Dockerfile — the .deb unpack needs dpkg on glibc Linux.
+# Includes dpkg + file so fetch-assets, asset checks, and x2t validation work.
 
-FROM golang:1.25-alpine
-RUN apk add --no-cache git ca-certificates
+FROM golang:1.27-bookworm
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates dpkg file \
+ && rm -rf /var/lib/apt/lists/*
+
 ENV CGO_ENABLED=0
 WORKDIR /src

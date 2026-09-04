@@ -140,3 +140,72 @@ func TestPersistCSVThenDocxDoesNotBlock(t *testing.T) {
 	}
 	_ = docxRel
 }
+
+func TestPersistRefreshesEditorBin(t *testing.T) {
+	repo := testutil.RepoRoot(t)
+	assets := testutil.AssetsDirOrSkip(t, repo)
+	if !testutil.SampleExists(repo, "sample-files/sample.txt") {
+		t.Skip("sample txt missing")
+	}
+
+	work := testutil.NewWorkspace(t)
+	txtRel := work.CopySample("sample-files/sample.txt")
+	absTxt := filepath.Join(work.Root, filepath.FromSlash(txtRel))
+
+	srv, err := office.New(work.Storage, office.Options{
+		AssetDir:     assets,
+		ConvertLimit: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	docKey := "persist-refresh-txt"
+	cacheDir := filepath.Join(assets, "cache", docKey)
+	if err = os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(cacheDir) })
+
+	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if err = conv.ToEditorBin(ctx, absTxt, cacheDir); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(filepath.Join(cacheDir, "Editor.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+
+	changesDir := filepath.Join(cacheDir, "changes")
+	if err = os.MkdirAll(changesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(changesDir, "changes0.json"), []byte(`["txt-change"]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv.Sessions().UpsertDoc(session.Document{
+		Key:      docKey,
+		Path:     txtRel,
+		FileType: "txt",
+	})
+	if err = srv.PersistDocument(ctx, docKey); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(filepath.Join(cacheDir, "Editor.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().After(before.ModTime()) && after.Size() == before.Size() {
+		t.Fatal("Editor.bin should be refreshed after persist")
+	}
+	if _, err := os.Stat(changesDir); !os.IsNotExist(err) {
+		t.Fatal("changes dir should be cleared after persist refresh")
+	}
+}

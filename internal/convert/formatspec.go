@@ -35,7 +35,7 @@ func lookupFormat(ext string) formatSpec {
 		return formatSpec{saveBridge: bridgeXLSX, openNormCSV: true}
 	case "xls", "ods":
 		return formatSpec{saveBridge: bridgeXLSX}
-	// RTF: native import on open; save applies changes to docx then plain-text RTF export.
+	// RTF: native import on open; save applies changes to docx then x2t docx→rtf.
 	case "rtf":
 		return formatSpec{saveBridge: bridgeDOCX}
 	// ODT: open via docx prelude; save uses direct reverse (see saveDirectReverse).
@@ -101,6 +101,17 @@ func legacyWordBinaryExt(ext string) bool {
 func legacySlideBinaryExt(ext string) bool {
 	switch normExt(ext) {
 	case "ppt":
+		return true
+	default:
+		return false
+	}
+}
+
+// legacySpreadsheetBinaryExt reports formats x2t cannot write (binary Excel .xls exit 88).
+// Save path copies changes-applied.xlsx bytes at the legacy path when xlsx→xls fails.
+func legacySpreadsheetBinaryExt(ext string) bool {
+	switch normExt(ext) {
+	case "xls":
 		return true
 	default:
 		return false

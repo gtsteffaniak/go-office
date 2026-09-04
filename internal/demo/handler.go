@@ -163,6 +163,7 @@ func (h *Handler) serveConfig(w http.ResponseWriter, r *http.Request) {
 	fileURL := origin + apiBase + "/demo/file/" + strings.TrimPrefix(file, "/")
 	callbackURL := origin + apiBase + "/demo/callback"
 	key := documentKey(file, info, h.fileFingerprint(r.Context(), file, info))
+	h.office.ResetCoauthoringSession(key)
 	ext := strings.TrimPrefix(strings.ToLower(path.Ext(info.Name)), ".")
 
 	cfg, err := h.office.BuildEditorConfig(ctx, config.EditorRequest{
@@ -228,6 +229,7 @@ func (h *Handler) serveViewer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(buf.Bytes())
 }
 

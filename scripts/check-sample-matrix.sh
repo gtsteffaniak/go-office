@@ -112,4 +112,73 @@ then
 	exit 1
 fi
 
+# RTF body text may be \\uc1\\uNN* unicode runs; decode before marker checks.
+if ! python3 - "$dir/sample.rtf" <<'PY'
+import re, sys
+
+def rtf_plain(rtf: str) -> str:
+    out: list[str] = []
+    i = 0
+    uc_skip = 1
+    while i < len(rtf):
+        if rtf.startswith("\\par", i):
+            out.append("\n")
+            i += 4
+            if i < len(rtf) and rtf[i] == " ":
+                i += 1
+            continue
+        if rtf.startswith("\\uc", i):
+            j = i + 3
+            start = j
+            while j < len(rtf) and rtf[j].isdigit():
+                j += 1
+            if j > start:
+                uc_skip = int(rtf[start:j])
+            if j < len(rtf) and rtf[j] == " ":
+                j += 1
+            i = j
+            continue
+        m = re.match(r"\\u(-?\d+)", rtf[i:])
+        if m:
+            cp = int(m.group(1))
+            if cp < 0:
+                cp += 65536
+            out.append(chr(cp) if cp < 0x110000 else "?")
+            j = i + len(m.group(0))
+            if j < len(rtf) and rtf[j] == "?":
+                j += 1
+            for _ in range(uc_skip):
+                if j < len(rtf):
+                    j += 1
+            i = j
+            continue
+        if rtf[i] == "\\":
+            j = i + 1
+            if j < len(rtf) and rtf[j] == "*":
+                j += 1
+            while j < len(rtf) and rtf[j].isalpha():
+                j += 1
+            i = j
+            continue
+        if rtf[i] in "{}":
+            i += 1
+            continue
+        out.append(rtf[i])
+        i += 1
+    return "".join(out)
+
+path = sys.argv[1]
+with open(path, "rb") as f:
+    raw = f.read().decode("latin-1", errors="replace")
+text = rtf_plain(raw)
+for marker in ("SYSTEM BRIEF", "DAILY LOG", "Reminder"):
+    if marker not in text:
+        print(f"error: {path} missing decoded marker {marker!r}", file=sys.stderr)
+        sys.exit(1)
+PY
+then
+	echo "error: sample.rtf marker check failed" >&2
+	exit 1
+fi
+
 echo "sample matrix ok ($dir, $(echo $required | wc -w | tr -d ' ') files)"

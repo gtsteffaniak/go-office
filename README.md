@@ -8,9 +8,9 @@ Embedded Go document server library compatible with ONLYOFFICE / Euro-Office bro
 
 **Source:** https://github.com/quantumx-apps/go-office
 
-**Platform:** Linux only (`linux/amd64`, `linux/arm64`). Euro-Office assets and x2t are Linux binaries. The Go library can be cross-compiled into a Windows/macOS host binary, but the document server must run on Linux with a Linux `AssetDir`.
+**Platform:** The document server runs on Linux (`linux/amd64`, `linux/arm64`) with Linux Euro-Office assets and x2t. On macOS and Windows, use Docker (`make serve`, `make build-docker`) or the [dev container](.devcontainer/devcontainer.json).
 
-**Go:** 1.25 or newer. `go.mod` pins `toolchain go1.25.14`. `make setup` verifies your toolchain.
+**Go:** 1.27 or newer (`go.mod` requires Go 1.27). `make setup` verifies your toolchain.
 
 **Compatibility:** See [api.md](api.md) for the full ONLYOFFICE compatibility audit and known gaps. See [RELEASE.md](RELEASE.md) for version tags and release schedule.
 
@@ -25,10 +25,11 @@ Embedded Go document server library compatible with ONLYOFFICE / Euro-Office bro
 
 ## Quick start (Makefile)
 
-**Develop in WSL** — use the Linux clone at `~/git/go-office` (not the Windows path under `/mnt/c/`).
+Requires [Docker](https://docs.docker.com/get-docker/) on macOS and Windows. Linux can run natively or via Docker.
+
+Open in the **dev container** (VS Code / Cursor: *Reopen in Container*) for a full Linux toolchain with Go 1.27, Node, and Docker-in-Docker.
 
 ```bash
-cd ~/git/go-office
 make setup    # once: Go module dependencies
 make build    # fetch Euro-Office assets (~600MB) + compile bin/go-office
 make serve    # build (if needed) and start server on :8080
@@ -37,7 +38,7 @@ make test     # unit tests (no assets)
 
 | Target | What it does |
 |--------|----------------|
-| `make setup` | Verify Go 1.25+, `go mod download`, verify Linux |
+| `make setup` | Verify Go 1.27+, `go mod download` |
 | `make build` | Download Euro-Office assets into `./assets/`, compile `bin/go-office` |
 | `make serve` | Runs `build` then starts the server on `:8080` |
 | `make test` | `go test ./...` (no assets) |
@@ -68,7 +69,7 @@ The release is pinned in `scripts/euro-office.version` as `EURO_OFFICE_VERSION` 
 - `assets/converter/bin/` — Linux x2t binaries
 - `assets/VERSION` — Euro-Office version string for `Options.ProtocolVersion`
 
-**Non-Linux workstations:** use WSL or pre-populate `AssetDir`; runtime fetch is Linux-only.
+**Non-Linux workstations:** run `make build` / `make serve` (uses Docker automatically), use the dev container, or pre-populate `AssetDir`.
 
 ## Docker image
 

@@ -27,8 +27,7 @@ const TXT_ORIGINAL = "Sample-Files.com";
 const TXT_MARKER = "PW_SAVE_TXT_MARKER";
 
 const RTF_SOURCE = "sample-files/sample.rtf";
-const RTF_ORIGINAL = "Lorem ipsum dolor sit amet";
-const RTF_MARKER = "PW_SAVE_RTF_MARKER";
+const RTF_ORIGINAL = "SYSTEM BRIEF & DAILY LOG";
 
 const ODS_SOURCE = "sample-files/sample.ods";
 const ODS_CELL = CSV_CELL;
@@ -116,6 +115,8 @@ test("txt save round-trip via demo file API", async ({ page, request }, testInfo
 test("rtf save round-trip via demo file API", async ({ page, request }, testInfo) => {
   const file = forkSample(RTF_SOURCE, testInfo);
   await assertDemoFileContains(request, file, RTF_ORIGINAL);
+  await assertDemoFileContains(request, file, "&amp;", { present: false });
+  await assertDemoFileContains(request, file, "> Reminder");
 
   await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
@@ -124,15 +125,19 @@ test("rtf save round-trip via demo file API", async ({ page, request }, testInfo
   await waitForEditorReady(page, "word");
   await waitForEditorInteractive(page, "word");
 
-  await insertSaveMarker(page, "word", RTF_MARKER);
+  await insertSaveMarker(page, "word", "PW_RTF_SAVE_ROUNDTRIP");
   await triggerEditorSave(page, "word");
   await waitForSaveDone(page, {
     request,
     filePath: file,
-    marker: RTF_MARKER,
+    marker: "PW_RTF_SAVE_ROUNDTRIP",
   });
 
-  await assertDemoFileContains(request, file, RTF_MARKER);
+  await assertDemoFileContains(request, file, "PW_RTF_SAVE_ROUNDTRIP");
+  await assertDemoFileContains(request, file, RTF_ORIGINAL);
+  await assertDemoFileContains(request, file, "&amp;", { present: false });
+  await assertDemoFileContains(request, file, "&gt;", { present: false });
+  await assertDemoFileContains(request, file, "> Reminder");
 });
 
 test("ods save round-trip via demo file API", async ({ page, request }, testInfo) => {

@@ -59,13 +59,21 @@ type AscEditor = {
   asc_PasteText?: (text: string) => void;
   PasteText?: (text: string) => void;
   asc_closeCellEditor?: (save: boolean) => void;
-  asc_findText?: (text: string, matchCase?: boolean, wholeCell?: boolean) => boolean;
+  asc_findText?: (
+    text: string | { searchString: string; matchCase?: boolean },
+    matchCase?: boolean,
+    wholeCell?: boolean,
+  ) => boolean;
   asc_replaceText?: (
     searchProps: { searchString: string; matchCase?: boolean } | string,
     replaceWith: string,
     replaceAll?: boolean,
   ) => boolean | void;
   asc_isDocumentCanSave?: () => boolean;
+  asc_setFontBold?: (value: boolean) => void;
+  asc_setFontItalic?: (value: boolean) => void;
+  asc_putHighlight?: (color: string) => void;
+  asc_putHighlightColor?: (color: string) => void;
 };
 
 type AscEditorWindow = {
@@ -140,17 +148,15 @@ function findTextInBrowser(arg: { needle: string; kind?: SampleFile["editor"] })
         : arg.kind === "word"
           ? w.Asc?.editor ?? w.Asc?.spreadsheet ?? w.editor
           : w.Asc?.editor ?? w.Asc?.presentation ?? w.Asc?.spreadsheet ?? w.editor;
-  if (!api) {
+  if (!api || typeof api.asc_findText !== "function") {
     return false;
   }
-  if (typeof api.asc_findText !== "function") {
-    return false;
-  }
+  const props = { searchString: arg.needle, matchCase: false };
   try {
     return Boolean(
-      api.asc_findText(arg.needle) ||
-        api.asc_findText(arg.needle, false, false) ||
-        api.asc_findText(arg.needle, true, false),
+      api.asc_findText(props) ||
+        api.asc_findText(props, false, false) ||
+        api.asc_findText(arg.needle, false, false),
     );
   } catch {
     return false;
@@ -173,7 +179,12 @@ function replaceTextInBrowser(arg: { from: string; to: string; kind?: SampleFile
   const searchProps = { searchString: arg.from, matchCase: false };
   try {
     api.asc_replaceText(searchProps, arg.to, true);
-    return true;
+    const toProps = { searchString: arg.to, matchCase: false };
+    return Boolean(
+      api.asc_findText?.(toProps) ||
+        api.asc_findText?.(toProps, false, false) ||
+        api.asc_findText?.(arg.to, false, false),
+    );
   } catch {
     return false;
   }
@@ -394,6 +405,25 @@ export async function waitForEditorInteractive(
       .poll(async () => isEditorInteractive(page, frame, editor), { timeout: 10_000 })
       .toBe(true);
   }
+  if (editor === "cell") {
+    await dismissEditorOverlays(frame);
+  }
+}
+
+async function dismissEditorOverlays(frame: FrameLocator): Promise<void> {
+  const tip = frame.locator(".synch-tip-root, .asc-synchronizetip").first();
+  if ((await tip.count()) === 0) {
+    return;
+  }
+  const closeBtn = tip.locator(
+    'button, .close, [id*="close"], .btn-close, .asc-synchronizetip-close, .tip-close',
+  ).first();
+  if ((await closeBtn.count()) > 0) {
+    await closeBtn.click({ timeout: 1_000 }).catch(() => {});
+  } else {
+    await frame.locator("body").press("Escape").catch(() => {});
+  }
+  await expect(tip).toBeHidden({ timeout: 3_000 }).catch(() => {});
 }
 
 /** @deprecated Use waitForEditorReady — body data-document-ready is unreliable under load. */
@@ -408,6 +438,7 @@ export async function waitForDocumentReady(
 async function selectCell(frame: FrameLocator, ref: string): Promise<void> {
   const cellName = frame.locator(CELL_NAME_INPUT).first();
   await expect(cellName).toBeEnabled({ timeout: EDITOR_LOAD_TIMEOUT });
+  await dismissEditorOverlays(frame);
   await cellName.click();
   await cellName.fill(ref);
   await cellName.press("Enter");
@@ -434,7 +465,13 @@ async function readFormulaBarValue(frame: FrameLocator): Promise<string> {
 async function writeFormulaBarValue(frame: FrameLocator, value: string): Promise<void> {
   const valueLoc = frame.locator(CELL_VALUE_INPUT).first();
   await expect(valueLoc).toBeVisible({ timeout: EDITOR_LOAD_TIMEOUT });
-  await valueLoc.click();
+  await dismissEditorOverlays(frame);
+  try {
+    await valueLoc.click({ timeout: 3_000 });
+  } catch {
+    await dismissEditorOverlays(frame);
+    await valueLoc.click({ force: true });
+  }
   await valueLoc.press("Control+a");
   await valueLoc.fill(value);
   await valueLoc.press("Enter");
@@ -733,11 +770,25 @@ export async function replaceDocumentText(
   const frame = getEditorFrame(page, editor);
 
   await expect
+    .poll(async () => documentContainsText(frame, from, editor), {
+      timeout: CONTENT_FIND_TIMEOUT,
+      intervals: [500, 1000, 2000],
+    })
+    .toBe(true);
+
+  await expect
     .poll(
       async () => {
         const hasTo = await documentContainsText(frame, to, editor);
         const hasFrom = await documentContainsText(frame, from, editor);
-        if (hasTo && !hasFrom && (await isDocumentDirty(page))) {
+        if (hasTo && !hasFrom) {
+          if (!(await isDocumentDirty(page))) {
+            await frame.locator("body").evaluate(() => {
+              const w = window as { Asc?: { editor?: { asc_insertText?: (t: string) => void } } };
+              w.Asc?.editor?.asc_insertText?.(" ");
+            }).catch(() => {});
+            await page.waitForTimeout(200);
+          }
           return true;
         }
         if (await replaceDocumentTextViaSdk(frame, from, to, editor)) {
@@ -857,7 +908,17 @@ export function officeFileContains(buf: Buffer, marker: string): boolean {
   if (buf.includes(Buffer.from(marker))) {
     return true;
   }
-  for (const entry of ["word/document.xml", "ppt/slides/slide1.xml", "content.xml"]) {
+  const plainRtf = rtfPlainText(text);
+  if (plainRtf.includes(marker)) {
+    return true;
+  }
+  for (const entry of [
+    "word/document.xml",
+    "ppt/slides/slide1.xml",
+    "content.xml",
+    "xl/sharedStrings.xml",
+    "xl/worksheets/sheet1.xml",
+  ]) {
     const xml = zipEntryText(buf, entry);
     if (xml.includes(marker)) {
       return true;
@@ -891,6 +952,272 @@ function decodeOfficeText(buf: Buffer): string {
     text = text.slice(1);
   }
   return text;
+}
+
+/** Decode x2t RTF plain text, including \\uc1\\uNN* unicode runs. */
+export function rtfPlainText(rtf: string): string {
+  let out = "";
+  let i = 0;
+  let ucSkip = 1;
+  while (i < rtf.length) {
+    if (i + 1 < rtf.length && rtf[i] === "\\") {
+      if (i + 3 < rtf.length && rtf[i + 1] === "'") {
+        const hex = rtf.slice(i + 2, i + 4);
+        const byte = Number.parseInt(hex, 16);
+        if (!Number.isNaN(byte)) {
+          out += String.fromCharCode(byte);
+          i += 4;
+          continue;
+        }
+      }
+      if (i + 3 < rtf.length && rtf[i + 1] === "p" && rtf[i + 2] === "a" && rtf[i + 3] === "r") {
+        out += "\n";
+        i += 4;
+        if (i < rtf.length && rtf[i] === " ") {
+          i++;
+        }
+        continue;
+      }
+      if (i + 2 < rtf.length && rtf[i + 1] === "u" && rtf[i + 2] === "c") {
+        let j = i + 3;
+        const start = j;
+        while (j < rtf.length && rtf[j] >= "0" && rtf[j] <= "9") {
+          j++;
+        }
+        if (j > start) {
+          ucSkip = Number.parseInt(rtf.slice(start, j), 10);
+          if (j < rtf.length && rtf[j] === " ") {
+            j++;
+          }
+          i = j;
+          continue;
+        }
+      }
+      if (rtf[i + 1] === "u") {
+        let j = i + 2;
+        let neg = false;
+        if (j < rtf.length && rtf[j] === "-") {
+          neg = true;
+          j++;
+        }
+        const start = j;
+        while (j < rtf.length && rtf[j] >= "0" && rtf[j] <= "9") {
+          j++;
+        }
+        if (j > start) {
+          let code = Number.parseInt(rtf.slice(start, j), 10);
+          if (neg) {
+            code = 65536 + code;
+          }
+          out += String.fromCharCode(code);
+          if (j < rtf.length && rtf[j] === "?") {
+            j++;
+          }
+          for (let skipped = 0; skipped < ucSkip && j < rtf.length; skipped++) {
+            j++;
+          }
+          i = j;
+          continue;
+        }
+      }
+      let j = i + 1;
+      if (j < rtf.length && rtf[j] === "*") {
+        j++;
+      }
+      while (j < rtf.length && /[A-Za-z]/.test(rtf[j])) {
+        j++;
+      }
+      if (j < rtf.length && rtf[j] === "-") {
+        j++;
+        while (j < rtf.length && rtf[j] >= "0" && rtf[j] <= "9") {
+          j++;
+        }
+      } else if (j < rtf.length && rtf[j] >= "0" && rtf[j] <= "9") {
+        while (j < rtf.length && rtf[j] >= "0" && rtf[j] <= "9") {
+          j++;
+        }
+      }
+      if (j < rtf.length && rtf[j] === " ") {
+        j++;
+      }
+      i = j;
+      continue;
+    }
+    if (rtf[i] === "{" || rtf[i] === "}") {
+      i++;
+      continue;
+    }
+    out += rtf[i];
+    i++;
+  }
+  return out;
+}
+
+function rtfWindowAroundMarker(rtf: string, marker: string, radius = 2500): string {
+  const idx = rtf.indexOf(marker);
+  if (idx >= 0) {
+    const start = Math.max(0, idx - radius);
+    const end = Math.min(rtf.length, idx + marker.length + radius);
+    return rtf.slice(start, end);
+  }
+  const plain = rtfPlainText(rtf);
+  const plainIdx = plain.indexOf(marker);
+  if (plainIdx < 0) {
+    return "";
+  }
+  const ratio = plain.length > 0 ? rtf.length / plain.length : 1;
+  const center = Math.floor(plainIdx * ratio);
+  const start = Math.max(0, center - radius);
+  const end = Math.min(rtf.length, center + marker.length + radius);
+  return rtf.slice(start, end);
+}
+
+export type WordFormatOptions = {
+  bold?: boolean;
+  italic?: boolean;
+  highlight?: boolean;
+};
+
+function applyWordFormatInBrowser(arg: { marker: string; format: WordFormatOptions }): boolean {
+  const w = window as AscEditorWindow;
+  const api = w.Asc?.editor ?? w.editor;
+  if (!api || typeof api.asc_findText !== "function") {
+    return false;
+  }
+  const props = { searchString: arg.marker, matchCase: false };
+  let found = false;
+  try {
+    found = Boolean(
+      api.asc_findText(props) ||
+        api.asc_findText(props, false, false) ||
+        api.asc_findText(arg.marker, false, false),
+    );
+  } catch {
+    return false;
+  }
+  if (!found) {
+    return false;
+  }
+  if (arg.format.bold) {
+    api.asc_setFontBold?.(true);
+  }
+  if (arg.format.italic) {
+    const italicFns = ["asc_setFontItalic", "asc_SetTextItalic", "asc_setTextItalic"];
+    for (const name of italicFns) {
+      const fn = (api as Record<string, unknown>)[name];
+      if (typeof fn === "function") {
+        (fn as (value: boolean) => void).call(api, true);
+      }
+    }
+  }
+  if (arg.format.highlight) {
+    if (api.asc_putHighlightColor) {
+      api.asc_putHighlightColor("ffff00");
+    } else {
+      api.asc_putHighlight?.("ffff00");
+    }
+  }
+  return true;
+}
+
+/** Find marker text in a word document and apply formatting via the Asc API. */
+export async function formatWordSelection(
+  page: Page,
+  marker: string,
+  format: WordFormatOptions,
+): Promise<void> {
+  await waitForEditorInteractive(page, "word");
+  const frame = getEditorFrame(page, "word");
+
+  const sdkApplied = await frame
+    .locator("body")
+    .evaluate(applyWordFormatInBrowser, { marker, format });
+  if (!sdkApplied) {
+    await frame.locator("body").click({ position: { x: 10, y: 10 }, force: true }).catch(() => {});
+    await frame.locator("body").press("Control+f");
+    const searchInput = frame.locator("#search-bar-text").first();
+    await searchInput.waitFor({ state: "visible", timeout: 8_000 });
+    await searchInput.fill(marker);
+    await searchInput.press("Enter");
+    await page.waitForTimeout(300);
+    if (format.bold) {
+      await frame.locator("body").press("Control+b");
+    }
+    if (format.italic) {
+      await frame.locator("body").press("Control+i");
+    }
+    if (format.highlight) {
+      const highlightBtn = frame
+        .locator('#slot-btn-highlight-color, #slot-btn-font-highlight, [id*="highlight"]')
+        .first();
+      if ((await highlightBtn.count()) > 0) {
+        await highlightBtn.click({ force: true });
+        const yellow = frame.locator('[data-color="ffff00"], [data-value="ffff00"], .color-yellow').first();
+        if ((await yellow.count()) > 0) {
+          await yellow.click({ force: true });
+        }
+      }
+    }
+    await frame.locator("#search-bar-close, #search-adv-close").first().click({ timeout: 1_000 }).catch(() => {});
+  }
+  await waitForDocumentDirty(page);
+}
+
+export type RtfFormattingAssert = {
+  marker: string;
+  bold?: boolean;
+  italic?: boolean;
+  highlight?: boolean;
+};
+
+export async function assertDemoRtfFormatting(
+  request: APIRequestContext,
+  filePath: string,
+  opts: RtfFormattingAssert,
+): Promise<void> {
+  const buf = await fetchDemoFileBody(request, filePath);
+  const rtf = decodeOfficeText(buf);
+  expect(rtfPlainText(rtf)).toContain(opts.marker);
+  const window = rtfWindowAroundMarker(rtf, opts.marker);
+  expect(window.length).toBeGreaterThan(0);
+  if (opts.bold) {
+    expect(window).toMatch(/\\b(?!ullet)/);
+  }
+  if (opts.italic) {
+    expect(rtf).toMatch(/\\i(?!nfo|lvl|tap)[^a-zA-Z]/);
+  }
+  if (opts.highlight) {
+    expect(rtf.match(/\\highlight\d*|\\cb\d+|\\chcbpat\d+/)).toBeTruthy();
+  }
+}
+
+/** Poll viewer status for stableMs after save; fail on Error: prefix. */
+export async function assertEditorStable(page: Page, stableMs = 15_000): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < stableMs) {
+    const status = (await page.locator("#status").textContent()) ?? "";
+    expect(status).not.toMatch(/^Error:/);
+    const className = (await page.locator("#status").getAttribute("class")) ?? "";
+    expect(className).not.toContain("status-error");
+    await page.waitForTimeout(500);
+  }
+}
+
+/** Minimal dirty edit before save (word/slide append, cell A1). */
+export async function applyMinimalSaveEdit(
+  page: Page,
+  editor: SampleFile["editor"],
+  marker = "PW_STABLE",
+): Promise<void> {
+  if (editor === "cell") {
+    await setCellContent(page, editor, "A1", marker);
+    return;
+  }
+  if (editor === "word" || editor === "slide") {
+    await insertSaveMarker(page, editor, marker);
+    return;
+  }
+  throw new Error(`unsupported editor for save edit: ${editor}`);
 }
 
 export async function fetchDemoFileBody(

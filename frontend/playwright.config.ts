@@ -29,16 +29,22 @@ export default defineConfig({
   use: sharedUse,
   projects: [
     {
-      name: "firefox",
-      testIgnore: /save\.spec\.ts$/,
-      use: { ...devices["Desktop Firefox"] },
+      name: "chromium",
+      testIgnore: /(save|rtf-formatting|post-save-stability)\.spec\.ts$/,
+      use: { ...devices["Desktop Chrome"] },
     },
     {
-      name: "firefox-save",
-      testMatch: /save\.spec\.ts$/,
-      dependencies: ["firefox"],
+      name: "chromium-save",
+      testMatch: /(save|rtf-formatting)\.spec\.ts$/,
+      dependencies: ["chromium"],
       workers: 1,
-      use: { ...devices["Desktop Firefox"] },
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "chromium-post-save",
+      testMatch: /post-save-stability\.spec\.ts$/,
+      dependencies: ["chromium"],
+      use: { ...devices["Desktop Chrome"] },
     },
   ],
 });

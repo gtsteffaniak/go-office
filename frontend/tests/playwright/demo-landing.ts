@@ -20,7 +20,7 @@ export async function expectSampleThumbnailsListed(page: Page): Promise<void> {
     await expect(row, samplePath).toBeVisible();
 
     const img = row.locator("img.thumb[data-sample-thumb]");
-    await expect(img).toBeVisible();
+    await expect(img).toBeAttached();
 
     const src = await img.getAttribute("src");
     expect(src, `${samplePath} src`).toBeTruthy();

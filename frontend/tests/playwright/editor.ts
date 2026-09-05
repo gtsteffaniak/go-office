@@ -543,24 +543,24 @@ export async function assertCellContent(
   ref: string,
   expected: string,
 ): Promise<void> {
-  await waitForEditorInteractive(page, editor);
+  await waitForEditorReady(page, editor);
   const frame = getEditorFrame(page, editor);
   const file = new URL(page.url()).searchParams.get("file");
 
   await expect
     .poll(
       async () => {
-        const value = await readCellValue(frame, ref);
-        if (value.includes(expected)) {
-          return true;
-        }
         if (file && (file.endsWith(".csv") || file.endsWith(".tsv"))) {
           const res = await page.request.get(`/api/office/demo/file/${encodeURIComponent(file)}`);
-          if (res.ok()) {
-            return csvCellValue(await res.text(), ref).includes(expected);
+          if (res.ok() && csvCellValue(await res.text(), ref).includes(expected)) {
+            return true;
           }
         }
-        return false;
+        if (!(await isEditorInteractive(page, frame, editor))) {
+          return false;
+        }
+        const value = await readCellValue(frame, ref);
+        return value.includes(expected);
       },
       { timeout: CONTENT_FIND_TIMEOUT },
     )
@@ -572,31 +572,27 @@ export async function assertDocumentContains(
   editor: SampleFile["editor"],
   text: string,
 ): Promise<void> {
-  await waitForEditorInteractive(page, editor);
+  await waitForEditorReady(page, editor);
   const frame = getEditorFrame(page, editor);
+  const file = new URL(page.url()).searchParams.get("file");
 
   await expect
     .poll(
       async () => {
-        let viaSdk = false;
-        try {
-          viaSdk = await frame.locator("body").evaluate(findTextInBrowser, { needle: text, kind: editor });
-        } catch {
-          viaSdk = false;
-        }
-        if (viaSdk) {
-          return true;
-        }
-        if (editor === "word" || editor === "slide") {
-          const file = new URL(page.url()).searchParams.get("file");
-          if (file) {
-            const res = await page.request.get(`/api/office/demo/file/${encodeURIComponent(file)}`);
-            if (res.ok()) {
-              return officeFileContains(Buffer.from(await res.body()), text);
-            }
+        if (file && (editor === "word" || editor === "slide")) {
+          const res = await page.request.get(`/api/office/demo/file/${encodeURIComponent(file)}`);
+          if (res.ok() && officeFileContains(Buffer.from(await res.body()), text)) {
+            return true;
           }
         }
-        return false;
+        if (!(await isEditorInteractive(page, frame, editor))) {
+          return false;
+        }
+        try {
+          return await frame.locator("body").evaluate(findTextInBrowser, { needle: text, kind: editor });
+        } catch {
+          return false;
+        }
       },
       { timeout: CONTENT_FIND_TIMEOUT },
     )

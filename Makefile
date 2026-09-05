@@ -45,7 +45,7 @@ DOCKER_DEV_RUN = docker run --rm $(DOCKER_DEV_MOUNTS) -w /src
 
 .PHONY: help setup build serve doctor fonts test test-integration clean \
         check-docker docker-dev-image check-go mod-download fetch-assets compile check-assets check-samples test-x2t test-x2t-concurrent \
-        playwright-npm test-playwright test-playwright-ui check-sample-matrix extract-sample-manifest \
+        playwright-npm test-playwright test-playwright-project test-playwright-ui check-sample-matrix extract-sample-manifest \
         build-docker build-docker-image build-docker-builder run-docker stop-docker ensure-assets \
         build-native serve-native fetch-assets-native compile-native fonts-native \
         test-integration-native test-convert-linux-native test-x2t-native test-x2t-concurrent-native doctor-native
@@ -66,7 +66,8 @@ help:
 	@echo "  make test-convert-linux x2t convert tests in ./internal/convert/ (runs build first)"
 	@echo "  make check-sample-matrix  Verify all Playwright sample files exist (git-tracked under sample-files/)"
 	@echo "  make extract-sample-manifest  Regenerate Playwright content expectations from sample-files/"
-	@echo "  make test-playwright    E2E Playwright tests in Docker (runs build first)"
+	@echo "  make test-playwright    E2E Playwright tests in Docker (all projects)"
+	@echo "  make test-playwright-project  Single Playwright project (PLAYWRIGHT_PROJECT=…)"
 	@echo "  make test-playwright-ui Local Playwright UI (server in Docker, tests on host)"
 	@echo "  make build-docker       Build Docker image (office-server)"
 	@echo "  make build-docker-image Build Docker image only (debian-slim runtime for x2t)"
@@ -356,9 +357,20 @@ playwright-npm:
 	cd frontend && npm install
 
 test-playwright: ensure-assets check-sample-matrix check-docker
-	@echo "==> Playwright E2E (Docker)"
+	@echo "==> Playwright E2E (Docker, all projects)"
 	GOOS=linux $(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
 	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_IMAGE)" --target test -f "$(PLAYWRIGHT_DOCKERFILE)" .
+
+test-playwright-project: ensure-assets check-sample-matrix check-docker
+	@if [ -z "$(PLAYWRIGHT_PROJECT)" ]; then \
+		echo "error: PLAYWRIGHT_PROJECT is required (e.g. chromium, chromium-save, chromium-post-save)"; \
+		exit 1; \
+	fi
+	@echo "==> Playwright E2E (Docker, project=$(PLAYWRIGHT_PROJECT))"
+	GOOS=linux $(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
+	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_IMAGE)-$(PLAYWRIGHT_PROJECT)" \
+		--build-arg PLAYWRIGHT_PROJECT="$(PLAYWRIGHT_PROJECT)" \
+		--target test -f "$(PLAYWRIGHT_DOCKERFILE)" .
 
 test-playwright-ui: build check-sample-matrix check-docker
 	@echo "==> Playwright UI (server in Docker, tests on host)"

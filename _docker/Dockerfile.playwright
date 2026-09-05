@@ -1,7 +1,8 @@
 # Playwright E2E for go-office (multi-stage).
 #
-#   make test-playwright      → docker build --target test
-#   make test-playwright-ui   → docker build --target server, run container
+#   make test-playwright                          → all projects in one run
+#   make test-playwright-project PLAYWRIGHT_PROJECT=chromium  → single project (CI matrix)
+#   make test-playwright-ui                       → long-running server target
 #
 # Browser/tooling base: ghcr.io/gtsteffaniak/playwright-base:chromium
 
@@ -35,14 +36,34 @@ ENTRYPOINT ["./go-office", \
   "-samples", "sample-files", \
   "-public", "http://127.0.0.1:8080"]
 
-# Self-contained CI image: runs Playwright suite during docker build.
-FROM base AS test
+# npm deps (shared layer for CI cache priming and test target).
+FROM ghcr.io/gtsteffaniak/playwright-base:chromium AS npm-deps
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm install
+
+# Self-contained test image. Set PLAYWRIGHT_PROJECT for a single project (--no-deps); omit to run all.
+FROM npm-deps AS test
+ARG PLAYWRIGHT_PROJECT=
+ENV PLAYWRIGHT_PROJECT=${PLAYWRIGHT_PROJECT}
+
+WORKDIR /app
+COPY bin/go-office ./go-office
+COPY assets/ ./assets/
+COPY sample-files/ ./sample-files/
+RUN chmod +x /app/go-office /app/assets/converter/bin/* 2>/dev/null || true
+
+WORKDIR /app/frontend
 COPY frontend/playwright.config.ts ./
 COPY frontend/tests/ ./tests/
 
-RUN npm install
+ENV OFFICE_ASSETS=/app/assets \
+    OFFICE_DEBUG_LOGGING=1 \
+    OFFICE_POLL_HOLD=0 \
+    OFFICE_CONVERT_LIMIT=6 \
+    OFFICE_SAVE_DELAY=500ms \
+    PLAYWRIGHT_BASE_URL=http://127.0.0.1:8080 \
+    PLAYWRIGHT_STRICT=1
 
 RUN timeout 10m sh -c 'cd /app && ./go-office \
       -assets /app/assets \
@@ -51,4 +72,9 @@ RUN timeout 10m sh -c 'cd /app && ./go-office \
       -samples sample-files \
       -public http://127.0.0.1:8080 & \
     sleep 5 && \
-    cd /app/frontend && npx playwright test'
+    cd /app/frontend && \
+    if [ -n "$PLAYWRIGHT_PROJECT" ]; then \
+      npx playwright test --project="$PLAYWRIGHT_PROJECT" --no-deps; \
+    else \
+      npx playwright test; \
+    fi'

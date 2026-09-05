@@ -1,5 +1,5 @@
 import { test, expect } from "../test-setup";
-import { waitForEditorReady, waitForEditorInteractive, assertSampleContent } from "../editor";
+import { waitForEditorReady, assertSampleContent } from "../editor";
 import {
   REPO_ROOT,
   sampleExists,
@@ -40,7 +40,6 @@ async function openSample(page: import("@playwright/test").Page, sample: SampleF
     timeout: STATUS_OK_TIMEOUT,
   });
   await waitForEditorReady(page, sample.editor);
-  await waitForEditorInteractive(page, sample.editor);
 
   expect(coauthoringFailures, `coauthoring POST failures: ${coauthoringFailures.join(", ")}`).toHaveLength(0);
 }

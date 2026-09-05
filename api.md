@@ -156,7 +156,7 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 | `editorConfig.lang`, `customization`, `user` | ✅ | ✅ | Passed through when set by host |
 | `editorConfig.coEditing` | ✅ | ⚠️ | Accepted; no multi-user semantics |
 | `editorConfig.plugins`, `templates`, `embedded`, … | ✅ | ⚠️ | Passed if host supplies; not validated server-side |
-| Config JWT (`token` top-level field) | ✅ | ✅ | Signed with `OFFICE_JWT_SECRET` when set |
+| Config JWT (`token` top-level field) | ✅ | ✅ | Signed when `OFFICE_JWT_SECRET` or `JWT_SECRET` is set |
 | Server-side JWT verify on coauthoring `auth` | ✅ | ❌ | go-office does not validate editor JWT on coauthoring packets |
 
 ### 3.2 Callback — integrator receives POSTs (Document Server → your app)
@@ -186,12 +186,30 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 
 | JWT usage | ONLYOFFICE | go-office |
 | --------- | :--------: | :-------: |
-| `OFFICE_JWT_SECRET` / `JWT_SECRET` | ✅ | ✅ (renamed env) |
+| `OFFICE_JWT_SECRET` (preferred) / `JWT_SECRET` (fallback) | ✅ | ✅ |
+| `OFFICE_JWT_ENABLED` / `JWT_ENABLED=false` | ✅ | ✅ |
 | Sign editor config `token` | ✅ | ✅ |
 | Verify config token on server | ✅ | ❌ |
 | Callback body `{"token":"…"}` | ✅ | ✅ |
-| Converter `Authorization: Bearer` | ✅ | ✅ | When `OFFICE_JWT_SECRET` set |
+| Converter `Authorization: Bearer` | ✅ | ✅ | When JWT secret is set (`OFFICE_JWT_SECRET` or `JWT_SECRET`) |
 | Command service `{"token":"…"}` | ✅ | ❌ (no `/command`) |
+
+### 3.4 Environment variables
+
+See [migration.md](migration.md) for the full matrix. Summary:
+
+| Category | ONLYOFFICE | go-office |
+| -------- | :--------: | :-------: |
+| JWT secret | `JWT_SECRET` | `OFFICE_JWT_SECRET` (preferred) or `JWT_SECRET` |
+| JWT disable | `JWT_ENABLED=false` | `OFFICE_JWT_ENABLED=false` or `JWT_ENABLED=false` |
+| JWT header name | `JWT_HEADER` | ❌ not configurable (`Authorization` only) |
+| JWT in callback body | `JWT_IN_BODY` | ⚠️ always signs body when secret set |
+| Database / Redis / RabbitMQ | `DB_*`, `REDIS_*`, `AMQP_*` | ❌ not used |
+| WOPI | `WOPI_ENABLED` | ❌ not supported |
+| Listen port | Docker `-p host:80` | `OFFICE_ADDR` (default `:80` in image) |
+| Public URL for cache links | nginx / proxy config | `OFFICE_PUBLIC_ORIGIN` |
+| Debug logging | nginx / service logs | `OFFICE_DEBUG_LOGGING`, `OFFICE_LOG_JSON` |
+| x2t concurrency | internal DS tuning | `OFFICE_CONVERT_LIMIT` (default `2`) |
 
 ---
 
@@ -200,7 +218,7 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 | FileBrowser feature | ONLYOFFICE URL / API | go-office |
 | ------------------- | -------------------- | --------- |
 | In-browser editor | `{url}/web-apps/…/api.js` + config | ✅ |
-| Config JWT (`integrations.onlyOffice.secret`) | Same as `OFFICE_JWT_SECRET` | ✅ |
+| Config JWT (`integrations.onlyOffice.secret`) | Same as `OFFICE_JWT_SECRET` / `JWT_SECRET` | ✅ |
 | **Grid preview thumbnails** | `POST {url}/converter` | **✅** |
 | Document download URL in config | Your app’s download route | ✅ (host responsibility) |
 | Callback save | Your app’s callback route | ✅ |
@@ -250,7 +268,7 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 - [Conversion API](https://api.onlyoffice.com/docs/docs-api/additional-api/conversion-api/)
 - [Command service](https://api.onlyoffice.com/docs/docs-api/additional-api/command-service/)
 - [Callback handler](https://api.onlyoffice.com/docs/docs-api/usage-api/callback-handler/)
-- [migration.md](migration.md) — Docker env mapping
+- [migration.md](migration.md) — Docker env mapping (`OFFICE_*` + ONLYOFFICE fallbacks)
 - Live HTML matrix: `/docs/api#compatibility`
 
 ---
@@ -262,3 +280,4 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 | Phase 2 | Initial matrix; FileBrowser `/converter` gap |
 | Follow-up audit | Added: legacy `.ashx` paths, WOPI, spellchecker, command subcommands, callback outbound field gaps, JWT matrix, `shardkey`, `downloadfile` partial, healthcheck semantics, coauthoring message gaps, integrator vs document-server callback direction |
 | v0.2.0 | `/converter` + `/ConvertService.ashx` implemented (sync JPG); JWT on converter; demo thumbnails; library `DiscoverAssets` / `FetchAssets` / `EnsureAssets` |
+| 2026-09 | `POST /session/reset`; `BuildEditorConfig` clears coauthoring session; demo warm; `JWT_SECRET` env fallback; reload/session tests |

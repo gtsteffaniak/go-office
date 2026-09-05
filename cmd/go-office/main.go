@@ -172,7 +172,7 @@ func main() {
 		log.Printf("  samples: %s", samplesPath)
 	}
 	if cfg.JWTSecret != "" {
-		log.Printf("  jwt:     enabled (OFFICE_JWT_SECRET)")
+		log.Printf("  jwt:     enabled (OFFICE_JWT_SECRET or JWT_SECRET)")
 	}
 	log.Printf("  assets:  %s", cfg.AssetDir)
 

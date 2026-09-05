@@ -10,6 +10,7 @@ import (
 
 	office "github.com/quantumx-apps/go-office/pkg/office"
 	"github.com/quantumx-apps/go-office/internal/debuglog"
+	"github.com/quantumx-apps/go-office/internal/envconfig"
 	"github.com/quantumx-apps/go-office/internal/demo"
 	"github.com/quantumx-apps/go-office/internal/home"
 )
@@ -41,11 +42,11 @@ func parseRunConfig() runConfig {
 		Addr:           envFirst("OFFICE_ADDR", ":8080"),
 		BasePath:       envFirst("OFFICE_BASE_PATH", office.DefaultBasePath),
 		APIBase:        envFirst("OFFICE_API_BASE", home.DefaultAPIBasePath),
-		JWTSecret:      jwtSecretFromEnv(),
-		Version:        strings.TrimSpace(os.Getenv("OFFICE_VERSION")),
-		PublicOrigin:   strings.TrimSpace(os.Getenv("OFFICE_PUBLIC_ORIGIN")),
-		DisableSamples: envBool("OFFICE_DISABLE_SAMPLES"),
-		SkipAssetFetch: envBool("OFFICE_SKIP_ASSET_FETCH"),
+		JWTSecret:      envconfig.JWTSecret(),
+		Version:        envconfig.First("OFFICE_VERSION"),
+		PublicOrigin:   envconfig.First("OFFICE_PUBLIC_ORIGIN"),
+		DisableSamples: envconfig.Bool("OFFICE_DISABLE_SAMPLES"),
+		SkipAssetFetch: envconfig.Bool("OFFICE_SKIP_ASSET_FETCH"),
 		Debug:          debugFromEnv(),
 		PollHold:       pollHoldFromEnv(),
 		SaveDelay:      saveDelayFromEnv(),
@@ -94,19 +95,14 @@ func (c runConfig) publicOrigin() string {
 }
 
 func envFirst(key, fallback string) string {
-	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+	if v := envconfig.First(key); v != "" {
 		return v
 	}
 	return fallback
 }
 
 func envBool(key string) bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
-	return v == "1" || v == "true" || v == "yes"
-}
-
-func jwtSecretFromEnv() string {
-	return strings.TrimSpace(os.Getenv("OFFICE_JWT_SECRET"))
+	return envconfig.Bool(key)
 }
 
 func debugFromEnv() bool {

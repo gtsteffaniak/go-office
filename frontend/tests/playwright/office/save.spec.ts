@@ -10,7 +10,6 @@ import {
 } from "../editor";
 import { forkSample } from "../fork-sample";
 
-const bundledTest = process.env.OFFICE_PLAYWRIGHT_TEST === "true";
 const STATUS_OK_TIMEOUT = 8_000;
 
 const CSV_SOURCE = "sample-files/sample.csv";
@@ -37,13 +36,6 @@ const ODS_REPLACEMENT = "REPLACED_ODS_ID";
 const PPT_SOURCE = "sample-files/sample.ppt";
 const PPT_FIND = "My Presentation";
 const PPT_MARKER = "PW_SAVE_PPT_MARKER";
-
-const SAVE_TEST_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_TEST_TIMEOUT ?? (bundledTest ? 150_000 : 120_000));
-
-test.use({
-  trace: bundledTest ? "retain-on-failure" : "on-first-retry",
-  timeout: SAVE_TEST_TIMEOUT,
-});
 
 test("docx save round-trip via demo file API", async ({ page, request }, testInfo) => {
   const file = forkSample(DOCX_SOURCE, testInfo);

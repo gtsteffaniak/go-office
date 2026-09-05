@@ -19,19 +19,10 @@ const EDITOR_APP: Record<SampleFile["editor"], string> = {
 /** Shell elements inside the editor app frame (not on the demo viewer page). */
 const EDITOR_SHELL = "#editor-container, #id_main, #editor_sdk, #id_view";
 
-const bundledTest = process.env.OFFICE_PLAYWRIGHT_TEST === "true";
-const EDITOR_LOAD_TIMEOUT = Number(
-  process.env.PLAYWRIGHT_EDITOR_TIMEOUT ?? (bundledTest ? 25_000 : 30_000),
-);
-const DOCUMENT_READY_TIMEOUT = Number(
-  process.env.PLAYWRIGHT_DOCUMENT_READY_TIMEOUT ?? (bundledTest ? 60_000 : 45_000),
-);
-const CONTENT_FIND_TIMEOUT = Number(
-  process.env.PLAYWRIGHT_CONTENT_FIND_TIMEOUT ?? (bundledTest ? 15_000 : 15_000),
-);
-const SAVE_DONE_TIMEOUT = Number(
-  process.env.PLAYWRIGHT_SAVE_DONE_TIMEOUT ?? (bundledTest ? 45_000 : 30_000),
-);
+const EDITOR_LOAD_TIMEOUT = Number(process.env.PLAYWRIGHT_EDITOR_TIMEOUT ?? 25_000);
+const DOCUMENT_READY_TIMEOUT = Number(process.env.PLAYWRIGHT_DOCUMENT_READY_TIMEOUT ?? 45_000);
+const CONTENT_FIND_TIMEOUT = Number(process.env.PLAYWRIGHT_CONTENT_FIND_TIMEOUT ?? 15_000);
+const SAVE_DONE_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_DONE_TIMEOUT ?? 30_000);
 const INTERACTIVE_SETTLE_MS = 400;
 
 /** Spreadsheet name box (e.g. B2) and formula bar (cell value). */
@@ -1129,9 +1120,10 @@ export async function formatWordSelection(
   await waitForEditorInteractive(page, "word");
   const frame = getEditorFrame(page, "word");
 
-  const sdkApplied = await frame
-    .locator("body")
-    .evaluate(applyWordFormatInBrowser, { marker, format });
+  // Highlight via toolbar — SDK asc_putHighlightColor is flaky and can drop the marker.
+  const sdkApplied =
+    !format.highlight &&
+    (await frame.locator("body").evaluate(applyWordFormatInBrowser, { marker, format }));
   if (!sdkApplied) {
     await frame.locator("body").click({ position: { x: 10, y: 10 }, force: true }).catch(() => {});
     await frame.locator("body").press("Control+f");
@@ -1160,6 +1152,13 @@ export async function formatWordSelection(
     }
     await frame.locator("#search-bar-close, #search-adv-close").first().click({ timeout: 1_000 }).catch(() => {});
   }
+
+  await expect
+    .poll(async () => documentContainsText(frame, marker, "word"), {
+      timeout: CONTENT_FIND_TIMEOUT,
+      intervals: [300, 500, 1000],
+    })
+    .toBe(true);
   await waitForDocumentDirty(page);
 }
 
@@ -1262,36 +1261,23 @@ export async function waitForSaveDone(
   await expect
     .poll(
       async () => {
-        if (options.marker && options.filePath && options.request) {
-          const res = await options.request.get(
-            `/api/office/demo/file/${encodeURIComponent(options.filePath)}`,
-          );
-          if (res.ok() && officeFileContains(Buffer.from(await res.body()), options.marker)) {
-            return true;
-          }
-        }
         const saveDone = await page.locator("body").getAttribute("data-save-done");
-        if (saveDone && options.marker && options.filePath && options.request) {
-          const res = await options.request.get(
-            `/api/office/demo/file/${encodeURIComponent(options.filePath)}`,
-          );
-          if (res.ok()) {
-            return officeFileContains(Buffer.from(await res.body()), options.marker);
-          }
+        const status = await page.locator("#status").textContent();
+        const saved = Boolean(saveDone) || status?.includes("Saved");
+
+        if (!saved) {
+          return false;
         }
-        if (saveDone && !options.marker) {
+        if (!options.marker || !options.filePath || !options.request) {
           return true;
         }
-        const status = await page.locator("#status").textContent();
-        if (status?.includes("Saved") && options.marker && options.filePath && options.request) {
-          const res = await options.request.get(
-            `/api/office/demo/file/${encodeURIComponent(options.filePath)}`,
-          );
-          if (res.ok()) {
-            return officeFileContains(Buffer.from(await res.body()), options.marker);
-          }
+        const res = await options.request.get(
+          `/api/office/demo/file/${encodeURIComponent(options.filePath)}`,
+        );
+        if (!res.ok()) {
+          return false;
         }
-        return false;
+        return officeFileContains(Buffer.from(await res.body()), options.marker);
       },
       { timeout: timeoutMs },
     )

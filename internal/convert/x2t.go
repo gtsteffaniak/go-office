@@ -313,6 +313,14 @@ func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, ta
 		if st, err := os.Stat(intermediate); err == nil {
 			slog.Debug("bridge after apply_changes", "path", intermediate, "bytes", st.Size(), "bridge", bridge)
 		}
+		if legacyBinarySaveUsesOOXMLFallback(bridge, ext) {
+			slog.Debug("legacy binary save uses OOXML fallback",
+				"ext", ext, "intermediate", intermediate, "dest", destPath)
+			if copyErr := fsutil.CopyFile(intermediate, destPath); copyErr != nil {
+				return fmt.Errorf("convert: OOXML fallback copy failed: %w", copyErr)
+			}
+			return nil
+		}
 		if err := c.convertOfficeInner(ctx, intermediate, destPath, string(bridge), ext, cacheDir); err != nil {
 			// DOC/DOT: x2t cannot write binary Word (exit 80). Persist changes-applied.docx bytes
 			// at the .doc/.dot path — ONLYOFFICE assemblyFormatAsOrigin rollback behavior.
@@ -587,18 +595,16 @@ func (c *Converter) convertOfficeInner(ctx context.Context, srcPath, destPath, f
 	taskPath := taskFile.Name()
 	defer os.Remove(taskPath)
 
-	workDir, err := os.MkdirTemp("", "go-office-x2t-fmt-*")
+	runDir, err := c.prepareX2TRunDir(cacheDir)
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(workDir)
+	defer os.RemoveAll(runDir)
 
-	allFontsPath := filepath.Join(c.binDir, "AllFonts.js")
-	if cacheDir != "" {
-		cacheFonts := filepath.Join(cacheDir, "AllFonts.js")
-		if st, statErr := os.Stat(cacheFonts); statErr == nil && st.Size() > 0 {
-			allFontsPath = cacheFonts
-		}
+	allFontsPath := filepath.Join(runDir, "AllFonts.js")
+	workDir := filepath.Join(runDir, "work")
+	if err = os.MkdirAll(workDir, 0o755); err != nil {
+		return err
 	}
 	c.logFontSources("office", cacheDir, allFontsPath)
 	xml := buildOfficeToOfficeXML(srcPath, destPath, c.fontDir, c.themeDir, allFontsPath, fromExt, toExt, workDir)
@@ -609,8 +615,7 @@ func (c *Converter) convertOfficeInner(ctx context.Context, srcPath, destPath, f
 	if err = taskFile.Close(); err != nil {
 		return err
 	}
-	// Office-to-office runs from converter/bin; only apply_changes needs an isolated cwd.
-	out, err := c.runX2t(ctx, taskPath, "")
+	out, err := c.runX2t(ctx, taskPath, runDir)
 	if err != nil {
 		return fmt.Errorf("convert: x2t %s→%s: %w: %s", fromExt, toExt, err, strings.TrimSpace(string(out)))
 	}

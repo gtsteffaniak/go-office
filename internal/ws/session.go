@@ -237,12 +237,6 @@ func (s *session) shouldLogReconnect(req authRequest) bool {
 	return s.documentOpened && s.isReconnectAuth(req)
 }
 
-func (s *session) hadDocumentOpen() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.documentOpened
-}
-
 func (s *session) onConnect(authData []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

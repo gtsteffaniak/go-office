@@ -295,8 +295,9 @@ test:
 lint:
 	$(GO) tool golangci-lint run ./...
 
-PLAYWRIGHT_TEST_IMAGE ?= go-office-playwright-tests
-PLAYWRIGHT_LOCAL_CONTAINER ?= go-office-playwright-local
+PLAYWRIGHT_IMAGE ?= go-office-playwright
+PLAYWRIGHT_DOCKERFILE := _docker/Dockerfile.playwright
+PLAYWRIGHT_LOCAL_CONTAINER ?= go-office-playwright-server
 
 DOCKER_IMAGE ?= ghcr.io/quantumx-apps/office-server:local
 DOCKER_BUILDER_IMAGE ?= go-office:builder
@@ -357,14 +358,14 @@ playwright-npm:
 test-playwright: ensure-assets check-sample-matrix check-docker
 	@echo "==> Playwright E2E (Docker)"
 	GOOS=linux $(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
-	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_TEST_IMAGE)" -f _docker/Dockerfile.playwright-office .
+	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_IMAGE)" --target test -f "$(PLAYWRIGHT_DOCKERFILE)" .
 
 test-playwright-ui: build check-sample-matrix check-docker
 	@echo "==> Playwright UI (server in Docker, tests on host)"
 	GOOS=linux $(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
 	docker rm -f "$(PLAYWRIGHT_LOCAL_CONTAINER)" 2>/dev/null || true
-	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_LOCAL_CONTAINER)" -f _docker/Dockerfile.playwright-local .
-	docker run -d -p 8080:8080 --name "$(PLAYWRIGHT_LOCAL_CONTAINER)" "$(PLAYWRIGHT_LOCAL_CONTAINER)"
+	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_IMAGE)" --target server -f "$(PLAYWRIGHT_DOCKERFILE)" .
+	docker run -d -p 8080:8080 --name "$(PLAYWRIGHT_LOCAL_CONTAINER)" "$(PLAYWRIGHT_IMAGE)"
 	cd frontend && npm install && npx playwright install chromium
 	@echo "Open Playwright UI — server at http://127.0.0.1:8080/"
 	cd frontend && npx playwright test --ui

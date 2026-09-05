@@ -1,0 +1,54 @@
+# Playwright E2E for go-office (multi-stage).
+#
+#   make test-playwright      → docker build --target test
+#   make test-playwright-ui   → docker build --target server, run container
+#
+# Browser/tooling base: ghcr.io/gtsteffaniak/playwright-base:chromium
+
+FROM ghcr.io/gtsteffaniak/playwright-base:chromium AS base
+WORKDIR /app
+
+LABEL org.opencontainers.image.source="https://github.com/quantumx-apps/go-office" \
+      org.opencontainers.image.licenses="AGPL-3.0"
+
+COPY bin/go-office ./go-office
+COPY assets/ ./assets/
+COPY sample-files/ ./sample-files/
+
+RUN chmod +x /app/go-office /app/assets/converter/bin/* 2>/dev/null || true
+
+ENV OFFICE_ASSETS=/app/assets \
+    OFFICE_DEBUG_LOGGING=1 \
+    OFFICE_POLL_HOLD=0 \
+    OFFICE_CONVERT_LIMIT=6 \
+    OFFICE_SAVE_DELAY=500ms \
+    PLAYWRIGHT_BASE_URL=http://127.0.0.1:8080 \
+    PLAYWRIGHT_STRICT=1
+
+# Long-running demo server (tests run on host via make test-playwright-ui).
+FROM base AS server
+EXPOSE 8080
+ENTRYPOINT ["./go-office", \
+  "-assets", "/app/assets", \
+  "-addr", ":8080", \
+  "-data", "/app", \
+  "-samples", "sample-files", \
+  "-public", "http://127.0.0.1:8080"]
+
+# Self-contained CI image: runs Playwright suite during docker build.
+FROM base AS test
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json* ./
+COPY frontend/playwright.config.ts ./
+COPY frontend/tests/ ./tests/
+
+RUN npm install
+
+RUN timeout 10m sh -c 'cd /app && ./go-office \
+      -assets /app/assets \
+      -addr :8080 \
+      -data /app \
+      -samples sample-files \
+      -public http://127.0.0.1:8080 & \
+    sleep 5 && \
+    cd /app/frontend && npx playwright test'

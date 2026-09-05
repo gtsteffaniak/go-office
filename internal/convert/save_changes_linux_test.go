@@ -639,6 +639,69 @@ func TestSaveChangesXlsOOXMLFallback(t *testing.T) {
 	}
 }
 
+func TestSaveChangesXlsConcurrentPlaywrightLoad(t *testing.T) {
+	// Regression for Playwright post-save-stability sample.xls under parallel workers.
+	// Office-to-office x2t must use isolated run dirs (same as reverse apply_changes).
+	repo := testutil.RepoRoot(t)
+	assets := testutil.AssetsDirOrSkip(t, repo)
+	if !testutil.SampleExists(repo, "sample-files/sample.xls") {
+		t.Skip("sample xls missing")
+	}
+
+	const (
+		workers      = 10
+		convertLimit = 6
+	)
+
+	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: convertLimit})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < workers; i++ {
+		t.Run(fmt.Sprintf("worker-%02d", i), func(t *testing.T) {
+			t.Parallel()
+
+			work := testutil.NewWorkspace(t)
+			xlsPath := filepath.Join(work.Root, filepath.FromSlash(work.CopySample("sample-files/sample.xls")))
+			cacheDir := t.TempDir()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+			defer cancel()
+
+			if err := conv.ToEditorBin(ctx, xlsPath, cacheDir); err != nil {
+				t.Fatalf("ToEditorBin: %v", err)
+			}
+			changesDir := filepath.Join(cacheDir, "changes")
+			if err := os.MkdirAll(changesDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(changesDir, "changes0.json"), []byte(`["xls-change"]`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			outPath := filepath.Join(cacheDir, "saved.xls")
+			if err := conv.SaveChanges(ctx, cacheDir, outPath, "xls"); err != nil {
+				t.Fatalf("SaveChanges: %v", err)
+			}
+			intermediate, err := os.ReadFile(filepath.Join(cacheDir, "changes-applied.xlsx"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			outBody, err := os.ReadFile(outPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(outBody) == 0 {
+				t.Fatal("saved.xls is empty")
+			}
+			if string(outBody) != string(intermediate) {
+				t.Fatal("xls save should persist OOXML fallback bytes under concurrent load")
+			}
+		})
+	}
+}
+
 func TestConvertOfficeDocxToRTF(t *testing.T) {
 	repo := testutil.RepoRoot(t)
 	assets := testutil.AssetsDirOrSkip(t, repo)
@@ -979,8 +1042,8 @@ func TestSaveChangesCSVConcurrentPlaywrightLoad(t *testing.T) {
 	}
 
 	const (
-		workers      = 10 // PLAYWRIGHT_WORKERS in Dockerfile.playwright-office
-		convertLimit = 6  // OFFICE_CONVERT_LIMIT in Dockerfile.playwright-office
+		workers      = 10 // PLAYWRIGHT_WORKERS default in playwright.config.ts
+		convertLimit = 6  // OFFICE_CONVERT_LIMIT in _docker/Dockerfile.playwright
 	)
 
 	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: convertLimit})

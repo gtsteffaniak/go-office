@@ -12,15 +12,14 @@ import { samplesForTier, sampleExists } from "../samples";
 
 test.describe.configure({ mode: "parallel" });
 
-const bundledTest = process.env.OFFICE_PLAYWRIGHT_TEST === "true";
 const STATUS_OK_TIMEOUT = 8_000;
 const STABLE_MS = Number(process.env.POST_SAVE_STABLE_MS ?? 10_000);
-const SAVE_TEST_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_TEST_TIMEOUT ?? (bundledTest ? 180_000 : 150_000));
+const SAVE_TEST_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_TEST_TIMEOUT ?? 150_000);
 
 const STABLE_SAMPLES = samplesForTier(3).filter((s) => s.editor !== "pdf" && sampleExists(s.path));
 
 test.use({
-  trace: bundledTest ? "retain-on-failure" : "on-first-retry",
+  trace: "on-first-retry",
   timeout: SAVE_TEST_TIMEOUT,
 });
 

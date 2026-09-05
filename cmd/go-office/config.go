@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	office "github.com/quantumx-apps/go-office/pkg/office"
 	"github.com/quantumx-apps/go-office/internal/debuglog"
-	"github.com/quantumx-apps/go-office/internal/envconfig"
 	"github.com/quantumx-apps/go-office/internal/demo"
+	"github.com/quantumx-apps/go-office/internal/envconfig"
 	"github.com/quantumx-apps/go-office/internal/home"
+	office "github.com/quantumx-apps/go-office/pkg/office"
 )
 
 // runConfig holds server startup options from flags and OFFICE_* environment variables.
@@ -99,10 +99,6 @@ func envFirst(key, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-func envBool(key string) bool {
-	return envconfig.Bool(key)
 }
 
 func debugFromEnv() bool {

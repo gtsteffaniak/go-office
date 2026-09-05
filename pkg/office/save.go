@@ -71,12 +71,19 @@ func (s *Server) PersistDocument(ctx context.Context, docKey string) error {
 		return fmt.Errorf("office: save not supported for %s format", ext)
 	}
 
+	cacheDir := filepath.Join(s.cacheDir(), docKey)
+	if !hasPendingChanges(cacheDir) && !convert.EditorBinCached(cacheDir) {
+		if s.opts.Logger != nil {
+			s.opts.Logger.Debug("persist skipped; no pending changes or Editor.bin", "key", docKey)
+		}
+		return nil
+	}
+
 	conv, err := s.converter()
 	if err != nil {
 		return err
 	}
 
-	cacheDir := filepath.Join(s.cacheDir(), docKey)
 	outPath := filepath.Join(cacheDir, "saved."+ext)
 	pending := hasPendingChanges(cacheDir)
 	if s.opts.Logger != nil {

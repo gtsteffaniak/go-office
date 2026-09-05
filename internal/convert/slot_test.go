@@ -2,6 +2,8 @@ package convert
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"testing"
 	"time"
 )
@@ -56,6 +58,57 @@ func TestAcquireConvertSlotQueuesWaiters(t *testing.T) {
 		t.Fatal("queued waiter was not admitted after slot release")
 	}
 	release2()
+}
+
+func TestAcquireConvertSlotQueueFull(t *testing.T) {
+	c := &Converter{admission: newConvertAdmissionWithQueue(1, 2)}
+	release, err := c.acquireConvertSlot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			releaseWaiter, err := c.acquireConvertSlot(ctx)
+			if err != nil {
+				t.Errorf("waiter: %v", err)
+				return
+			}
+			releaseWaiter()
+		}()
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	_, err = c.acquireConvertSlot(context.Background())
+	if !errors.Is(err, ErrConvertQueueFull) {
+		t.Fatalf("expected ErrConvertQueueFull, got %v", err)
+	}
+	release()
+	wg.Wait()
+}
+
+func TestAcquireConvertSlotWaitTimeout(t *testing.T) {
+	c := &Converter{admission: newConvertAdmission(1)}
+	release, err := c.acquireConvertSlot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	_, err = c.acquireConvertSlot(ctx)
+	if err == nil {
+		t.Fatal("expected timeout waiting for slot")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected deadline exceeded, got %v", err)
+	}
+	release()
 }
 
 func TestConverterDrainWaitsForInflight(t *testing.T) {

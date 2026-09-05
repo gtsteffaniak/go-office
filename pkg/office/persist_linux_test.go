@@ -193,6 +193,7 @@ func TestPersistInvalidatesEditorBin(t *testing.T) {
 	if err = srv.PersistDocument(ctx, docKey); err != nil {
 		t.Fatal(err)
 	}
+	// No active coauthoring session in this unit test — cache is invalidated for reopen.
 	if _, err := os.Stat(filepath.Join(cacheDir, "Editor.bin")); !os.IsNotExist(err) {
 		t.Fatal("Editor.bin should be removed after persist so reopen reconverts from storage")
 	}

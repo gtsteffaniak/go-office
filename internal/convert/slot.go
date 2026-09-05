@@ -2,45 +2,59 @@ package convert
 
 import (
 	"context"
+	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
-
-	"github.com/gtsteffaniak/go-push/push"
 )
 
-const (
-	convertAdmissionInterval = time.Millisecond
-	convertAdmissionQueue    = 10_000
-)
+// convertQueueMaxWaiters is the maximum number of blocked x2t admission waiters.
+// Beyond this, new acquire calls fail immediately with ErrConvertQueueFull.
+const convertQueueMaxWaiters = 500
+
+// convertQueueWaitTimeout is how long a caller may wait for a convert slot before
+// the request expires (avoids indefinite buildup under sustained load).
+const convertQueueWaitTimeout = 10 * time.Second
+
+// ErrConvertQueueFull is returned when more than convertQueueMaxWaiters callers
+// are already waiting for a convert slot.
+var ErrConvertQueueFull = errors.New("convert: admission queue full")
 
 type slotGrant struct {
 	ready chan struct{}
 	done  chan struct{}
 }
 
-// convertAdmission limits concurrent x2t subprocesses with a go-push rate-limited
-// admission queue. Excess callers wait in order until a slot frees; they are not
-// rejected while their context remains valid.
+// convertAdmission limits concurrent x2t subprocesses with a FIFO wait queue.
+// Waiters block until a slot is available, their context is cancelled, or
+// convertQueueWaitTimeout elapses. go-push is used for demo warm debounce;
+// admission here uses an explicit FIFO channel because go-push Push() is
+// non-blocking and drops after 50ms when its input buffer is full.
 type convertAdmission struct {
 	limit     int
+	maxWait   int
 	slots     chan struct{}
-	admission *push.Pacer[slotGrant]
+	incoming  chan slotGrant
+	waiting   atomic.Int32
 	inflight  sync.WaitGroup
 }
 
 func newConvertAdmission(limit int) *convertAdmission {
+	return newConvertAdmissionWithQueue(limit, convertQueueMaxWaiters)
+}
+
+func newConvertAdmissionWithQueue(limit, maxWaiters int) *convertAdmission {
 	if limit <= 0 {
 		limit = 1
 	}
+	if maxWaiters <= 0 {
+		maxWaiters = convertQueueMaxWaiters
+	}
 	a := &convertAdmission{
-		limit: limit,
-		slots: make(chan struct{}, limit),
-		admission: push.New[slotGrant](push.Config{
-			Mode:      push.ModeRateLimit,
-			Interval:  convertAdmissionInterval,
-			MaxItems:  limit,
-			QueueSize: convertAdmissionQueue,
-		}),
+		limit:    limit,
+		maxWait:  maxWaiters,
+		slots:    make(chan struct{}, limit),
+		incoming: make(chan slotGrant, 64),
 	}
 	for i := 0; i < limit; i++ {
 		a.slots <- struct{}{}
@@ -50,7 +64,7 @@ func newConvertAdmission(limit int) *convertAdmission {
 }
 
 func (a *convertAdmission) run() {
-	for grant := range a.admission.Updates() {
+	for grant := range a.incoming {
 		if grantIsCancelled(grant) {
 			continue
 		}
@@ -77,22 +91,40 @@ func grantIsCancelled(grant slotGrant) bool {
 }
 
 func (a *convertAdmission) acquire(ctx context.Context) (func(), error) {
+	if int(a.waiting.Add(1)) > a.maxWait {
+		a.waiting.Add(-1)
+		return nil, ErrConvertQueueFull
+	}
+
 	a.inflight.Add(1)
 	grant := slotGrant{
 		ready: make(chan struct{}),
 		done:  make(chan struct{}),
 	}
-	a.admission.Push(grant)
+
+	waitCtx, cancel := context.WithTimeout(ctx, convertQueueWaitTimeout)
+	defer cancel()
+
+	select {
+	case a.incoming <- grant:
+	case <-waitCtx.Done():
+		a.waiting.Add(-1)
+		a.inflight.Done()
+		return nil, waitCtx.Err()
+	}
+
 	select {
 	case <-grant.ready:
+		a.waiting.Add(-1)
 		return func() {
 			a.slots <- struct{}{}
 			a.inflight.Done()
 		}, nil
-	case <-ctx.Done():
+	case <-waitCtx.Done():
 		close(grant.done)
+		a.waiting.Add(-1)
 		a.inflight.Done()
-		return nil, ctx.Err()
+		return nil, waitCtx.Err()
 	}
 }
 
@@ -111,9 +143,7 @@ func (a *convertAdmission) drain(ctx context.Context) error {
 }
 
 func (a *convertAdmission) stop() {
-	if a.admission != nil {
-		a.admission.Stop()
-	}
+	close(a.incoming)
 }
 
 // Drain waits until in-flight conversions finish or ctx is cancelled.

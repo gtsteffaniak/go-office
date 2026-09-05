@@ -26,7 +26,7 @@ func TestFlushDocumentUnknownKey(t *testing.T) {
 	}
 }
 
-func TestPersistDocumentRequiresEditorBin(t *testing.T) {
+func TestPersistDocumentNoOpWithoutEditorBin(t *testing.T) {
 	assetDir := t.TempDir()
 	srv, err := office.New(nopStorage{}, office.Options{AssetDir: assetDir})
 	if err != nil {
@@ -40,8 +40,8 @@ func TestPersistDocumentRequiresEditorBin(t *testing.T) {
 	})
 
 	err = srv.PersistDocument(context.Background(), docKey)
-	if err == nil {
-		t.Fatal("expected error when Editor.bin is missing")
+	if err != nil {
+		t.Fatalf("expected no-op when Editor.bin is missing and no changes: %v", err)
 	}
 }
 

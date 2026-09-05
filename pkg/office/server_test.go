@@ -198,6 +198,9 @@ func TestServesFonts(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s status = %d body = %s", path, rec.Code, rec.Body.String())
 		}
+		if cc := rec.Header().Get("Cache-Control"); cc != "public, max-age=31536000, immutable" {
+			t.Fatalf("%s Cache-Control = %q", path, cc)
+		}
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const sourceHashFileName = "source.sha256"
@@ -40,6 +41,22 @@ func editorBinReusable(outDir, sourceHash string) bool {
 		return false
 	}
 	return string(got) == sourceHash
+}
+
+// EditorBinCached reports whether outDir already has a non-empty Editor.bin (document key binds content).
+func EditorBinCached(outDir string) bool {
+	st, err := os.Stat(filepath.Join(outDir, "Editor.bin"))
+	return err == nil && st.Size() > 0
+}
+
+// BrowserOriginCached reports whether a browser-native document was copied to the cache.
+func BrowserOriginCached(outDir, ext string) bool {
+	ext = strings.TrimPrefix(strings.ToLower(ext), ".")
+	if ext == "" {
+		return false
+	}
+	st, err := os.Stat(filepath.Join(outDir, "origin."+ext))
+	return err == nil && st.Size() > 0
 }
 
 func writeSourceHash(outDir, sourceHash string) error {

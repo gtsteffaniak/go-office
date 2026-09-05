@@ -53,6 +53,44 @@ func TestOpenerOpenPDF(t *testing.T) {
 	}
 }
 
+func TestOpenerOpenSkipsDownloadWhenEditorBinCached(t *testing.T) {
+	cacheDir := t.TempDir()
+	key := "cached-key"
+	outDir := filepath.Join(cacheDir, key)
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outDir, "Editor.bin"), []byte("editor-bin"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	downloads := 0
+	fileSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		downloads++
+		http.Error(w, "should not download", http.StatusInternalServerError)
+	}))
+	t.Cleanup(fileSrv.Close)
+
+	opener := &Opener{CacheDir: cacheDir, Logger: slog.Default()}
+	packets, err := opener.Open(context.Background(), "http://example.com", "/office", key, openCmd{
+		Command: "open",
+		Format:  "csv",
+		URL:     fileSrv.URL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if downloads != 0 {
+		t.Fatalf("download calls = %d, want 0 on cache hit", downloads)
+	}
+	if len(packets) != 1 || !strings.Contains(packets[0], `"status":"ok"`) {
+		t.Fatalf("unexpected packet: %v", packets)
+	}
+	if !strings.Contains(packets[0], `"Editor.bin"`) {
+		t.Fatalf("packet missing Editor.bin: %s", packets[0])
+	}
+}
+
 type recordingFlushSaver struct {
 	calls int
 }

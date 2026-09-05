@@ -21,6 +21,12 @@ func init() {
 // Dir returns an http.Handler that serves files from root/subdir.
 // Returns nil if the directory does not exist.
 func Dir(root, subdir string) http.Handler {
+	return DirWithPolicy(root, subdir, false)
+}
+
+// DirWithPolicy serves files from root/subdir. When immutableExtless is true,
+// extensionless paths (e.g. font id binaries under /fonts/) also get long-lived cache headers.
+func DirWithPolicy(root, subdir string, immutableExtless bool) http.Handler {
 	dir := filepath.Join(root, subdir)
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 		return nil
@@ -28,14 +34,33 @@ func Dir(root, subdir string) http.Handler {
 	fs := http.FileServer(http.Dir(dir))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		setContentType(w, r.URL.Path)
-		// Immutable caching for versioned editor assets.
-		if strings.HasSuffix(r.URL.Path, ".js") ||
-			strings.HasSuffix(r.URL.Path, ".css") ||
-			strings.HasSuffix(r.URL.Path, ".wasm") {
+		if cacheControlImmutable(r.URL.Path, immutableExtless) {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		}
 		fs.ServeHTTP(w, r)
 	})
+}
+
+func cacheControlImmutable(path string, immutableExtless bool) bool {
+	if strings.HasSuffix(path, ".js") ||
+		strings.HasSuffix(path, ".css") ||
+		strings.HasSuffix(path, ".wasm") {
+		return true
+	}
+	if !immutableExtless {
+		return false
+	}
+	ext := filepath.Ext(path)
+	if ext != "" {
+		switch ext {
+		case ".ttf", ".otf", ".woff", ".woff2":
+			return true
+		default:
+			return false
+		}
+	}
+	base := filepath.Base(strings.TrimSuffix(path, "/"))
+	return base != "" && base != "."
 }
 
 func setContentType(w http.ResponseWriter, name string) {

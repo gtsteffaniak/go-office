@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -59,11 +60,21 @@ type landingData struct {
 }
 
 type viewerData struct {
-	FileJSON       template.JS
-	OfficeBaseJSON template.JS
-	APIBaseJSON    template.JS
-	LandingURLJSON template.JS
-	LandingURL     string
+	FileJSON        template.JS
+	DocumentKeyJSON template.JS
+	OfficeBaseJSON  template.JS
+	APIBaseJSON     template.JS
+	LandingURLJSON  template.JS
+	LandingURL      string
+	APIScriptURL    string
+}
+
+type sampleDoc struct {
+	RelPath   string
+	Info      office.FileInfo
+	Key       string
+	Ext       string
+	LocalPath string
 }
 
 // New returns a demo handler. Register patterns with Attach.
@@ -132,6 +143,8 @@ func (h *Handler) serveUI(w http.ResponseWriter, r *http.Request) {
 		h.serveLanding(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/view":
 		h.serveViewer(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == "/warm":
+		h.serveWarm(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -139,19 +152,17 @@ func (h *Handler) serveUI(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) serveConfig(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	file := strings.TrimSpace(r.URL.Query().Get("file"))
-	if file == "" {
-		http.Error(w, "file query parameter is required", http.StatusBadRequest)
-		return
-	}
-	if !h.isAllowedSample(file) {
-		http.Error(w, "file not found", http.StatusNotFound)
-		return
-	}
-
-	info, err := h.store.Stat(ctx, file)
+	doc, err := h.resolveSampleDoc(ctx, r.URL.Query().Get("file"))
 	if err != nil {
-		http.Error(w, "sample file not found: "+file, http.StatusNotFound)
+		if errors.Is(err, errSampleNotFound) {
+			if strings.TrimSpace(r.URL.Query().Get("file")) == "" {
+				http.Error(w, "file query parameter is required", http.StatusBadRequest)
+				return
+			}
+			http.Error(w, "file not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -160,18 +171,16 @@ func (h *Handler) serveConfig(w http.ResponseWriter, r *http.Request) {
 		origin = strings.TrimSuffix(o, "/")
 	}
 	apiBase := h.opts.APIBasePath
-	fileURL := origin + apiBase + "/demo/file/" + strings.TrimPrefix(file, "/")
+	fileURL := origin + apiBase + "/demo/file/" + strings.TrimPrefix(doc.RelPath, "/")
 	callbackURL := origin + apiBase + "/demo/callback"
-	key := documentKey(file, info, h.fileFingerprint(r.Context(), file, info))
-	h.office.ResetCoauthoringSession(key)
-	ext := strings.TrimPrefix(strings.ToLower(path.Ext(info.Name)), ".")
+	h.office.ResetCoauthoringSession(doc.Key)
 
 	cfg, err := h.office.BuildEditorConfig(ctx, config.EditorRequest{
-		DocumentKey: key,
-		Title:       info.Name,
-		FileType:    ext,
+		DocumentKey: doc.Key,
+		Title:       doc.Info.Name,
+		FileType:    doc.Ext,
 		DocumentURL: fileURL,
-		StoragePath: file,
+		StoragePath: doc.RelPath,
 		CallbackURL: callbackURL,
 		UserID:      "demo-user",
 		UserName:    "Demo User",
@@ -187,8 +196,8 @@ func (h *Handler) serveConfig(w http.ResponseWriter, r *http.Request) {
 
 	if h.office.Debug() {
 		h.opts.Logger.Debug("demo config",
-			"file", file,
-			"key", key,
+			"file", doc.RelPath,
+			"key", doc.Key,
 			"documentURL", fileURL,
 			"callbackURL", callbackURL,
 		)
@@ -198,14 +207,75 @@ func (h *Handler) serveConfig(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(cfg)
 }
 
+func (h *Handler) serveWarm(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	doc, err := h.resolveSampleDoc(r.Context(), r.URL.Query().Get("file"))
+	if err != nil {
+		if errors.Is(err, errSampleNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	go func() {
+		ctx := context.WithoutCancel(r.Context())
+		if warmErr := h.warmDocument(ctx, doc); warmErr != nil && h.opts.Logger != nil {
+			h.opts.Logger.Warn("demo warm failed", "file", doc.RelPath, "key", doc.Key, "err", warmErr)
+		}
+	}()
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func (h *Handler) warmDocument(ctx context.Context, doc sampleDoc) error {
+	if _, err := os.Stat(doc.LocalPath); err != nil {
+		return err
+	}
+	return h.office.EnsureEditorBin(ctx, doc.Key, doc.LocalPath, doc.Ext)
+}
+
+func (h *Handler) resolveSampleDoc(ctx context.Context, file string) (sampleDoc, error) {
+	file = strings.TrimSpace(file)
+	if file == "" {
+		return sampleDoc{}, errSampleNotFound
+	}
+	if !h.isAllowedSample(file) {
+		return sampleDoc{}, errSampleNotFound
+	}
+	info, err := h.store.Stat(ctx, file)
+	if err != nil {
+		return sampleDoc{}, errSampleNotFound
+	}
+	key := documentKey(file, info, h.fileFingerprint(ctx, file, info))
+	ext := strings.TrimPrefix(strings.ToLower(path.Ext(info.Name)), ".")
+	localPath := filepath.Join(h.opts.DataRoot, filepath.FromSlash(file))
+	return sampleDoc{
+		RelPath:   file,
+		Info:      info,
+		Key:       key,
+		Ext:       ext,
+		LocalPath: localPath,
+	}, nil
+}
+
+var errSampleNotFound = fmt.Errorf("demo: sample not found")
+
 func (h *Handler) serveViewer(w http.ResponseWriter, r *http.Request) {
 	file := strings.TrimSpace(r.URL.Query().Get("file"))
 	if file == "" {
 		http.Redirect(w, r, ".", http.StatusFound)
 		return
 	}
-	if !h.isAllowedSample(file) {
-		http.Error(w, "file not found", http.StatusNotFound)
+	doc, err := h.resolveSampleDoc(r.Context(), file)
+	if err != nil {
+		if errors.Is(err, errSampleNotFound) {
+			http.Error(w, "file not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -215,13 +285,16 @@ func (h *Handler) serveViewer(w http.ResponseWriter, r *http.Request) {
 	}
 	apiBase := normalizePath(h.opts.APIBasePath)
 	landingURL := office.URLPath(h.office.BasePath(), "demo/")
+	apiScriptURL := office.URLPath(h.office.BasePath(), "web-apps/apps/api/documents/api.js")
 
 	data := viewerData{
-		FileJSON:       template.JS(jsonString(file)),
-		OfficeBaseJSON: template.JS(jsonString(officeBase)),
-		APIBaseJSON:    template.JS(jsonString(apiBase)),
-		LandingURLJSON: template.JS(jsonString(landingURL)),
-		LandingURL:     landingURL,
+		FileJSON:        template.JS(jsonString(doc.RelPath)),
+		DocumentKeyJSON: template.JS(jsonString(doc.Key)),
+		OfficeBaseJSON:  template.JS(jsonString(officeBase)),
+		APIBaseJSON:     template.JS(jsonString(apiBase)),
+		LandingURLJSON:  template.JS(jsonString(landingURL)),
+		LandingURL:      landingURL,
+		APIScriptURL:    apiScriptURL,
 	}
 	var buf bytes.Buffer
 	if err := h.viewerTmpl.Execute(&buf, data); err != nil {

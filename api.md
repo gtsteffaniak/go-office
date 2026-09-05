@@ -69,6 +69,7 @@ Paths are relative to `documentServerUrl` (default site root). `OFFICE_BASE_PATH
 | `/healthcheck` | GET | ✅ | ⚠️ | Body `true`. ONLYOFFICE also probes DB/Redis/broker; go-office returns `true` without those dependencies |
 | `/health` | GET | ⚠️ | ✅ | go-office JSON: `status`, `version`, `sessions`, `cacheDirs`, `cacheBytes` |
 | `/healthz` | GET | — | ✅ | Alias of `/health` (k8s convention; not ONLYOFFICE-specific) |
+| `/session/reset?key={documentKey}` | POST | — | ✅ | Clears in-memory coauthoring session for a document key before a new editor page load. Integrators that build config outside `BuildEditorConfig` (e.g. FileBrowser) should call this when minting editor config. Returns `204 No Content`. |
 | `/info/info.json` | GET | ✅ | ✅ | `{"version":"…"}` |
 
 ### 1.2 Conversion API (FileBrowser previews, print/export pipelines)

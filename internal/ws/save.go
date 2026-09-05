@@ -42,21 +42,21 @@ type keyFlushCoordinator struct {
 }
 
 type saveScheduler struct {
-	mu              sync.Mutex
-	timers          map[string]*time.Timer
-	gen             map[string]uint64
-	delay           time.Duration
-	forceFallback   time.Duration
-	saver           DocumentSaver
-	cacheDir        string
-	logger          *slog.Logger
-	inflight        sync.WaitGroup
-	forceTimers     map[string]*time.Timer
-	forceOnDone     map[string]func(error)
-	forceOrigin     map[string]string
-	saveIntent      map[string]bool
-	pendingEndSave  map[string]bool
-	flushCoords     map[string]*keyFlushCoordinator
+	mu             sync.Mutex
+	timers         map[string]*time.Timer
+	gen            map[string]uint64
+	delay          time.Duration
+	forceFallback  time.Duration
+	saver          DocumentSaver
+	cacheDir       string
+	logger         *slog.Logger
+	inflight       sync.WaitGroup
+	forceTimers    map[string]*time.Timer
+	forceOnDone    map[string]func(error)
+	forceOrigin    map[string]string
+	saveIntent     map[string]bool
+	pendingEndSave map[string]bool
+	flushCoords    map[string]*keyFlushCoordinator
 }
 
 func newSaveScheduler(cacheDir string, saver DocumentSaver, logger *slog.Logger, delayOverride, forceFallbackOverride *time.Duration) *saveScheduler {
@@ -72,19 +72,19 @@ func newSaveScheduler(cacheDir string, saver DocumentSaver, logger *slog.Logger,
 		forceFallback = *forceFallbackOverride
 	}
 	return &saveScheduler{
-		timers:          make(map[string]*time.Timer),
-		gen:             make(map[string]uint64),
-		delay:           delay,
-		forceFallback:   forceFallback,
-		saver:           saver,
-		cacheDir:        cacheDir,
-		logger:          logger,
-		forceTimers:     make(map[string]*time.Timer),
-		forceOnDone:     make(map[string]func(error)),
-		forceOrigin:     make(map[string]string),
-		saveIntent:      make(map[string]bool),
-		pendingEndSave:  make(map[string]bool),
-		flushCoords:     make(map[string]*keyFlushCoordinator),
+		timers:         make(map[string]*time.Timer),
+		gen:            make(map[string]uint64),
+		delay:          delay,
+		forceFallback:  forceFallback,
+		saver:          saver,
+		cacheDir:       cacheDir,
+		logger:         logger,
+		forceTimers:    make(map[string]*time.Timer),
+		forceOnDone:    make(map[string]func(error)),
+		forceOrigin:    make(map[string]string),
+		saveIntent:     make(map[string]bool),
+		pendingEndSave: make(map[string]bool),
+		flushCoords:    make(map[string]*keyFlushCoordinator),
 	}
 }
 
@@ -636,11 +636,7 @@ func (h *Handler) handleSaveChanges(sess *session, msg map[string]any, docKey st
 
 func notifyForceSaveResult(docKey string, success bool) {
 	now := time.Now().UnixMilli()
-	sessions.Range(func(key, value any) bool {
-		s, ok := value.(*session)
-		if !ok || s.docKey != docKey {
-			return true
-		}
+	forEachSession(docKey, func(s *session) {
 		pkt, err := socketMessage(map[string]any{
 			"type": "forceSave",
 			"messages": map[string]any{
@@ -652,6 +648,5 @@ func notifyForceSaveResult(docKey string, success bool) {
 		if err == nil {
 			s.enqueue(pkt)
 		}
-		return true
 	})
 }

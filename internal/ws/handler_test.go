@@ -117,31 +117,52 @@ func TestPollingAuthResponse(t *testing.T) {
 }
 
 func TestPollingReloadSameCSVResendsAuth(t *testing.T) {
-	h := testHandler(t)
+	ws.ResetSessionsForTest()
+	opener := newHookOpener()
+	h := ws.NewWithOptions(ws.HandlerOptions{
+		Version:  "9.3.4-hotfix.1",
+		CacheDir: t.TempDir(),
+		OpenHook: opener,
+	})
+	h.PollHold = 0
+
 	csvKey := "0c799d3dbda398a50f7077f6f3c3de7cb9110610d27e9318951de50ec9788e47"
 	connectAuth := `40{"data":{"type":"auth","docid":"` + csvKey + `","user":{"id":"demo-user","username":"Demo User"},"openCmd":{"c":"open","id":"` + csvKey + `","format":"csv","url":"http://localhost/sample.csv"}}}`
 
-	poll := func() string {
-		get := httptest.NewRequest(http.MethodGet, "/?EIO=4&transport=polling&sid=go-office&t=1", nil)
-		rec := httptest.NewRecorder()
-		h.ServePath(rec, get, "/doc/"+csvKey+"/c")
-		return rec.Body.String()
+	postReload := func() {
+		req := httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(connectAuth))
+		h.ServePath(httptest.NewRecorder(), req, "/doc/"+csvKey+"/c")
 	}
 
-	h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(connectAuth)), "/doc/"+csvKey+"/c")
-	first := poll()
-	if !strings.Contains(first, `"type":"auth"`) {
-		t.Fatalf("first open missing auth: %q", first)
+	// First load uses Engine.IO packet 40 with embedded auth + openCmd (browser reload shape).
+	postReload()
+	waitDocumentOpen(t, h, csvKey)
+	if opener.count(csvKey) != 1 {
+		t.Fatalf("first open calls = %d, want 1", opener.count(csvKey))
 	}
 
 	// Same hardcoded sid + document key, as the browser does on reload.
-	h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(connectAuth)), "/doc/"+csvKey+"/c")
-	second := poll()
+	postReload()
+	second := pollingGet(t, h, csvKey)
 	if !strings.Contains(second, `"type":"auth"`) {
 		t.Fatalf("reload must resend auth for the same csv key, got %q", second)
 	}
 	if !strings.Contains(second, `"result":1`) {
 		t.Fatalf("reload auth result missing: %q", second)
+	}
+	if strings.Contains(second, `"type":"documentOpen"`) {
+		t.Fatalf("reload without session clear must not send documentOpen: %q", second)
+	}
+	if opener.count(csvKey) != 1 {
+		t.Fatalf("reload without clear should not open again, got %d calls", opener.count(csvKey))
+	}
+
+	// Integrator reset (BuildEditorConfig / POST session/reset).
+	ws.ClearDocumentSession(csvKey)
+	postReload()
+	waitDocumentOpen(t, h, csvKey)
+	if opener.count(csvKey) < 2 {
+		t.Fatalf("reload after session reset must open again, got %d calls", opener.count(csvKey))
 	}
 }
 

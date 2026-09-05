@@ -210,6 +210,63 @@ func TestHandlerSwitchCSVThenDocxSameSid(t *testing.T) {
 	}
 }
 
+func reloadConnectPacket(docKey, format, docURL string) string {
+	return `40{"data":{"type":"auth","docid":"` + docKey + `","user":{"id":"demo","username":"Demo"},"openCmd":{"c":"open","id":"` + docKey + `","format":"` + format + `","url":"` + docURL + `"}}}`
+}
+
+func TestHandlerReloadWithoutClearHangs(t *testing.T) {
+	ws.ResetSessionsForTest()
+	opener := newHookOpener()
+	h := ws.NewWithOptions(ws.HandlerOptions{
+		Version:  "9.3.4",
+		CacheDir: t.TempDir(),
+		OpenHook: opener,
+	})
+	h.PollHold = 0
+	docKey := "reload-hang-key"
+	docURL := "http://localhost/a.docx"
+
+	h.ServePath(httptest.NewRecorder(), authPostRequest("docx", docURL), "/doc/"+docKey+"/c")
+	waitDocumentOpen(t, h, docKey)
+
+	reload := httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office",
+		strings.NewReader(reloadConnectPacket(docKey, "docx", docURL)))
+	h.ServePath(httptest.NewRecorder(), reload, "/doc/"+docKey+"/c")
+	body := pollingGet(t, h, docKey)
+	if strings.Contains(body, `"type":"documentOpen"`) {
+		t.Fatalf("reload without session clear must not send documentOpen: %q", body)
+	}
+	if opener.count(docKey) != 1 {
+		t.Fatalf("open calls = %d, want 1 without session reset", opener.count(docKey))
+	}
+}
+
+func TestHandlerReloadAfterSessionReset(t *testing.T) {
+	ws.ResetSessionsForTest()
+	opener := newHookOpener()
+	h := ws.NewWithOptions(ws.HandlerOptions{
+		Version:  "9.3.4",
+		CacheDir: t.TempDir(),
+		OpenHook: opener,
+	})
+	h.PollHold = 0
+	docKey := "reload-ok-key"
+	docURL := "http://localhost/a.docx"
+
+	h.ServePath(httptest.NewRecorder(), authPostRequest("docx", docURL), "/doc/"+docKey+"/c")
+	waitDocumentOpen(t, h, docKey)
+
+	ws.ClearDocumentSession(docKey)
+	reload := httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office",
+		strings.NewReader(reloadConnectPacket(docKey, "docx", docURL)))
+	h.ServePath(httptest.NewRecorder(), reload, "/doc/"+docKey+"/c")
+	waitDocumentOpen(t, h, docKey)
+
+	if opener.count(docKey) < 2 {
+		t.Fatalf("expected 2 opens after session reset reload, got %d", opener.count(docKey))
+	}
+}
+
 func TestHandlerReopenAfterFirstOpenCompletes(t *testing.T) {
 	ws.ResetSessionsForTest()
 	opener := newHookOpener()

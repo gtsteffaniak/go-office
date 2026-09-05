@@ -51,6 +51,15 @@ func (s *Server) EnsureEditorBin(ctx context.Context, docKey, sourcePath, ext st
 	return nil
 }
 
+// EditorBinCached reports whether cache/{docKey} already has a usable Editor.bin.
+func (s *Server) EditorBinCached(docKey string) bool {
+	docKey = strings.TrimSpace(docKey)
+	if docKey == "" {
+		return false
+	}
+	return convert.EditorBinCached(filepath.Join(s.cacheDir(), docKey))
+}
+
 func copyFile(src, dest string) error {
 	in, err := os.Open(src)
 	if err != nil {

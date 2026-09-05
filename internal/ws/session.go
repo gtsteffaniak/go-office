@@ -22,8 +22,8 @@ type session struct {
 	waitCh  chan struct{}
 	waitGen uint64
 
-	namespaceAck bool
-	infoSent     bool
+	namespaceAck   bool
+	infoSent       bool
 	authSent       bool
 	openStarted    bool
 	documentOpened bool
@@ -31,9 +31,16 @@ type session struct {
 	sessionID string
 	indexUser int
 	userID    string // participant id: original user id + indexUser (sdkjs _userId)
+
+	configEpochAtCreate uint64
 }
 
-var sessions sync.Map // sessionKey -> *session
+var coauthoringSessions = sessionRegistry{sessions: make(map[string]*session)}
+
+type sessionRegistry struct {
+	mu       sync.RWMutex
+	sessions map[string]*session
+}
 
 func sessionKey(sid, docKey string) string {
 	if sid == "" {
@@ -43,39 +50,57 @@ func sessionKey(sid, docKey string) string {
 }
 
 func getSession(sid, docKey string, build BuildInfo, basePath string) *session {
+	return coauthoringSessions.get(sid, docKey, build, basePath)
+}
+
+func (r *sessionRegistry) get(sid, docKey string, build BuildInfo, basePath string) *session {
 	key := sessionKey(sid, docKey)
-	if v, ok := sessions.Load(key); ok {
-		s, ok := v.(*session)
-		if !ok {
-			return &session{docKey: docKey, build: build, basePath: basePath, indexUser: 1}
-		}
-		if s.build.Release == "" && build.Release != "" {
-			s.build = build
-		}
-		if s.basePath == "" && basePath != "" {
-			s.basePath = basePath
-		}
+
+	r.mu.RLock()
+	s, ok := r.sessions[key]
+	r.mu.RUnlock()
+	if ok {
+		s.applyBuildBase(build, basePath)
 		return s
 	}
-	s := &session{docKey: docKey, build: build, basePath: basePath, indexUser: 1}
-	actual, _ := sessions.LoadOrStore(key, s)
-	if actualSession, ok := actual.(*session); ok {
-		return actualSession
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if s, ok = r.sessions[key]; ok {
+		s.applyBuildBase(build, basePath)
+		return s
 	}
+	s = &session{
+		docKey:              docKey,
+		build:               build,
+		basePath:            basePath,
+		indexUser:           1,
+		configEpochAtCreate: documentConfigEpoch(docKey),
+	}
+	r.sessions[key] = s
 	return s
+}
+
+func (s *session) applyBuildBase(build BuildInfo, basePath string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.build.Release == "" && build.Release != "" {
+		s.build = build
+	}
+	if s.basePath == "" && basePath != "" {
+		s.basePath = basePath
+	}
 }
 
 // ResetSessionsForTest clears in-memory coauthoring sessions (tests only).
 func ResetSessionsForTest() {
+	resetDocumentConfigEpochs()
 	ClearAllSessions()
 }
 
 // ClearAllSessions drops all in-memory coauthoring sessions.
 func ClearAllSessions() {
-	sessions.Range(func(key, _ any) bool {
-		sessions.Delete(key)
-		return true
-	})
+	coauthoringSessions.clear()
 }
 
 // ClearDocumentSession drops the default demo coauthoring session for a document key.
@@ -84,7 +109,30 @@ func ClearDocumentSession(docKey string) {
 	if docKey == "" {
 		return
 	}
-	sessions.Delete(sessionKey(defaultSessionID, docKey))
+	bumpDocumentConfigEpoch(docKey)
+	coauthoringSessions.delete(sessionKey(defaultSessionID, docKey))
+}
+
+func (r *sessionRegistry) delete(key string) {
+	r.mu.Lock()
+	delete(r.sessions, key)
+	r.mu.Unlock()
+}
+
+func (r *sessionRegistry) clear() {
+	r.mu.Lock()
+	r.sessions = make(map[string]*session)
+	r.mu.Unlock()
+}
+
+func forEachSession(docKey string, fn func(*session)) {
+	coauthoringSessions.mu.RLock()
+	defer coauthoringSessions.mu.RUnlock()
+	for _, s := range coauthoringSessions.sessions {
+		if s.docKey == docKey {
+			fn(s)
+		}
+	}
 }
 
 func (s *session) enqueue(packets ...string) {
@@ -159,6 +207,34 @@ func (s *session) isReconnectAuth(req authRequest) bool {
 	// Engine.IO packet 40 on polling reconnect often omits sessionId; the editor
 	// still holds the open document and resends sessionId on the follow-up auth.
 	return true
+}
+
+func (s *session) needsDocumentOpen(req authRequest) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.syncConfigEpochLocked()
+	if req.Open == nil {
+		return false
+	}
+	if s.documentOpened || s.openStarted {
+		return false
+	}
+	return !s.isReconnectAuth(req)
+}
+
+func (s *session) syncConfigEpochLocked() {
+	current := documentConfigEpoch(s.docKey)
+	if current > s.configEpochAtCreate {
+		s.documentOpened = false
+		s.openStarted = false
+		s.configEpochAtCreate = current
+	}
+}
+
+func (s *session) shouldLogReconnect(req authRequest) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.documentOpened && s.isReconnectAuth(req)
 }
 
 func (s *session) hadDocumentOpen() bool {

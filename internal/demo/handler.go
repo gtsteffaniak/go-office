@@ -173,7 +173,6 @@ func (h *Handler) serveConfig(w http.ResponseWriter, r *http.Request) {
 	apiBase := h.opts.APIBasePath
 	fileURL := origin + apiBase + "/demo/file/" + strings.TrimPrefix(doc.RelPath, "/")
 	callbackURL := origin + apiBase + "/demo/callback"
-	h.office.ResetCoauthoringSession(doc.Key)
 
 	cfg, err := h.office.BuildEditorConfig(ctx, config.EditorRequest{
 		DocumentKey: doc.Key,
@@ -223,9 +222,17 @@ func (h *Handler) serveWarm(w http.ResponseWriter, r *http.Request) {
 	}
 	go func() {
 		ctx := context.WithoutCancel(r.Context())
-		if warmErr := h.warmDocument(ctx, doc); warmErr != nil && h.opts.Logger != nil {
-			h.opts.Logger.Warn("demo warm failed", "file", doc.RelPath, "key", doc.Key, "err", warmErr)
+		warmErr := h.warmDocument(ctx, doc)
+		if warmErr == nil || h.opts.Logger == nil {
+			return
 		}
+		// Warm races coauthoring open on first load; if open won, the failure is benign.
+		if h.office.EditorBinCached(doc.Key) {
+			h.opts.Logger.Debug("demo warm lost race; editor cache ready",
+				"file", doc.RelPath, "key", doc.Key, "err", warmErr)
+			return
+		}
+		h.opts.Logger.Error("demo warm failed", "file", doc.RelPath, "key", doc.Key, "err", warmErr)
 	}()
 	w.WriteHeader(http.StatusAccepted)
 }

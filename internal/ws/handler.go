@@ -172,23 +172,25 @@ func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey st
 		for _, packet := range parsePostPackets(string(body)) {
 			switch {
 			case strings.HasPrefix(packet, "40"):
-				hadOpen := sess.hadDocumentOpen()
 				sess.onConnect(connectAuthData(packet))
 				if req, ok := parseAuthPacket(packet); ok {
 					h.registerDocumentSession(docKey, req)
-					if hadOpen {
-						if h.Logger != nil {
-							h.Logger.Info("coauthoring reconnect", "key", docKey, "keptOpen", true)
-						}
-					} else {
+					if sess.needsDocumentOpen(req) {
 						sess.startOpen(h.documentOpener(), req, CoauthoringOrigin(h.PublicOrigin, r))
+					} else if sess.shouldLogReconnect(req) {
+						if h.Logger != nil {
+							h.Logger.WithGroup("coauthoring").Info("reconnect",
+								"key", docKey,
+								"keptOpen", true,
+							)
+						}
 					}
 				}
 			case strings.HasPrefix(packet, "42"):
 				if req, ok := parseAuthPacket(packet); ok {
 					h.registerDocumentSession(docKey, req)
 					sess.onAuth(req)
-					if !sess.hadDocumentOpen() {
+					if sess.needsDocumentOpen(req) {
 						sess.startOpen(h.documentOpener(), req, CoauthoringOrigin(h.PublicOrigin, r))
 					}
 					continue

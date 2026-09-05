@@ -96,12 +96,9 @@ func (o *Opener) Open(ctx context.Context, origin, basePath, docKey string, cmd 
 		return []string{pkt}, nil
 	}
 	if err = o.Converter.ToEditorBin(ctx, tmpPath, outDir); err != nil {
-		if o.Logger != nil {
-			o.Logger.Error("document open failed", "key", docKey, "url", cmd.URL, "err", err)
-		}
 		return o.errorPackets(cmd.Command, err)
 	}
-	return o.editorBinOpenPackets(cmd.Command, origin, basePath, docKey, outDir)
+	return o.editorBinOpenPackets(cmd.Command, origin, basePath, docKey, outDir, "")
 }
 
 func (o *Opener) openFromCache(cmd openCmd, origin, basePath, docKey, ext, outDir string) ([]string, bool, error) {
@@ -125,17 +122,14 @@ func (o *Opener) openFromCache(cmd openCmd, origin, basePath, docKey, ext, outDi
 	if !convert.EditorBinCached(outDir) {
 		return nil, false, nil
 	}
-	packets, err := o.editorBinOpenPackets(cmd.Command, origin, basePath, docKey, outDir)
+	packets, err := o.editorBinOpenPackets(cmd.Command, origin, basePath, docKey, outDir, "cached editor bin")
 	if err != nil {
 		return nil, true, err
-	}
-	if o.Logger != nil {
-		o.Logger.Info("document open ok (cached editor bin)", "key", docKey)
 	}
 	return packets, true, nil
 }
 
-func (o *Opener) editorBinOpenPackets(cmdType, origin, basePath, docKey, outDir string) ([]string, error) {
+func (o *Opener) editorBinOpenPackets(cmdType, origin, basePath, docKey, outDir, logSuffix string) ([]string, error) {
 	files := map[string]string{
 		"Editor.bin": fileURL(origin, basePath, docKey, "Editor.bin"),
 	}
@@ -153,8 +147,14 @@ func (o *Opener) editorBinOpenPackets(cmdType, origin, basePath, docKey, outDir 
 		return nil, err
 	}
 	if o.Logger != nil {
+		msg := "document open ok"
+		if logSuffix != "" {
+			msg += " (" + logSuffix + ")"
+		}
 		if st, err := os.Stat(filepath.Join(outDir, "Editor.bin")); err == nil {
-			o.Logger.Info("document open ok", "key", docKey, "editorBinBytes", st.Size())
+			o.Logger.Info(msg, "key", docKey, "editorBinBytes", st.Size())
+		} else if logSuffix == "cached editor bin" {
+			o.Logger.Info(msg, "key", docKey)
 		}
 	}
 	return []string{pkt}, nil
@@ -213,7 +213,7 @@ func copyFile(src, dest string) error {
 
 func (o *Opener) errorPackets(cmdType string, err error) ([]string, error) {
 	if o.Logger != nil {
-		o.Logger.Warn("document open failed", "err", err)
+		o.Logger.Error("document open failed", "err", err)
 	}
 	pkt, perr := documentOpenPacket(cmdType, "error", err.Error())
 	if perr != nil {

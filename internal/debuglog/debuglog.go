@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/quantumx-apps/go-office/internal/logging"
 	"github.com/quantumx-apps/go-office/internal/ws"
 )
 
@@ -26,15 +27,12 @@ func EnvEnabled() bool {
 	return false
 }
 
-// NewLogger returns a stderr logger at debug level when enabled, otherwise info.
+// NewLogger returns a stderr logger backed by go-logger when available.
 func NewLogger(debug bool) *slog.Logger {
-	level := slog.LevelInfo
-	if debug {
-		level = slog.LevelDebug
-	}
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: level,
-	}))
+	return logging.NewSlog(logging.Options{
+		Debug: debug,
+		JSON:  logging.JSONEnabled(),
+	})
 }
 
 type responseWriter struct {
@@ -91,7 +89,17 @@ func isExpectedHTTPError(r *http.Request, status int) bool {
 	case status == http.StatusNotImplemented && strings.Contains(path, "/c/") &&
 		(strings.EqualFold(r.Header.Get("Upgrade"), "websocket") || r.URL.Query().Get("transport") == "websocket"):
 		return true
-	default:
-		return false
+	case status == http.StatusNotFound:
+		switch {
+		case path == "/favicon.ico":
+			return true
+		case path == "/themes.json":
+			return true
+		case strings.HasPrefix(path, "/dictionaries/"):
+			return true
+		case strings.HasPrefix(path, "/.well-known/"):
+			return true
+		}
 	}
+	return false
 }

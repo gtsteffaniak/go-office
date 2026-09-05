@@ -1043,7 +1043,7 @@ func TestSaveChangesCSVConcurrentPlaywrightLoad(t *testing.T) {
 
 	const (
 		workers      = 10 // PLAYWRIGHT_WORKERS default in playwright.config.ts
-		convertLimit = 6  // OFFICE_CONVERT_LIMIT in _docker/Dockerfile.playwright
+		convertLimit = 6 // OFFICE_CONVERT_LIMIT in _docker/Dockerfile.playwright
 	)
 
 	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: convertLimit})

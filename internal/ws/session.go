@@ -135,6 +135,20 @@ func forEachSession(docKey string, fn func(*session)) {
 	}
 }
 
+// HasActiveDocumentSession reports whether a document still has an open or opening editor.
+// Used to skip post-persist Editor.bin refresh while the client holds in-memory state.
+func HasActiveDocumentSession(docKey string) bool {
+	found := false
+	forEachSession(docKey, func(s *session) {
+		s.mu.Lock()
+		if s.documentOpened || s.openStarted {
+			found = true
+		}
+		s.mu.Unlock()
+	})
+	return found
+}
+
 func (s *session) enqueue(packets ...string) {
 	s.mu.Lock()
 	s.outbox = append(s.outbox, packets...)

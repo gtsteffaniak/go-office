@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/quantumx-apps/go-office/internal/fsutil"
@@ -32,8 +31,7 @@ type Converter struct {
 	webAllFonts   string // sdkjs bundle for browser only
 	seedAllFonts  []byte // converter/bin/AllFonts.js frozen at startup
 	fontSelection []byte // converter/bin/font_selection.bin frozen at startup
-	limit         chan struct{}
-	inflight      sync.WaitGroup
+	admission     *convertAdmission
 	runner        X2TRunner
 }
 
@@ -80,9 +78,16 @@ func New(opts Options) (*Converter, error) {
 		webAllFonts:   filepath.Join(opts.AssetDir, "sdkjs", "common", "AllFonts.js"),
 		seedAllFonts:  seedAllFonts,
 		fontSelection: fontSel,
-		limit:         make(chan struct{}, limit),
+		admission:     newConvertAdmission(limit),
 		runner:        runner,
 	}, nil
+}
+
+func (c *Converter) acquireConvertSlot(ctx context.Context) (func(), error) {
+	if c == nil || c.admission == nil {
+		return func() {}, nil
+	}
+	return c.admission.acquire(ctx)
 }
 
 // ToEditorBin converts sourcePath into outDir/Editor.bin.
@@ -183,12 +188,11 @@ func (c *Converter) toEditorBin(ctx context.Context, sourcePath, outDir string) 
 	_ = os.Remove(partFile)
 	_ = os.Remove(sourceHashPath(outDir))
 
-	select {
-	case c.limit <- struct{}{}:
-		defer func() { <-c.limit }()
-	case <-ctx.Done():
-		return ctx.Err()
+	release, err := c.acquireConvertSlot(ctx)
+	if err != nil {
+		return err
 	}
+	defer release()
 
 	taskFile, err := os.CreateTemp("", "go-office-x2t-*.xml")
 	if err != nil {

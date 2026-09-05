@@ -141,7 +141,7 @@ func TestPersistCSVThenDocxDoesNotBlock(t *testing.T) {
 	_ = docxRel
 }
 
-func TestPersistRefreshesEditorBin(t *testing.T) {
+func TestPersistInvalidatesEditorBin(t *testing.T) {
 	repo := testutil.RepoRoot(t)
 	assets := testutil.AssetsDirOrSkip(t, repo)
 	if !testutil.SampleExists(repo, "sample-files/sample.txt") {
@@ -160,7 +160,7 @@ func TestPersistRefreshesEditorBin(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	docKey := "persist-refresh-txt"
+	docKey := "persist-invalidate-txt"
 	cacheDir := filepath.Join(assets, "cache", docKey)
 	if err = os.MkdirAll(cacheDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -176,11 +176,6 @@ func TestPersistRefreshesEditorBin(t *testing.T) {
 	if err = conv.ToEditorBin(ctx, absTxt, cacheDir); err != nil {
 		t.Fatal(err)
 	}
-	before, err := os.Stat(filepath.Join(cacheDir, "Editor.bin"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(1100 * time.Millisecond)
 
 	changesDir := filepath.Join(cacheDir, "changes")
 	if err = os.MkdirAll(changesDir, 0o755); err != nil {
@@ -198,14 +193,10 @@ func TestPersistRefreshesEditorBin(t *testing.T) {
 	if err = srv.PersistDocument(ctx, docKey); err != nil {
 		t.Fatal(err)
 	}
-	after, err := os.Stat(filepath.Join(cacheDir, "Editor.bin"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !after.ModTime().After(before.ModTime()) && after.Size() == before.Size() {
-		t.Fatal("Editor.bin should be refreshed after persist")
+	if _, err := os.Stat(filepath.Join(cacheDir, "Editor.bin")); !os.IsNotExist(err) {
+		t.Fatal("Editor.bin should be removed after persist so reopen reconverts from storage")
 	}
 	if _, err := os.Stat(changesDir); !os.IsNotExist(err) {
-		t.Fatal("changes dir should be cleared after persist refresh")
+		t.Fatal("changes dir should be cleared after persist")
 	}
 }

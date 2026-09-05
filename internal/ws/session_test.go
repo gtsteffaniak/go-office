@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -285,18 +284,16 @@ func TestSessionWaitForPacketsConcurrentPoll(t *testing.T) {
 	ResetSessionsForTest()
 	sess := getSession(defaultSessionID, "key", ParseBuild("9.3.4"), "")
 
-	var ready atomic.Bool
 	go func() {
 		time.Sleep(20 * time.Millisecond)
 		sess.enqueue(`42["message",{"type":"ping"}]`)
-		ready.Store(true)
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	packets := sess.waitForPackets(ctx, 100*time.Millisecond)
-	if !ready.Load() || len(packets) == 0 {
-		t.Fatalf("expected packet after enqueue, got %v", packets)
+	if len(packets) == 0 || !containsType(packets[0], "ping") {
+		t.Fatalf("expected ping packet after enqueue, got %v", packets)
 	}
 }
 
@@ -322,5 +319,30 @@ func TestSessionStalePollDoesNotStealReloadAuth(t *testing.T) {
 	fresh := sess.drain()
 	if authCount(fresh) != 1 {
 		t.Fatalf("reload auth should remain for the new client, got %v", fresh)
+	}
+}
+
+func TestHasActiveDocumentSession(t *testing.T) {
+	ResetSessionsForTest()
+	if HasActiveDocumentSession("ppt-key") {
+		t.Fatal("expected no active session")
+	}
+	sess := getSession(defaultSessionID, "ppt-key", ParseBuild("9.3.4"), "")
+	sess.mu.Lock()
+	sess.openStarted = true
+	sess.mu.Unlock()
+	if !HasActiveDocumentSession("ppt-key") {
+		t.Fatal("expected openStarted session to count as active")
+	}
+	sess.mu.Lock()
+	sess.openStarted = false
+	sess.documentOpened = true
+	sess.mu.Unlock()
+	if !HasActiveDocumentSession("ppt-key") {
+		t.Fatal("expected documentOpened session to count as active")
+	}
+	ClearDocumentSession("ppt-key")
+	if HasActiveDocumentSession("ppt-key") {
+		t.Fatal("expected cleared session to be inactive")
 	}
 }

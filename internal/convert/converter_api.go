@@ -62,12 +62,11 @@ func (c *Converter) ConvertFile(ctx context.Context, req ConvertRequest) error {
 		return err
 	}
 
-	select {
-	case c.limit <- struct{}{}:
-		defer func() { <-c.limit }()
-	case <-ctx.Done():
-		return ctx.Err()
+	release, err := c.acquireConvertSlot(ctx)
+	if err != nil {
+		return err
 	}
+	defer release()
 
 	runDir, err := c.prepareX2TRunDir("")
 	if err != nil {

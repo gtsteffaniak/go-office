@@ -77,7 +77,6 @@ jobs:
   prime_playwright_cache:
     name: Prime Playwright docker cache
     runs-on: ubuntu-24.04-arm
-    needs: [prepare_playwright_assets]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Docker Buildx

@@ -45,6 +45,7 @@ type Handler struct {
 
 	landingTmpl *template.Template
 	viewerTmpl  *template.Template
+	warm        *warmScheduler
 }
 
 type landingFile struct {
@@ -98,13 +99,15 @@ func New(srv *office.Server, store office.Storage, opts Options) (*Handler, erro
 		return nil, fmt.Errorf("demo: viewer template: %w", err)
 	}
 
-	return &Handler{
+	h := &Handler{
 		office:      srv,
 		store:       store,
 		opts:        opts,
 		landingTmpl: landingTmpl,
 		viewerTmpl:  viewerTmpl,
-	}, nil
+	}
+	h.warm = newWarmScheduler(h)
+	return h, nil
 }
 
 // Attach registers demo UI routes under the office base path and API routes under APIBasePath.
@@ -222,17 +225,7 @@ func (h *Handler) serveWarm(w http.ResponseWriter, r *http.Request) {
 	}
 	go func() {
 		ctx := context.WithoutCancel(r.Context())
-		warmErr := h.warmDocument(ctx, doc)
-		if warmErr == nil || h.opts.Logger == nil {
-			return
-		}
-		// Warm races coauthoring open on first load; if open won, the failure is benign.
-		if h.office.EditorBinCached(doc.Key) {
-			h.opts.Logger.Debug("demo warm lost race; editor cache ready",
-				"file", doc.RelPath, "key", doc.Key, "err", warmErr)
-			return
-		}
-		h.opts.Logger.Error("demo warm failed", "file", doc.RelPath, "key", doc.Key, "err", warmErr)
+		h.warm.schedule(ctx, doc)
 	}()
 	w.WriteHeader(http.StatusAccepted)
 }

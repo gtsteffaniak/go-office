@@ -10,6 +10,8 @@ import {
 } from "../editor";
 import { forkSample } from "../fork-sample";
 
+test.describe.configure({ mode: "parallel" });
+
 const STATUS_OK_TIMEOUT = 8_000;
 const RTF_SOURCE = "sample-files/sample.rtf";
 

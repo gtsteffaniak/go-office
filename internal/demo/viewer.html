@@ -61,6 +61,10 @@
     var saveWatchdogTimer = null;
     var lastSavedFileBytes = 0;
     var saveBaselineBytes = 0;
+    // Match Playwright SAVE_DONE_TIMEOUT (30s) with margin for queued x2t under load.
+    var SAVE_VERIFY_MS = 35000;
+    var SAVE_POLL_INTERVAL_MS = 500;
+    var SAVE_POLL_MAX_ATTEMPTS = Math.ceil(SAVE_VERIFY_MS / SAVE_POLL_INTERVAL_MS);
 
     function demoFileUrl() {
       return joinPath(apiBase, "/demo/file/" + encodeURIComponent(SAMPLE_FILE));
@@ -88,7 +92,7 @@
         if (document.body.hasAttribute("data-dirty")) {
           setStatus("Save failed — changes were not stored on the server", "error");
         }
-      }, 12000);
+      }, SAVE_VERIFY_MS + 5000);
     }
 
     function pollSaveComplete() {
@@ -110,8 +114,8 @@
               setStatus("Saved", "ok");
               return;
             }
-            if (attempts < 24) {
-              autosavePollTimer = setTimeout(tick, 500);
+            if (attempts < SAVE_POLL_MAX_ATTEMPTS) {
+              autosavePollTimer = setTimeout(tick, SAVE_POLL_INTERVAL_MS);
             } else {
               clearSaveWatchdog();
               if (document.body.hasAttribute("data-dirty")) {
@@ -120,8 +124,8 @@
             }
           })
           .catch(function () {
-            if (attempts < 24) {
-              autosavePollTimer = setTimeout(tick, 500);
+            if (attempts < SAVE_POLL_MAX_ATTEMPTS) {
+              autosavePollTimer = setTimeout(tick, SAVE_POLL_INTERVAL_MS);
             } else {
               clearSaveWatchdog();
               setStatus("Save failed — could not verify saved file", "error");

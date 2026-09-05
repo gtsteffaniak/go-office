@@ -122,13 +122,8 @@ func (s *Server) PersistDocument(ctx context.Context, docKey string) error {
 		s.opts.Logger.Info("document converted for callback", "key", docKey, "bytes", len(raw))
 	}
 	_ = os.Remove(filepath.Join(cacheDir, "source.sha256"))
-	if err := conv.ToEditorBin(ctx, outPath, cacheDir); err != nil {
-		return fmt.Errorf("office: refresh Editor.bin after persist: %w", err)
-	}
 	_ = os.RemoveAll(filepath.Join(cacheDir, "changes"))
-	if s.opts.Logger != nil {
-		s.opts.Logger.Debug("refreshed Editor.bin after persist", "key", docKey, "cache", cacheDir)
-	}
+	s.afterPersistCacheUpdate(cacheDir)
 	return nil
 }
 

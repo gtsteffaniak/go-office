@@ -34,7 +34,6 @@ export default defineConfig({
       name: "chromium-save",
       testMatch: /(save|rtf-formatting)\.spec\.ts$/,
       dependencies: ["chromium"],
-      workers: 1,
       use: { ...devices["Desktop Chrome"] },
     },
     {

@@ -25,18 +25,18 @@ type slotGrant struct {
 	done  chan struct{}
 }
 
-// convertAdmission limits concurrent x2t subprocesses with a FIFO wait queue.
-// Waiters block until a slot is available, their context is cancelled, or
-// convertQueueWaitTimeout elapses. go-push is used for demo warm debounce;
-// admission here uses an explicit FIFO channel because go-push Push() is
-// non-blocking and drops after 50ms when its input buffer is full.
+// convertAdmission limits concurrent x2t subprocesses with prioritized FIFO wait queues.
+// High-priority waiters (editor open, save) are admitted before low-priority work
+// (demo thumbnails). go-push is used for demo warm debounce; admission here uses
+// explicit channels because go-push Push() drops after 50ms when its buffer is full.
 type convertAdmission struct {
-	limit     int
-	maxWait   int
-	slots     chan struct{}
-	incoming  chan slotGrant
-	waiting   atomic.Int32
-	inflight  sync.WaitGroup
+	limit      int
+	maxWait    int
+	slots      chan struct{}
+	hiIncoming chan slotGrant
+	loIncoming chan slotGrant
+	waiting    atomic.Int32
+	inflight   sync.WaitGroup
 }
 
 func newConvertAdmission(limit int) *convertAdmission {
@@ -51,10 +51,11 @@ func newConvertAdmissionWithQueue(limit, maxWaiters int) *convertAdmission {
 		maxWaiters = convertQueueMaxWaiters
 	}
 	a := &convertAdmission{
-		limit:    limit,
-		maxWait:  maxWaiters,
-		slots:    make(chan struct{}, limit),
-		incoming: make(chan slotGrant, 64),
+		limit:      limit,
+		maxWait:    maxWaiters,
+		slots:      make(chan struct{}, limit),
+		hiIncoming: make(chan slotGrant, 64),
+		loIncoming: make(chan slotGrant, 64),
 	}
 	for i := 0; i < limit; i++ {
 		a.slots <- struct{}{}
@@ -64,7 +65,11 @@ func newConvertAdmissionWithQueue(limit, maxWaiters int) *convertAdmission {
 }
 
 func (a *convertAdmission) run() {
-	for grant := range a.incoming {
+	for {
+		grant, ok := a.nextGrant()
+		if !ok {
+			return
+		}
 		if grantIsCancelled(grant) {
 			continue
 		}
@@ -81,6 +86,20 @@ func (a *convertAdmission) run() {
 	}
 }
 
+func (a *convertAdmission) nextGrant() (slotGrant, bool) {
+	select {
+	case grant := <-a.hiIncoming:
+		return grant, true
+	default:
+	}
+	select {
+	case grant := <-a.hiIncoming:
+		return grant, true
+	case grant := <-a.loIncoming:
+		return grant, true
+	}
+}
+
 func grantIsCancelled(grant slotGrant) bool {
 	select {
 	case <-grant.done:
@@ -91,6 +110,14 @@ func grantIsCancelled(grant slotGrant) bool {
 }
 
 func (a *convertAdmission) acquire(ctx context.Context) (func(), error) {
+	return a.acquireOn(ctx, a.hiIncoming)
+}
+
+func (a *convertAdmission) acquireLow(ctx context.Context) (func(), error) {
+	return a.acquireOn(ctx, a.loIncoming)
+}
+
+func (a *convertAdmission) acquireOn(ctx context.Context, incoming chan slotGrant) (func(), error) {
 	if int(a.waiting.Add(1)) > a.maxWait {
 		a.waiting.Add(-1)
 		return nil, ErrConvertQueueFull
@@ -106,7 +133,7 @@ func (a *convertAdmission) acquire(ctx context.Context) (func(), error) {
 	defer cancel()
 
 	select {
-	case a.incoming <- grant:
+	case incoming <- grant:
 	case <-waitCtx.Done():
 		a.waiting.Add(-1)
 		a.inflight.Done()
@@ -140,10 +167,6 @@ func (a *convertAdmission) drain(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-}
-
-func (a *convertAdmission) stop() {
-	close(a.incoming)
 }
 
 // Drain waits until in-flight conversions finish or ctx is cancelled.

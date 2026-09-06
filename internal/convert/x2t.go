@@ -90,6 +90,13 @@ func (c *Converter) acquireConvertSlot(ctx context.Context) (func(), error) {
 	return c.admission.acquire(ctx)
 }
 
+func (c *Converter) acquireConvertSlotLow(ctx context.Context) (func(), error) {
+	if c == nil || c.admission == nil {
+		return func() {}, nil
+	}
+	return c.admission.acquireLow(ctx)
+}
+
 // ToEditorBin converts sourcePath into outDir/Editor.bin.
 func (c *Converter) ToEditorBin(ctx context.Context, sourcePath, outDir string) error {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {

@@ -46,6 +46,7 @@ type Handler struct {
 	landingTmpl *template.Template
 	viewerTmpl  *template.Template
 	warm        *warmScheduler
+	thumbs      *thumbnailCoordinator
 }
 
 type landingFile struct {
@@ -107,6 +108,7 @@ func New(srv *office.Server, store office.Storage, opts Options) (*Handler, erro
 		viewerTmpl:  viewerTmpl,
 	}
 	h.warm = newWarmScheduler(h)
+	h.thumbs = newThumbnailCoordinator()
 	return h, nil
 }
 
@@ -366,18 +368,12 @@ func (h *Handler) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 		URL:        fileURL,
 		Thumbnail:  &office.ConverterThumbnail{Width: 200, Height: 200, Aspect: 2, First: true},
 	}
-	if _, runErr := h.office.RunConverter(ctx, origin, req); runErr != nil {
+	raw, runErr := h.thumbnailJPEG(ctx, origin, file, req)
+	if runErr != nil {
 		if h.opts.Logger != nil {
 			h.opts.Logger.Error("demo thumbnail", "file", file, "err", runErr)
 		}
 		http.Error(w, "thumbnail failed", http.StatusInternalServerError)
-		return
-	}
-	cacheName := office.ConvCacheDirName(key, "jpg")
-	outPath := filepath.Join(h.office.CacheDir(), cacheName, office.ConvOutputBasename("jpg", req.Thumbnail))
-	raw, err := os.ReadFile(outPath)
-	if err != nil {
-		http.Error(w, "thumbnail missing", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "image/jpeg")

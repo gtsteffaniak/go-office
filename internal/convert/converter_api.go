@@ -20,11 +20,12 @@ type Thumbnail struct {
 
 // ConvertRequest is a direct file conversion (POST /converter).
 type ConvertRequest struct {
-	SourcePath string
-	DestPath   string
-	FileType   string
-	OutputType string
-	Thumbnail  *Thumbnail
+	SourcePath  string
+	DestPath    string
+	FileType    string
+	OutputType  string
+	Thumbnail   *Thumbnail
+	LowPriority bool // demo thumbnails; admitted after editor open/save waiters
 }
 
 // ConvertOffice runs x2t office-to-office conversion (e.g. csv → ods, xlsx → ods).
@@ -62,7 +63,13 @@ func (c *Converter) ConvertFile(ctx context.Context, req ConvertRequest) error {
 		return err
 	}
 
-	release, err := c.acquireConvertSlot(ctx)
+	var release func()
+	var err error
+	if req.LowPriority {
+		release, err = c.acquireConvertSlotLow(ctx)
+	} else {
+		release, err = c.acquireConvertSlot(ctx)
+	}
 	if err != nil {
 		return err
 	}

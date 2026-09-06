@@ -61,12 +61,14 @@ func (s *Server) RunConverter(ctx context.Context, origin string, req ConverterR
 	}
 
 	thumb := thumbnailToConvert(req.Thumbnail)
+	lowPriority := req.Thumbnail != nil
 	if err := conv.ConvertFile(ctx, convert.ConvertRequest{
-		SourcePath: srcPath,
-		DestPath:   outPath,
-		FileType:   req.FileType,
-		OutputType: req.OutputType,
-		Thumbnail:  thumb,
+		SourcePath:  srcPath,
+		DestPath:    outPath,
+		FileType:    req.FileType,
+		OutputType:  req.OutputType,
+		Thumbnail:   thumb,
+		LowPriority: lowPriority,
 	}); err != nil {
 		return ConverterResponse{Error: -4}, err
 	}

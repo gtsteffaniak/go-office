@@ -74,9 +74,9 @@ func TestAcquireConvertSlotQueueFull(t *testing.T) {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			releaseWaiter, err := c.acquireConvertSlot(ctx)
-			if err != nil {
-				t.Errorf("waiter: %v", err)
+			releaseWaiter, acquireErr := c.acquireConvertSlot(ctx)
+			if acquireErr != nil {
+				t.Errorf("waiter: %v", acquireErr)
 				return
 			}
 			releaseWaiter()
@@ -109,6 +109,55 @@ func TestAcquireConvertSlotWaitTimeout(t *testing.T) {
 		t.Fatalf("expected deadline exceeded, got %v", err)
 	}
 	release()
+}
+
+func TestAcquireConvertSlotPriority(t *testing.T) {
+	c := &Converter{admission: newConvertAdmission(1)}
+	hold, err := c.acquireConvertSlot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	loDone := make(chan struct{})
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		release, acquireErr := c.acquireConvertSlotLow(ctx)
+		if acquireErr != nil {
+			t.Errorf("low waiter: %v", acquireErr)
+			return
+		}
+		close(loDone)
+		release()
+	}()
+	time.Sleep(30 * time.Millisecond)
+
+	hiDone := make(chan struct{})
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		release, acquireErr := c.acquireConvertSlot(ctx)
+		if acquireErr != nil {
+			t.Errorf("high waiter: %v", acquireErr)
+			return
+		}
+		close(hiDone)
+		release()
+	}()
+	time.Sleep(30 * time.Millisecond)
+
+	hold()
+
+	select {
+	case <-hiDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("high-priority waiter should be admitted before low-priority")
+	}
+	select {
+	case <-loDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("low-priority waiter should complete after high-priority")
+	}
 }
 
 func TestConverterDrainWaitsForInflight(t *testing.T) {

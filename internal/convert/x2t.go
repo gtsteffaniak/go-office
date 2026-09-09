@@ -19,6 +19,9 @@ import (
 type Options struct {
 	AssetDir string
 	Limit    int
+	// QueueWaitTimeout caps how long acquire waits when the caller context has no
+	// deadline. Zero uses DefaultQueueWaitTimeout.
+	QueueWaitTimeout time.Duration
 	// Runner overrides the x2t subprocess (tests only).
 	Runner X2TRunner
 }
@@ -79,7 +82,7 @@ func New(opts Options) (*Converter, error) {
 		webAllFonts:   filepath.Join(opts.AssetDir, "sdkjs", "common", "AllFonts.js"),
 		seedAllFonts:  seedAllFonts,
 		fontSelection: fontSel,
-		admission:     newConvertAdmission(limit),
+		admission:     newConvertAdmissionWithQueue(limit, convertQueueMaxWaiters, opts.QueueWaitTimeout),
 		runner:        runner,
 	}, nil
 }
@@ -265,46 +268,48 @@ func (c *Converter) FromEditorBin(ctx context.Context, cacheDir, destPath, targe
 }
 
 // SaveChanges applies cacheDir/changes/*.json on top of Editor.bin and writes destPath.
-func (c *Converter) SaveChanges(ctx context.Context, cacheDir, destPath, targetExt string) error {
-	return c.saveChanges(ctx, cacheDir, destPath, targetExt)
-}
-
-func (c *Converter) saveChanges(ctx context.Context, cacheDir, destPath, targetExt string) error {
+// On success it returns how many journal blobs were converted (for later Acknowledge).
+func (c *Converter) SaveChanges(ctx context.Context, cacheDir, destPath, targetExt string) (int, error) {
 	release, err := c.acquireConvertSlot(ctx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer release()
 	return c.saveChangesInner(ctx, cacheDir, destPath, targetExt)
 }
 
-func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, targetExt string) error {
+func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, targetExt string) (int, error) {
 	editorBin := filepath.Join(cacheDir, "Editor.bin")
 	if st, err := os.Stat(editorBin); err != nil || st.Size() == 0 {
-		return fmt.Errorf("convert: Editor.bin missing in %s", cacheDir)
+		return 0, fmt.Errorf("convert: Editor.bin missing in %s", cacheDir)
 	}
-	changesDir := filepath.Join(cacheDir, "changes")
-	entries, err := os.ReadDir(changesDir)
-	if err != nil || len(entries) == 0 {
-		return c.fromEditorInner(ctx, editorBin, destPath, targetExt, false)
+	if !changes.HasPending(cacheDir) {
+		if err := c.fromEditorInner(ctx, editorBin, destPath, targetExt, false); err != nil {
+			return 0, err
+		}
+		return 0, nil
 	}
+	snap, err := changes.BeginSnapshot(cacheDir)
+	if err != nil {
+		return 0, err
+	}
+	defer changes.RemoveSnapshot(cacheDir)
+	changesDir := snap.ChangesDir
 	ext := normExt(targetExt)
 	slog.Debug("save changes",
 		"cache", cacheDir,
 		"dest", destPath,
 		"ext", ext,
-		"changeFiles", len(entries),
+		"changeBlobs", snap.BlobCount,
 		"bridge", saveBridgeExt(ext),
 	)
-	if err := changes.WithDirLock(cacheDir, func() error {
-		return prepareChangesForSave(changesDir, "")
-	}); err != nil {
-		return err
+	if err := prepareChangesForSave(changesDir, ""); err != nil {
+		return 0, err
 	}
 
 	if legacyWordSaveDirectReverse(ext) {
 		// RTF/ODT: x2t apply_changes can write the target format directly; skip docx bridge step 2.
-		return c.fromEditorInner(ctx, editorBin, destPath, targetExt, true)
+		return snap.BlobCount, c.fromEditorInner(ctx, editorBin, destPath, targetExt, true)
 	}
 
 	bridge := saveBridgeExt(ext)
@@ -312,7 +317,7 @@ func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, ta
 		if bridge == bridgeXLSX && csvNeedsXlsxBridge(ext) {
 			n, err := canonicalizeCSVChangeFiles(changesDir)
 			if err != nil {
-				return err
+				return 0, err
 			}
 			if n > 0 {
 				slog.Debug("csv change sheet id remapped", "blobs", n, "to", csvNativeSheetID)
@@ -320,7 +325,7 @@ func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, ta
 		}
 		intermediate := filepath.Join(cacheDir, "changes-applied."+string(bridge))
 		if err := c.fromEditorInner(ctx, editorBin, intermediate, string(bridge), true); err != nil {
-			return err
+			return 0, err
 		}
 		if st, err := os.Stat(intermediate); err == nil {
 			slog.Debug("bridge after apply_changes", "path", intermediate, "bytes", st.Size(), "bridge", bridge)
@@ -329,9 +334,9 @@ func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, ta
 			slog.Debug("legacy binary save uses OOXML fallback",
 				"ext", ext, "intermediate", intermediate, "dest", destPath)
 			if copyErr := fsutil.CopyFile(intermediate, destPath); copyErr != nil {
-				return fmt.Errorf("convert: OOXML fallback copy failed: %w", copyErr)
+				return 0, fmt.Errorf("convert: OOXML fallback copy failed: %w", copyErr)
 			}
-			return nil
+			return snap.BlobCount, nil
 		}
 		if err := c.convertOfficeInner(ctx, intermediate, destPath, string(bridge), ext, cacheDir); err != nil {
 			// DOC/DOT: x2t cannot write binary Word (exit 80). Persist changes-applied.docx bytes
@@ -340,9 +345,9 @@ func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, ta
 				slog.Warn("x2t cannot write binary Word; persisting OOXML fallback",
 					"ext", ext, "intermediate", intermediate, "dest", destPath, "err", err)
 				if copyErr := fsutil.CopyFile(intermediate, destPath); copyErr != nil {
-					return fmt.Errorf("convert: %s→%s failed and OOXML fallback copy failed: %w", bridge, ext, copyErr)
+					return 0, fmt.Errorf("convert: %s→%s failed and OOXML fallback copy failed: %w", bridge, ext, copyErr)
 				}
-				return nil
+				return snap.BlobCount, nil
 			}
 			// PPT: x2t cannot write binary PowerPoint (exit 88). Persist changes-applied.pptx bytes
 			// at the .ppt path — same assemblyFormatAsOrigin rollback behavior.
@@ -350,9 +355,9 @@ func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, ta
 				slog.Warn("x2t cannot write binary PowerPoint; persisting OOXML fallback",
 					"ext", ext, "intermediate", intermediate, "dest", destPath, "err", err)
 				if copyErr := fsutil.CopyFile(intermediate, destPath); copyErr != nil {
-					return fmt.Errorf("convert: %s→%s failed and OOXML fallback copy failed: %w", bridge, ext, copyErr)
+					return 0, fmt.Errorf("convert: %s→%s failed and OOXML fallback copy failed: %w", bridge, ext, copyErr)
 				}
-				return nil
+				return snap.BlobCount, nil
 			}
 			// XLS: x2t cannot write binary Excel (exit 88). Persist changes-applied.xlsx bytes
 			// at the .xls path — same assemblyFormatAsOrigin rollback behavior.
@@ -360,33 +365,33 @@ func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, ta
 				slog.Warn("x2t cannot write binary Excel; persisting OOXML fallback",
 					"ext", ext, "intermediate", intermediate, "dest", destPath, "err", err)
 				if copyErr := fsutil.CopyFile(intermediate, destPath); copyErr != nil {
-					return fmt.Errorf("convert: %s→%s failed and OOXML fallback copy failed: %w", bridge, ext, copyErr)
+					return 0, fmt.Errorf("convert: %s→%s failed and OOXML fallback copy failed: %w", bridge, ext, copyErr)
 				}
-				return nil
+				return snap.BlobCount, nil
 			}
-			return err
+			return 0, err
 		}
 		if bridge == bridgeXLSX && (ext == "csv" || ext == "tsv" || ext == "scsv") {
 			stripped, err := rewriteNormalizedCSV(destPath)
 			if err != nil {
-				return err
+				return 0, err
 			}
 			slog.Debug("csv persist normalized", "path", destPath, "stripped", stripped)
 		}
-		return nil
+		return snap.BlobCount, nil
 	}
 
 	if err := c.fromEditorInner(ctx, editorBin, destPath, targetExt, true); err != nil {
-		return err
+		return 0, err
 	}
 	if ext == "txt" {
 		if stripped, err := rewriteNormalizedTxt(destPath); err != nil {
-			return err
+			return 0, err
 		} else if stripped {
 			slog.Debug("txt persist normalized", "path", destPath)
 		}
 	}
-	return nil
+	return snap.BlobCount, nil
 }
 
 func (c *Converter) fromEditor(ctx context.Context, editorBin, destPath, targetExt string, fromChanges bool) error {

@@ -75,7 +75,7 @@ func TestSaveChangesCSVRoundTrip(t *testing.T) {
 	}
 
 	outWithChanges := filepath.Join(cacheDir, "saved-with-changes.csv")
-	err = conv.SaveChanges(ctx, cacheDir, outWithChanges, "csv")
+	_, err = conv.SaveChanges(ctx, cacheDir, outWithChanges, "csv")
 	if err != nil {
 		t.Fatalf("save changes: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestSaveChangesRTFRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	outPath := filepath.Join(cacheDir, "saved.rtf")
-	err = conv.SaveChanges(ctx, cacheDir, outPath, "rtf")
+	_, err = conv.SaveChanges(ctx, cacheDir, outPath, "rtf")
 	if err != nil {
 		t.Fatalf("SaveChanges: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestSaveChangesRTFFromCorruptedSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	outPath := filepath.Join(cacheDir, "saved.rtf")
-	err = conv.SaveChanges(ctx, cacheDir, outPath, "rtf")
+	_, err = conv.SaveChanges(ctx, cacheDir, outPath, "rtf")
 	if err != nil {
 		t.Fatalf("SaveChanges: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestSaveChangesODSRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	outPath := filepath.Join(cacheDir, "saved.ods")
-	err = conv.SaveChanges(ctx, cacheDir, outPath, "ods")
+	_, err = conv.SaveChanges(ctx, cacheDir, outPath, "ods")
 	if err != nil {
 		t.Fatalf("SaveChanges: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestSaveChangesODTRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	outPath := filepath.Join(cacheDir, "saved.odt")
-	err = conv.SaveChanges(ctx, cacheDir, outPath, "odt")
+	_, err = conv.SaveChanges(ctx, cacheDir, outPath, "odt")
 	if err != nil {
 		t.Fatalf("SaveChanges: %v", err)
 	}
@@ -376,7 +376,7 @@ func TestSaveChangesPPTRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	outPath := filepath.Join(cacheDir, "saved.ppt")
-	err = conv.SaveChanges(ctx, cacheDir, outPath, "ppt")
+	_, err = conv.SaveChanges(ctx, cacheDir, outPath, "ppt")
 	if err != nil {
 		t.Fatalf("SaveChanges: %v", err)
 	}
@@ -461,7 +461,7 @@ func TestSaveReopenRTFAfterSave(t *testing.T) {
 		t.Fatal(err)
 	}
 	savedPath := filepath.Join(cacheDir, "saved.rtf")
-	if err = conv.SaveChanges(ctx, cacheDir, savedPath, "rtf"); err != nil {
+	if _, err = conv.SaveChanges(ctx, cacheDir, savedPath, "rtf"); err != nil {
 		t.Fatalf("SaveChanges: %v", err)
 	}
 	savedBody, err := os.ReadFile(savedPath)
@@ -507,7 +507,7 @@ func TestSaveReopenPPTAfterSave(t *testing.T) {
 		t.Fatal(err)
 	}
 	savedPath := filepath.Join(cacheDir, "saved.ppt")
-	if err = conv.SaveChanges(ctx, cacheDir, savedPath, "ppt"); err != nil {
+	if _, err = conv.SaveChanges(ctx, cacheDir, savedPath, "ppt"); err != nil {
 		t.Fatalf("SaveChanges: %v", err)
 	}
 	if !zipEntryContains(savedPath, "ppt/slides/slide1.xml", "My Presentation") {
@@ -568,7 +568,7 @@ func TestSaveChangesDocOOXMLFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	outPath := filepath.Join(cacheDir, "saved.doc")
-	err = conv.SaveChanges(ctx, cacheDir, outPath, "doc")
+	_, err = conv.SaveChanges(ctx, cacheDir, outPath, "doc")
 	if err != nil {
 		t.Fatalf("SaveChanges: %v", err)
 	}
@@ -618,7 +618,7 @@ func TestSaveChangesXlsOOXMLFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	outPath := filepath.Join(cacheDir, "saved.xls")
-	err = conv.SaveChanges(ctx, cacheDir, outPath, "xls")
+	_, err = conv.SaveChanges(ctx, cacheDir, outPath, "xls")
 	if err != nil {
 		t.Fatalf("SaveChanges: %v", err)
 	}
@@ -681,7 +681,7 @@ func TestSaveChangesXlsConcurrentPlaywrightLoad(t *testing.T) {
 			}
 
 			outPath := filepath.Join(cacheDir, "saved.xls")
-			if err := conv.SaveChanges(ctx, cacheDir, outPath, "xls"); err != nil {
+			if _, err := conv.SaveChanges(ctx, cacheDir, outPath, "xls"); err != nil {
 				t.Fatalf("SaveChanges: %v", err)
 			}
 			intermediate, err := os.ReadFile(filepath.Join(cacheDir, "changes-applied.xlsx"))
@@ -792,7 +792,7 @@ func TestSaveChangesTxtUsesDirectPath(t *testing.T) {
 	}
 
 	outPath := filepath.Join(cacheDir, "saved.txt")
-	err = conv.SaveChanges(ctx, cacheDir, outPath, "txt")
+	_, err = conv.SaveChanges(ctx, cacheDir, outPath, "txt")
 	if err != nil {
 		t.Fatalf("SaveChanges: %v", err)
 	}
@@ -1074,7 +1074,7 @@ func TestSaveChangesCSVConcurrentPlaywrightLoad(t *testing.T) {
 			}
 
 			outPath := filepath.Join(cacheDir, "saved.csv")
-			if err := conv.SaveChanges(ctx, cacheDir, outPath, "csv"); err != nil {
+			if _, err := conv.SaveChanges(ctx, cacheDir, outPath, "csv"); err != nil {
 				t.Fatalf("SaveChanges: %v", err)
 			}
 			body, err := os.ReadFile(outPath)
@@ -1192,7 +1192,7 @@ func TestSaveChangesCSVConcurrentWithDocumentOpens(t *testing.T) {
 				return
 			}
 			outPath := filepath.Join(cacheDir, "saved.csv")
-			if saveErr := conv.SaveChanges(ctx, cacheDir, outPath, "csv"); saveErr != nil {
+			if _, saveErr := conv.SaveChanges(ctx, cacheDir, outPath, "csv"); saveErr != nil {
 				errCh <- fmt.Errorf("save worker %d: %w", n, saveErr)
 				return
 			}

@@ -12,6 +12,7 @@ type Document struct {
 	URL         string // document download URL used on open
 	FileType    string // extension without dot, e.g. docx
 	CallbackURL string
+	UserID      string // editor user id from coauthoring auth
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -64,6 +65,9 @@ func (m *Manager) UpsertDoc(doc Document) Document {
 		}
 		if doc.CallbackURL != "" {
 			d.CallbackURL = doc.CallbackURL
+		}
+		if doc.UserID != "" {
+			d.UserID = doc.UserID
 		}
 		d.UpdatedAt = now
 		return *d

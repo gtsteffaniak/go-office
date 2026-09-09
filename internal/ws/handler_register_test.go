@@ -19,12 +19,13 @@ func (m *mockSessionRegistrar) FlushDocument(context.Context, string, string, bo
 	return nil
 }
 
-func (m *mockSessionRegistrar) RegisterDocumentSession(docKey, callbackURL, fileType, documentURL string) {
+func (m *mockSessionRegistrar) RegisterDocumentSession(docKey, callbackURL, fileType, documentURL, userID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, struct {
 		key, callback, fileType, docURL string
 	}{docKey, callbackURL, fileType, documentURL})
+	_ = userID
 }
 
 func TestHandlerRegisterDocumentSessionOnAuth(t *testing.T) {

@@ -2,7 +2,10 @@ package ws
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 type openCmd struct {
@@ -27,6 +30,7 @@ type authRequest struct {
 	SessionID           string   `json:"sessionId"`
 	DocumentCallbackURL string   `json:"documentCallbackUrl"`
 	CallbackURL         string   `json:"callbackUrl"`
+	Token               string   `json:"token"`
 }
 
 // IntegratorCallbackURL returns the editor callback URL from coauthoring auth.
@@ -35,6 +39,37 @@ func (r authRequest) IntegratorCallbackURL() string {
 		return r.DocumentCallbackURL
 	}
 	return r.CallbackURL
+}
+
+func verifyAuthJWT(secret []byte, token, docKey string) error {
+	if len(secret) == 0 {
+		return nil
+	}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return fmt.Errorf("coauthoring: missing jwt")
+	}
+	parsed, err := jwt.Parse(token, func(t *jwt.Token) (any, error) {
+		if t.Method != jwt.SigningMethodHS256 {
+			return nil, fmt.Errorf("coauthoring: unexpected signing method")
+		}
+		return secret, nil
+	})
+	if err != nil || !parsed.Valid {
+		return fmt.Errorf("coauthoring: invalid jwt: %w", err)
+	}
+	claims, ok := parsed.Claims.(jwt.MapClaims)
+	if !ok {
+		return fmt.Errorf("coauthoring: invalid claims")
+	}
+	if docKey != "" {
+		if doc, ok := claims["document"].(map[string]any); ok {
+			if key, ok := doc["key"].(string); ok && key != "" && key != docKey {
+				return fmt.Errorf("coauthoring: jwt document key mismatch")
+			}
+		}
+	}
+	return nil
 }
 
 func parseAuthPayload(raw []byte) (authRequest, bool) {

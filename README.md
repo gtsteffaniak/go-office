@@ -42,7 +42,7 @@ make test     # unit tests (no assets)
 | `make setup` | Verify Go 1.27+, `go mod download` |
 | `make build` | Download Euro-Office assets into `./assets/`, compile `bin/go-office` |
 | `make serve` | Runs `build` then starts the server on `:8080` |
-| `make test` | `go test ./...` (no assets) |
+| `make test` | `go test -race ./...` (no assets) |
 | `make test-integration` | `build` then integration tests |
 | `make test-playwright` | `build` then Playwright E2E in Docker |
 | `make test-playwright-ui` | Demo server in Docker + Playwright UI on host |

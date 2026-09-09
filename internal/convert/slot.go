@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+// DefaultQueueWaitTimeout bounds how long callers wait for a convert slot when
+// their context has no deadline. Direct API users may pass a shorter deadline.
+const DefaultQueueWaitTimeout = 2 * time.Minute
+
 // convertQueueMaxWaiters is the maximum number of blocked x2t admission waiters.
 // Beyond this, new acquire calls fail immediately with ErrConvertQueueFull.
 const convertQueueMaxWaiters = 500
@@ -17,8 +21,8 @@ const convertQueueMaxWaiters = 500
 var ErrConvertQueueFull = errors.New("convert: admission queue full")
 
 type slotGrant struct {
-	ready chan struct{}
-	done  chan struct{}
+	handoff chan func()
+	done    chan struct{}
 }
 
 // convertAdmission limits concurrent x2t subprocesses with prioritized FIFO wait queues.
@@ -26,29 +30,34 @@ type slotGrant struct {
 // (demo thumbnails). go-push is used for demo warm debounce; admission here uses
 // explicit channels because go-push Push() drops after 50ms when its buffer is full.
 type convertAdmission struct {
-	limit      int
-	maxWait    int
-	slots      chan struct{}
-	hiIncoming chan slotGrant
-	loIncoming chan slotGrant
-	waiting    atomic.Int32
-	inflight   sync.WaitGroup
+	limit       int
+	maxWait     int
+	queueWait   time.Duration
+	slots       chan struct{}
+	hiIncoming  chan slotGrant
+	loIncoming  chan slotGrant
+	waiting     atomic.Int32
+	inflight    sync.WaitGroup
 }
 
 func newConvertAdmission(limit int) *convertAdmission {
-	return newConvertAdmissionWithQueue(limit, convertQueueMaxWaiters)
+	return newConvertAdmissionWithQueue(limit, convertQueueMaxWaiters, DefaultQueueWaitTimeout)
 }
 
-func newConvertAdmissionWithQueue(limit, maxWaiters int) *convertAdmission {
+func newConvertAdmissionWithQueue(limit, maxWaiters int, queueWait time.Duration) *convertAdmission {
 	if limit <= 0 {
 		limit = 1
 	}
 	if maxWaiters <= 0 {
 		maxWaiters = convertQueueMaxWaiters
 	}
+	if queueWait <= 0 {
+		queueWait = DefaultQueueWaitTimeout
+	}
 	a := &convertAdmission{
 		limit:      limit,
 		maxWait:    maxWaiters,
+		queueWait:  queueWait,
 		slots:      make(chan struct{}, limit),
 		hiIncoming: make(chan slotGrant, 64),
 		loIncoming: make(chan slotGrant, 64),
@@ -78,12 +87,14 @@ func (a *convertAdmission) run() {
 			a.slots <- struct{}{}
 			continue
 		}
-		close(grant.ready)
-		// Waiter may time out after ready closes; return the slot if cancelled.
-		select {
-		case <-grant.done:
+		release := func() {
 			a.slots <- struct{}{}
-		default:
+			a.inflight.Done()
+		}
+		select {
+		case grant.handoff <- release:
+		case <-grant.done:
+			release()
 		}
 	}
 }
@@ -119,10 +130,24 @@ func (a *convertAdmission) acquireLow(ctx context.Context) (func(), error) {
 	return a.acquireOn(ctx, a.loIncoming)
 }
 
-func (a *convertAdmission) acquireOn(ctx context.Context, incoming chan slotGrant) (func(), error) {
+func withQueueWait(ctx context.Context, queueWait time.Duration) (context.Context, context.CancelFunc) {
+	if queueWait <= 0 {
+		queueWait = DefaultQueueWaitTimeout
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	deadline := time.Now().Add(queueWait)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		return ctx, func() {}
+	}
+	return context.WithDeadline(ctx, deadline)
+}
+
+func (a *convertAdmission) acquireOn(ctx context.Context, incoming chan slotGrant) (func(), error) {
+	ctx, cancelWait := withQueueWait(ctx, a.queueWait)
+	defer cancelWait()
+
 	if int(a.waiting.Add(1)) > a.maxWait {
 		a.waiting.Add(-1)
 		return nil, ErrConvertQueueFull
@@ -130,11 +155,9 @@ func (a *convertAdmission) acquireOn(ctx context.Context, incoming chan slotGran
 
 	a.inflight.Add(1)
 	grant := slotGrant{
-		ready: make(chan struct{}),
-		done:  make(chan struct{}),
+		handoff: make(chan func()),
+		done:    make(chan struct{}),
 	}
-
-	waitStart := time.Now()
 
 	select {
 	case incoming <- grant:
@@ -145,30 +168,20 @@ func (a *convertAdmission) acquireOn(ctx context.Context, incoming chan slotGran
 	}
 
 	select {
-	case <-grant.ready:
+	case release := <-grant.handoff:
 		a.waiting.Add(-1)
-		if waited := time.Since(waitStart); waited > 5*time.Second {
-			// Slow admission under load — visible in debug logs when logger is wired.
-			_ = waited
-		}
-		return func() {
-			a.slots <- struct{}{}
-			a.inflight.Done()
-		}, nil
+		return release, nil
 	case <-ctx.Done():
 		close(grant.done)
 		select {
-		case <-grant.ready:
+		case release := <-grant.handoff:
 			a.waiting.Add(-1)
-			return func() {
-				a.slots <- struct{}{}
-				a.inflight.Done()
-			}, ctx.Err()
+			release()
 		default:
 			a.waiting.Add(-1)
 			a.inflight.Done()
-			return nil, ctx.Err()
 		}
+		return nil, ctx.Err()
 	}
 }
 

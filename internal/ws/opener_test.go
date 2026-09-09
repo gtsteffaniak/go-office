@@ -100,6 +100,17 @@ func (s *recordingFlushSaver) FlushDocument(context.Context, string, string, boo
 	return nil
 }
 
+func TestCoauthoringOriginPrefersPublicOrigin(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://localhost:9999/demo", nil)
+	req.Host = "localhost:9999"
+	if got := CoauthoringOrigin("https://docs.example.com", req); got != "https://docs.example.com" {
+		t.Fatalf("public origin = %q, want https://docs.example.com", got)
+	}
+	if got := CoauthoringOrigin("", req); got != "http://localhost:9999" {
+		t.Fatalf("request origin = %q, want http://localhost:9999", got)
+	}
+}
+
 func TestOpenerFlushPendingBeforeOpen(t *testing.T) {
 	cacheDir := t.TempDir()
 	key := "csv-key"

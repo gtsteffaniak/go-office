@@ -157,7 +157,7 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 | `editorConfig.coEditing` | ✅ | ⚠️ | Accepted; no multi-user semantics |
 | `editorConfig.plugins`, `templates`, `embedded`, … | ✅ | ⚠️ | Passed if host supplies; not validated server-side |
 | Config JWT (`token` top-level field) | ✅ | ✅ | Signed when `OFFICE_JWT_SECRET` or `JWT_SECRET` is set |
-| Server-side JWT verify on coauthoring `auth` | ✅ | ❌ | go-office does not validate editor JWT on coauthoring packets |
+| Server-side JWT verify on coauthoring `auth` | ✅ | ✅ | When `JWTSecret` is set, `auth` packets must include a valid HS256 JWT |
 
 ### 3.2 Callback — integrator receives POSTs (Document Server → your app)
 
@@ -173,12 +173,12 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 | Status **3** (save error) | ✅ | ❌ | Not emitted |
 | Status **4** (closed, no changes) | ✅ | ❌ | Not emitted |
 | Status **7** (force save error) | ✅ | ❌ | Not emitted |
-| Payload fields: `users`, `actions` | ✅ | ❌ | Not in outbound `NotifyCallback` |
-| Payload fields: `changesurl`, `history`, `filetype` | ✅ | ❌ | Not in outbound payload |
-| Payload fields: `forcesavetype`, `userdata` | ✅ | ❌ | Not in outbound payload |
+| Payload fields: `users`, `actions` | ✅ | ⚠️ | Outbound includes `users` (document opener user id); `actions` not emitted |
+| Payload fields: `changesurl`, `history`, `filetype` | ✅ | ⚠️ | Outbound includes `filetype`; `changesurl` / `history` not emitted |
+| Payload fields: `forcesavetype`, `userdata` | ✅ | ⚠️ | Outbound includes `forcesavetype` on force save; `userdata` not emitted |
 | Inbound: accept status 1/4 and return `error:0` | ✅ | ✅ | `HandleCallback` — no persist, OK response |
 | Callback JWT `{"token":"…"}` (JWT_IN_BODY) | ✅ | ✅ | Sign outbound; verify inbound when secret set |
-| Callback JWT in `Authorization` header only | ✅ | ⚠️ | `TrimToken` helper exists; **not wired** in `HandleCallback` |
+| Callback JWT in `Authorization` header only | ✅ | ✅ | `HandleCallback` uses `callback.ReadRequest` (Bearer or body token) |
 
 **Important:** Integrators that only implement status **2** and **6** (typical save path) work. Integrators that track **status 1** “who is editing” or **status 4** “closed without save” from the document server will not receive those events from go-office.
 

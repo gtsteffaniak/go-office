@@ -26,7 +26,7 @@ type DocumentSaver interface {
 
 // DocumentSessionRegistrar records integrator session metadata from coauthoring auth.
 type DocumentSessionRegistrar interface {
-	RegisterDocumentSession(docKey, callbackURL, fileType, documentURL string)
+	RegisterDocumentSession(docKey, callbackURL, fileType, documentURL, userID string)
 }
 
 type flushJob struct {
@@ -510,7 +510,7 @@ func (h *Handler) handleForceSaveStart(sess *session, docKey string, r *http.Req
 		return
 	}
 
-	origin := requestOrigin(r)
+	origin := CoauthoringOrigin(h.PublicOrigin, r)
 	onDone := func(flushErr error) {
 		success := flushErr == nil
 		if h.Logger != nil {
@@ -617,7 +617,7 @@ func (h *Handler) handleSaveChanges(sess *session, msg map[string]any, docKey st
 	}
 
 	force := messageBool(msg, "reSave")
-	origin := requestOrigin(r)
+	origin := CoauthoringOrigin(h.PublicOrigin, r)
 	endSave := messageBool(msg, "endSaveChanges")
 
 	if endSave && h.Scheduler != nil {

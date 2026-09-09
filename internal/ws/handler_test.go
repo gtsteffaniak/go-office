@@ -44,7 +44,7 @@ func TestPollingHandshake(t *testing.T) {
 	h.ServePath(rec, req, "/doc/key/c")
 
 	body := rec.Body.String()
-	if !strings.HasPrefix(body, `0{"sid":"go-office"`) {
+	if !strings.HasPrefix(body, `0{"sid":"`) {
 		t.Fatalf("open packet = %q", body)
 	}
 }
@@ -136,14 +136,14 @@ func TestPollingReloadSameCSVResendsAuth(t *testing.T) {
 
 	// First load uses Engine.IO packet 40 with embedded auth + openCmd (browser reload shape).
 	postReload()
-	waitDocumentOpen(t, h, csvKey)
+	waitDocumentOpen(t, h, csvKey, "go-office")
 	if opener.count(csvKey) != 1 {
 		t.Fatalf("first open calls = %d, want 1", opener.count(csvKey))
 	}
 
 	// Same hardcoded sid + document key, as the browser does on reload.
 	postReload()
-	second := pollingGet(t, h, csvKey)
+	second := pollingGet(t, h, csvKey, "go-office")
 	if !strings.Contains(second, `"type":"auth"`) {
 		t.Fatalf("reload must resend auth for the same csv key, got %q", second)
 	}
@@ -160,7 +160,7 @@ func TestPollingReloadSameCSVResendsAuth(t *testing.T) {
 	// Integrator reset (BuildEditorConfig / POST session/reset).
 	ws.ClearDocumentSession(csvKey)
 	postReload()
-	waitDocumentOpen(t, h, csvKey)
+	waitDocumentOpen(t, h, csvKey, "go-office")
 	if opener.count(csvKey) < 2 {
 		t.Fatalf("reload after session reset must open again, got %d calls", opener.count(csvKey))
 	}

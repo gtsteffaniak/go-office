@@ -9,12 +9,64 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/quantumx-apps/go-office/internal/session"
 	"github.com/quantumx-apps/go-office/pkg/callback"
 	office "github.com/quantumx-apps/go-office/pkg/office"
 )
+
+func TestNotifyCallbackPayloadFields(t *testing.T) {
+	var got callback.Payload
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		p, err := callback.Parse(body)
+		if err != nil {
+			t.Errorf("parse callback body: %v", err)
+			http.Error(w, "bad body", http.StatusBadRequest)
+			return
+		}
+		got = p
+		callback.WriteOK(w)
+	}))
+	defer srv.Close()
+
+	officeSrv, err := office.New(nopStorage{}, office.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := session.Document{Key: "k1", FileType: "docx", UserID: "user-42"}
+	if err := officeSrv.NotifyCallback(context.Background(), "k1", srv.URL, "http://x/saved.docx", true, doc); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != callback.StatusForceSaved || got.ForceSaveType != 1 {
+		t.Fatalf("force save payload = %+v", got)
+	}
+	if got.FileType != "docx" || len(got.Users) != 1 || got.Users[0] != "user-42" {
+		t.Fatalf("payload fields = %+v", got)
+	}
+	if got.URL != "http://x/saved.docx" {
+		t.Fatalf("url = %q", got.URL)
+	}
+}
+
+func TestNotifyCallbackRejectsNonZeroError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		callback.WriteError(w, 1)
+	}))
+	defer srv.Close()
+
+	officeSrv, err := office.New(nopStorage{}, office.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := session.Document{Key: "k1", FileType: "csv"}
+	err = officeSrv.NotifyCallback(context.Background(), "k1", srv.URL, "http://x/saved.csv", false, doc)
+	if err == nil || !strings.Contains(err.Error(), "integrator returned error") {
+		t.Fatalf("NotifyCallback() = %v", err)
+	}
+}
 
 func TestNotifyCallbackSignsJWT(t *testing.T) {
 	var gotBody []byte
@@ -28,7 +80,8 @@ func TestNotifyCallbackSignsJWT(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := officeSrv.NotifyCallback(context.Background(), "k1", srv.URL, "http://x/saved.csv", false); err != nil {
+	doc := session.Document{Key: "k1", FileType: "csv", UserID: "u1"}
+	if err := officeSrv.NotifyCallback(context.Background(), "k1", srv.URL, "http://x/saved.csv", false, doc); err != nil {
 		t.Fatal(err)
 	}
 	var wrapped map[string]string

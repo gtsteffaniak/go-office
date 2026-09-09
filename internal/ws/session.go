@@ -13,6 +13,7 @@ const defaultSessionID = "go-office"
 
 type session struct {
 	docKey   string
+	eioSID   string
 	build    BuildInfo
 	basePath string
 
@@ -61,6 +62,7 @@ func (r *sessionRegistry) get(sid, docKey string, build BuildInfo, basePath stri
 	r.mu.RUnlock()
 	if ok {
 		s.applyBuildBase(build, basePath)
+		s.setEioSID(sid)
 		return s
 	}
 
@@ -68,10 +70,12 @@ func (r *sessionRegistry) get(sid, docKey string, build BuildInfo, basePath stri
 	defer r.mu.Unlock()
 	if s, ok = r.sessions[key]; ok {
 		s.applyBuildBase(build, basePath)
+		s.setEioSID(sid)
 		return s
 	}
 	s = &session{
 		docKey:              docKey,
+		eioSID:              sid,
 		build:               build,
 		basePath:            basePath,
 		indexUser:           1,
@@ -79,6 +83,24 @@ func (r *sessionRegistry) get(sid, docKey string, build BuildInfo, basePath stri
 	}
 	r.sessions[key] = s
 	return s
+}
+
+func (s *session) setEioSID(sid string) {
+	if sid == "" {
+		return
+	}
+	s.mu.Lock()
+	s.eioSID = sid
+	s.mu.Unlock()
+}
+
+func (s *session) transportSID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.eioSID != "" {
+		return s.eioSID
+	}
+	return defaultSessionID
 }
 
 func (s *session) applyBuildBase(build BuildInfo, basePath string) {
@@ -276,7 +298,11 @@ func (s *session) onConnect(authData []byte) {
 		close(s.waitCh)
 		s.waitCh = nil
 	}
-	s.outbox = append(s.outbox, `40{"sid":"`+defaultSessionID+`"}`)
+	sid := s.eioSID
+	if sid == "" {
+		sid = defaultSessionID
+	}
+	s.outbox = append(s.outbox, `40{"sid":"`+sid+`"}`)
 	s.namespaceAck = true
 	s.outbox = append(s.outbox, serverInfoPacket(s.build))
 	s.infoSent = true

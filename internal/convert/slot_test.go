@@ -61,7 +61,7 @@ func TestAcquireConvertSlotQueuesWaiters(t *testing.T) {
 }
 
 func TestAcquireConvertSlotQueueFull(t *testing.T) {
-	c := &Converter{admission: newConvertAdmissionWithQueue(1, 2)}
+	c := &Converter{admission: newConvertAdmissionWithQueue(1, 2, DefaultQueueWaitTimeout)}
 	release, err := c.acquireConvertSlot(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -181,6 +181,31 @@ func TestAdmissionNoSlotLeakOnTimeoutRace(t *testing.T) {
 	release()
 	if a.available() != 1 {
 		t.Fatalf("available slots = %d after release, want 1", a.available())
+	}
+}
+
+func TestAcquireUsesLibraryDefaultQueueTimeout(t *testing.T) {
+	const wait = 80 * time.Millisecond
+	a := newConvertAdmissionWithQueue(1, 2, wait)
+	release, err := a.acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	_, err = a.acquire(ctx)
+	elapsed := time.Since(start)
+	release()
+	if err == nil {
+		t.Fatal("expected queue timeout")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected deadline exceeded, got %v", err)
+	}
+	if elapsed < wait/2 || elapsed > wait*3 {
+		t.Fatalf("elapsed %v, want ~%v default queue wait", elapsed, wait)
 	}
 }
 

@@ -85,7 +85,7 @@ func (s *Server) ResetCoauthoringSession(docKey string) {
 }
 
 // RegisterDocumentSession stores integrator metadata from coauthoring auth (external integrators).
-func (s *Server) RegisterDocumentSession(docKey, callbackURL, fileType, documentURL string) {
+func (s *Server) RegisterDocumentSession(docKey, callbackURL, fileType, documentURL, userID string) {
 	if docKey == "" {
 		return
 	}
@@ -94,6 +94,7 @@ func (s *Server) RegisterDocumentSession(docKey, callbackURL, fileType, document
 		CallbackURL: callbackURL,
 		FileType:    fileType,
 		URL:         documentURL,
+		UserID:      userID,
 	})
 }
 
@@ -240,6 +241,7 @@ func (s *Server) registerCoauthoringFallback() {
 		Debug:        s.opts.Debug,
 		PollHold:     s.opts.PollHold,
 		PublicOrigin: s.opts.PublicOrigin,
+		JWTSecret:    s.opts.JWTSecret,
 		Opener:       opener,
 		CacheDir:     s.cacheDir(),
 		Saver:        s,

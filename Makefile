@@ -14,6 +14,8 @@
 .DEFAULT_GOAL := help
 
 GO ?= go
+# All go test invocations use the race detector (CI and local).
+GO_TEST_FLAGS ?= -race
 OFFICE_ASSETS ?= $(CURDIR)/assets
 ADDR ?= :8080
 BIN_DIR ?= bin
@@ -262,7 +264,7 @@ endif
 
 test-x2t-concurrent-native: build-native check-samples
 	@echo "==> Concurrent CSV save (Playwright load regression, needs x2t)"
-	$(GO) test ./internal/convert/ -run 'TestSaveChangesCSVConcurrent|TestPrepareX2TRunDir' -count=3 -v
+	$(GO) test $(GO_TEST_FLAGS) ./internal/convert/ -run 'TestSaveChangesCSVConcurrent|TestPrepareX2TRunDir' -count=3 -v
 
 doctor:
 ifeq ($(USE_DOCKER_DEV),1)
@@ -291,7 +293,7 @@ fonts-native:
 	$(FETCH_ASSETS_BIN) -fonts -out "$(OFFICE_ASSETS)"
 
 test:
-	$(GO) test -race ./...
+	$(GO) test $(GO_TEST_FLAGS) ./...
 
 lint:
 	$(GO) tool golangci-lint run ./...
@@ -344,13 +346,13 @@ else
 endif
 
 test-integration-native: build-native
-	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test -tags=integration ./integration/... -count=1
+	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test $(GO_TEST_FLAGS) -tags=integration ./integration/... -count=1
 
 test-convert-linux-native: build-native
-	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test ./internal/convert/... -count=1
+	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test $(GO_TEST_FLAGS) ./internal/convert/... -count=1
 
 test-save-integration: build
-	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test -tags=integration ./integration/... -race -count=1
+	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test $(GO_TEST_FLAGS) -tags=integration ./integration/... -count=1
 
 playwright-npm:
 	@echo "==> Playwright npm dependencies"

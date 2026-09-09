@@ -30,6 +30,41 @@ func TestAppendConcurrent(t *testing.T) {
 	}
 }
 
+func TestBeginSnapshotPreservesConcurrentAppends(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := changes.Append(dir, []string{"snap-a", "snap-b"}); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := changes.BeginSnapshot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.BlobCount != 2 {
+		t.Fatalf("blob count = %d, want 2", snap.BlobCount)
+	}
+	if _, err := changes.Append(dir, []string{"after-snap"}); err != nil {
+		t.Fatal(err)
+	}
+	count, err := changes.Count(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 3 {
+		t.Fatalf("live count = %d, want 3 after snapshot", count)
+	}
+	if err := changes.Acknowledge(dir, snap.BlobCount); err != nil {
+		t.Fatal(err)
+	}
+	count, err = changes.Count(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("count after ack = %d, want 1 remaining blob", count)
+	}
+	changes.RemoveSnapshot(dir)
+}
+
 func TestAcknowledgePreservesNewBlobs(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := changes.Append(dir, []string{"a", "b", "c"}); err != nil {

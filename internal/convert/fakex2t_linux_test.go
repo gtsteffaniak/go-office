@@ -31,7 +31,7 @@ func TestFakeX2TValidatesIsolatedFontPaths(t *testing.T) {
 
 	dest := filepath.Join(cacheDir, "saved.docx")
 	ctx := context.Background()
-	if err := conv.SaveChanges(ctx, cacheDir, dest, "docx"); err != nil {
+	if _, err := conv.SaveChanges(ctx, cacheDir, dest, "docx"); err != nil {
 		t.Fatalf("SaveChanges: %v", err)
 	}
 	if len(fake.Tasks) == 0 {

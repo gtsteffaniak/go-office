@@ -56,6 +56,8 @@ RUN chmod +x /app/go-office /app/assets/converter/bin/* 2>/dev/null || true
 WORKDIR /app/frontend
 COPY frontend/playwright.config.ts ./
 COPY frontend/tests/ ./tests/
+COPY _docker/run-playwright-tests.sh /usr/local/bin/run-playwright-tests.sh
+RUN chmod +x /usr/local/bin/run-playwright-tests.sh
 
 ENV OFFICE_ASSETS=/app/assets \
     OFFICE_DEBUG_LOGGING=1 \
@@ -63,18 +65,7 @@ ENV OFFICE_ASSETS=/app/assets \
     OFFICE_CONVERT_LIMIT=6 \
     OFFICE_SAVE_DELAY=500ms \
     PLAYWRIGHT_BASE_URL=http://127.0.0.1:8080 \
+    PLAYWRIGHT_SAVE_DONE_TIMEOUT=45000 \
     PLAYWRIGHT_STRICT=1
 
-RUN timeout 10m sh -c 'cd /app && ./go-office \
-      -assets /app/assets \
-      -addr :8080 \
-      -data /app \
-      -samples sample-files \
-      -public http://127.0.0.1:8080 & \
-    sleep 5 && \
-    cd /app/frontend && \
-    if [ -n "$PLAYWRIGHT_PROJECT" ]; then \
-      npx playwright test --project="$PLAYWRIGHT_PROJECT" --no-deps; \
-    else \
-      npx playwright test; \
-    fi'
+RUN timeout 10m run-playwright-tests.sh

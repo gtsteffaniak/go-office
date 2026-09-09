@@ -4,8 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"unicode/utf16"
 
@@ -14,61 +12,16 @@ import (
 
 const changesFileName = docchanges.FileName
 
-// appendChanges appends editor change blobs to cacheDir/changes/changes0.json.
-// x2t expects this exact file when m_bFromChanges is true.
-func appendChanges(cacheDir string, changes []string) (int, error) {
-	if len(changes) == 0 {
-		return maxChangeIndex(cacheDir)
-	}
-	dir := filepath.Join(cacheDir, "changes")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return 0, err
-	}
-
-	path := filepath.Join(dir, changesFileName)
-	existing, err := readChangesFile(path)
-	if err != nil {
-		return 0, err
-	}
-	existing = append(existing, changes...)
-	raw, err := json.Marshal(existing)
-	if err != nil {
-		return 0, err
-	}
-	if err := os.WriteFile(path, raw, 0o644); err != nil {
-		return 0, err
-	}
-	return len(existing), nil
-}
-
-func readChangesFile(path string) ([]string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var existing []string
-	if err := json.Unmarshal(data, &existing); err != nil {
-		return nil, err
-	}
-	return existing, nil
+func appendChanges(cacheDir string, blobs []string) (int, error) {
+	return docchanges.Append(cacheDir, blobs)
 }
 
 func maxChangeIndex(cacheDir string) (int, error) {
-	existing, err := readChangesFile(filepath.Join(cacheDir, "changes", changesFileName))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0, nil
-		}
-		return 0, err
-	}
-	return len(existing), nil
+	return docchanges.Count(cacheDir)
 }
 
 func clearChanges(cacheDir string) {
-	_ = os.RemoveAll(filepath.Join(cacheDir, "changes"))
+	_ = docchanges.Clear(cacheDir)
 }
 
 func hasPendingChanges(cacheDir string) bool {

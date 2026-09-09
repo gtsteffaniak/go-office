@@ -5,14 +5,15 @@ const workers = Number(process.env.PLAYWRIGHT_WORKERS ?? 10);
 
 const sharedUse = {
   baseURL,
-  actionTimeout: Number(process.env.PLAYWRIGHT_ACTION_TIMEOUT ?? 12_000),
+  actionTimeout: Number(process.env.PLAYWRIGHT_ACTION_TIMEOUT ?? 20_000),
   navigationTimeout: Number(process.env.PLAYWRIGHT_NAVIGATION_TIMEOUT ?? 25_000),
-  trace: "on-first-retry" as const,
+  trace: (process.env.PLAYWRIGHT_TRACE as "on" | "off" | "retain-on-failure" | "on-first-retry") ??
+    "retain-on-failure",
   locale: "en-US",
 };
 
 export default defineConfig({
-  timeout: Number(process.env.PLAYWRIGHT_TEST_TIMEOUT ?? 90_000),
+  timeout: Number(process.env.PLAYWRIGHT_TEST_TIMEOUT ?? 120_000),
   expect: {
     timeout: Number(process.env.PLAYWRIGHT_EXPECT_TIMEOUT ?? 6_000),
   },

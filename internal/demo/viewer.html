@@ -90,15 +90,23 @@
       clearSaveWatchdog();
       saveWatchdogTimer = setTimeout(function () {
         if (document.body.hasAttribute("data-dirty")) {
-          setStatus("Save failed — changes were not stored on the server", "error");
+          markSaveError("changes were not stored on the server");
         }
       }, SAVE_VERIFY_MS + 5000);
+    }
+
+    function markSaveError(msg) {
+      document.body.setAttribute("data-save-error", msg);
+      document.body.removeAttribute("data-saving");
+      setStatus("Error: " + msg, "error");
     }
 
     function pollSaveComplete() {
       if (autosavePollTimer) {
         clearTimeout(autosavePollTimer);
       }
+      document.body.setAttribute("data-saving", "true");
+      document.body.removeAttribute("data-save-error");
       var attempts = 0;
       var baseline = saveBaselineBytes;
       function tick() {
@@ -111,6 +119,8 @@
               clearSaveWatchdog();
               document.body.setAttribute("data-save-done", String(Date.now()));
               document.body.removeAttribute("data-dirty");
+              document.body.removeAttribute("data-saving");
+              document.body.removeAttribute("data-save-error");
               setStatus("Saved", "ok");
               return;
             }
@@ -119,7 +129,9 @@
             } else {
               clearSaveWatchdog();
               if (document.body.hasAttribute("data-dirty")) {
-                setStatus("Save failed — file on server was not updated", "error");
+                markSaveError("file on server was not updated");
+              } else {
+                document.body.removeAttribute("data-saving");
               }
             }
           })
@@ -128,7 +140,7 @@
               autosavePollTimer = setTimeout(tick, SAVE_POLL_INTERVAL_MS);
             } else {
               clearSaveWatchdog();
-              setStatus("Save failed — could not verify saved file", "error");
+              markSaveError("could not verify saved file");
             }
           });
       }
@@ -183,11 +195,12 @@
                     autosavePollTimer = null;
                   }
                   if (!document.body.hasAttribute("data-dirty")) {
-                    document.body.setAttribute("data-save-done", String(Date.now()));
                     setStatus("Saved", "ok");
                     return;
                   }
                   saveBaselineBytes = lastSavedFileBytes;
+                  document.body.removeAttribute("data-save-done");
+                  document.body.removeAttribute("data-save-error");
                   setStatus("Saving…");
                   beginSaveWatchdog();
                   pollSaveComplete();

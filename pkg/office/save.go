@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/quantumx-apps/go-office/internal/changes"
 	"github.com/quantumx-apps/go-office/internal/convert"
 	"github.com/quantumx-apps/go-office/internal/session"
 	"github.com/quantumx-apps/go-office/pkg/callback"
@@ -55,7 +56,7 @@ func (s *Server) HandleCallback(w http.ResponseWriter, r *http.Request) {
 
 // PersistDocument converts Editor.bin in cache and writes to Storage.
 func (s *Server) PersistDocument(ctx context.Context, docKey string) error {
-	doc, ok := s.sessions.Get(docKey)
+	doc, ok := s.sessions.Lookup(docKey)
 	if !ok {
 		return fmt.Errorf("office: unknown document key %q", docKey)
 	}
@@ -86,8 +87,12 @@ func (s *Server) PersistDocument(ctx context.Context, docKey string) error {
 
 	outPath := filepath.Join(cacheDir, "saved."+ext)
 	pending := hasPendingChanges(cacheDir)
+	pendingCount := 0
+	if pending {
+		pendingCount, _ = changes.Count(cacheDir)
+	}
 	if s.opts.Logger != nil {
-		s.opts.Logger.Debug("persist convert", "key", docKey, "path", doc.Path, "ext", ext, "pendingChanges", pending, "callbackOnly", callbackOnly)
+		s.opts.Logger.Debug("persist convert", "key", docKey, "path", doc.Path, "ext", ext, "pendingChanges", pending, "pendingBlobs", pendingCount, "callbackOnly", callbackOnly)
 	}
 	if err = s.convertDocument(ctx, conv, cacheDir, outPath, ext); err != nil {
 		return err
@@ -129,7 +134,14 @@ func (s *Server) PersistDocument(ctx context.Context, docKey string) error {
 		s.opts.Logger.Info("document converted for callback", "key", docKey, "bytes", len(raw))
 	}
 	_ = os.Remove(filepath.Join(cacheDir, "source.sha256"))
-	_ = os.RemoveAll(filepath.Join(cacheDir, "changes"))
+	if pendingCount > 0 {
+		if err := changes.Acknowledge(cacheDir, pendingCount); err != nil {
+			return err
+		}
+	} else {
+		_ = changes.Clear(cacheDir)
+	}
+	changes.RemoveSnapshot(cacheDir)
 	s.afterPersistCacheUpdate(cacheDir)
 	return nil
 }

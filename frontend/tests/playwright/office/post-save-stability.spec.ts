@@ -33,3 +33,24 @@ for (const sample of STABLE_SAMPLES) {
     await assertEditorStable(page, STABLE_MS);
   });
 }
+
+test("post-save rapid double save: sample.docx", async ({ page, request }, testInfo) => {
+  const file = forkSample("sample-files/sample.docx", testInfo);
+  const markerA = `PW_RAPID_A_${testInfo.testId.slice(-4)}`;
+  const markerB = `PW_RAPID_B_${testInfo.testId.slice(-4)}`;
+
+  await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
+  await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
+  await waitForEditorReady(page, "word");
+  await waitForEditorInteractive(page, "word");
+
+  await applyMinimalSaveEdit(page, "word", markerA);
+  await triggerEditorSave(page, "word");
+  await waitForSaveDone(page, { request, filePath: file, marker: markerA });
+
+  await applyMinimalSaveEdit(page, "word", markerB);
+  await triggerEditorSave(page, "word");
+  await waitForSaveDone(page, { request, filePath: file, marker: markerB });
+
+  await assertEditorStable(page, STABLE_MS);
+});

@@ -329,7 +329,15 @@ func (s *saveScheduler) mergeFlushJob(existing *flushJob, job flushJob) *flushJo
 		existing.origin = job.origin
 	}
 	if job.onDone != nil {
-		existing.onDone = job.onDone
+		if existing.onDone != nil {
+			prev := existing.onDone
+			existing.onDone = func(err error) {
+				prev(err)
+				job.onDone(err)
+			}
+		} else {
+			existing.onDone = job.onDone
+		}
 	}
 	return existing
 }

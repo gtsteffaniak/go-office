@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/quantumx-apps/go-office/internal/changes"
 	"github.com/quantumx-apps/go-office/internal/fsutil"
 )
 
@@ -265,9 +266,7 @@ func (c *Converter) FromEditorBin(ctx context.Context, cacheDir, destPath, targe
 
 // SaveChanges applies cacheDir/changes/*.json on top of Editor.bin and writes destPath.
 func (c *Converter) SaveChanges(ctx context.Context, cacheDir, destPath, targetExt string) error {
-	return withCacheDirLock(cacheDir, func() error {
-		return c.saveChanges(ctx, cacheDir, destPath, targetExt)
-	})
+	return c.saveChanges(ctx, cacheDir, destPath, targetExt)
 }
 
 func (c *Converter) saveChanges(ctx context.Context, cacheDir, destPath, targetExt string) error {
@@ -297,7 +296,9 @@ func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, ta
 		"changeFiles", len(entries),
 		"bridge", saveBridgeExt(ext),
 	)
-	if err := prepareChangesForSave(changesDir, ""); err != nil {
+	if err := changes.WithDirLock(cacheDir, func() error {
+		return prepareChangesForSave(changesDir, "")
+	}); err != nil {
 		return err
 	}
 

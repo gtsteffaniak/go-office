@@ -25,7 +25,7 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	doc, ok := s.sessions.Get(key)
+	doc, ok := s.sessions.Lookup(key)
 	if !ok || (doc.Path == "" && doc.URL == "") {
 		http.NotFound(w, r)
 		return

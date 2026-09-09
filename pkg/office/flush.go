@@ -14,7 +14,7 @@ func (s *Server) FlushDocument(ctx context.Context, docKey, origin string, force
 	if err := s.PersistDocument(ctx, docKey); err != nil {
 		return err
 	}
-	doc, ok := s.sessions.Get(docKey)
+	doc, ok := s.sessions.Lookup(docKey)
 	if !ok || strings.TrimSpace(doc.CallbackURL) == "" {
 		return nil
 	}

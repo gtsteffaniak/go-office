@@ -160,6 +160,30 @@ func TestAcquireConvertSlotPriority(t *testing.T) {
 	}
 }
 
+func TestAdmissionNoSlotLeakOnTimeoutRace(t *testing.T) {
+	a := newConvertAdmission(1)
+	release, err := a.acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 50; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		_, acquireErr := a.acquire(ctx)
+		cancel()
+		if acquireErr == nil {
+			t.Fatal("expected timeout without releasing holder")
+		}
+	}
+	if a.available() != 0 {
+		t.Fatalf("available slots = %d, want 0 while holder active", a.available())
+	}
+	release()
+	if a.available() != 1 {
+		t.Fatalf("available slots = %d after release, want 1", a.available())
+	}
+}
+
 func TestConverterDrainWaitsForInflight(t *testing.T) {
 	c := &Converter{admission: newConvertAdmission(1)}
 	release, err := c.acquireConvertSlot(context.Background())

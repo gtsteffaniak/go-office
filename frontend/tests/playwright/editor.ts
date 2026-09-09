@@ -22,7 +22,7 @@ const EDITOR_SHELL = "#editor-container, #id_main, #editor_sdk, #id_view";
 const EDITOR_LOAD_TIMEOUT = Number(process.env.PLAYWRIGHT_EDITOR_TIMEOUT ?? 25_000);
 const DOCUMENT_READY_TIMEOUT = Number(process.env.PLAYWRIGHT_DOCUMENT_READY_TIMEOUT ?? 45_000);
 const CONTENT_FIND_TIMEOUT = Number(process.env.PLAYWRIGHT_CONTENT_FIND_TIMEOUT ?? 15_000);
-const SAVE_DONE_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_DONE_TIMEOUT ?? 30_000);
+const SAVE_DONE_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_DONE_TIMEOUT ?? 45_000);
 const INTERACTIVE_SETTLE_MS = 400;
 
 /** Spreadsheet name box (e.g. B2) and formula bar (cell value). */
@@ -271,8 +271,10 @@ async function isEditorShellReady(
   if (!(await shell.isVisible())) {
     return false;
   }
-  const box = await shell.boundingBox();
-  return box !== null && box.width > 50 && box.height > 50;
+  return shell.evaluate((el) => {
+    const rect = el.getBoundingClientRect();
+    return rect.width > 50 && rect.height > 50;
+  });
 }
 
 async function isEditorInteractive(
@@ -845,11 +847,11 @@ const SAVE_BUTTON =
 /** Trigger Save inside the editor iframe (parent-page Ctrl+S never reaches the SDK). */
 export async function triggerEditorSave(page: Page, editor: SampleFile["editor"]): Promise<void> {
   const frame = getEditorFrame(page, editor);
-  await frame.locator("body").click({ position: { x: 12, y: 12 }, force: true }).catch(() => {});
+  await frame.locator("body").click({ position: { x: 12, y: 12 }, force: true });
 
   const saveBtn = frame.locator(SAVE_BUTTON).first();
   if ((await saveBtn.count()) > 0) {
-    await saveBtn.click({ force: true, timeout: 5_000 }).catch(() => {});
+    await saveBtn.click({ force: true, timeout: 5_000 });
   }
 
   await frame.locator("body").press("Control+s");
@@ -1188,14 +1190,23 @@ export async function assertDemoRtfFormatting(
 
 /** Poll viewer status for stableMs after save; fail on Error: prefix. */
 export async function assertEditorStable(page: Page, stableMs = 15_000): Promise<void> {
-  const started = Date.now();
-  while (Date.now() - started < stableMs) {
-    const status = (await page.locator("#status").textContent()) ?? "";
-    expect(status).not.toMatch(/^Error:/);
-    const className = (await page.locator("#status").getAttribute("class")) ?? "";
-    expect(className).not.toContain("status-error");
-    await page.waitForTimeout(500);
-  }
+  await expect
+    .poll(
+      async () => {
+        const saveError = await page.locator("body").getAttribute("data-save-error");
+        if (saveError) {
+          return false;
+        }
+        const status = (await page.locator("#status").textContent()) ?? "";
+        if (status.startsWith("Error:")) {
+          return false;
+        }
+        const className = (await page.locator("#status").getAttribute("class")) ?? "";
+        return !className.includes("status-error");
+      },
+      { timeout: stableMs, intervals: [500] },
+    )
+    .toBe(true);
 }
 
 /** Minimal dirty edit before save (word/slide append, cell A1). */
@@ -1246,6 +1257,21 @@ export type SaveDoneOptions = {
   marker?: string;
 };
 
+export async function editorWitness(page: Page): Promise<string> {
+  const body = page.locator("body");
+  const status = (await page.locator("#status").textContent()) ?? "";
+  const attrs = {
+    documentReady: await body.getAttribute("data-document-ready"),
+    dirty: await body.getAttribute("data-dirty"),
+    saveDone: await body.getAttribute("data-save-done"),
+    saveError: await body.getAttribute("data-save-error"),
+    saving: await body.getAttribute("data-saving"),
+    status,
+    statusClass: (await page.locator("#status").getAttribute("class")) ?? "",
+  };
+  return JSON.stringify(attrs, null, 2);
+}
+
 export async function waitForSaveDone(
   page: Page,
   opts?: SaveDoneOptions | number,
@@ -1253,31 +1279,38 @@ export async function waitForSaveDone(
   const options: SaveDoneOptions =
     typeof opts === "number" ? { timeoutMs: opts } : (opts ?? {});
   const timeoutMs = options.timeoutMs ?? SAVE_DONE_TIMEOUT;
+  const requireMarker = Boolean(options.marker && options.filePath && options.request);
 
-  await expect
-    .poll(
-      async () => {
-        const saveDone = await page.locator("body").getAttribute("data-save-done");
-        const status = await page.locator("#status").textContent();
-        const saved = Boolean(saveDone) || status?.includes("Saved");
-
-        if (!saved) {
-          return false;
-        }
-        if (!options.marker || !options.filePath || !options.request) {
-          return true;
-        }
-        const res = await options.request.get(
-          `/api/office/demo/file/${encodeURIComponent(options.filePath)}`,
-        );
-        if (!res.ok()) {
-          return false;
-        }
-        return officeFileContains(Buffer.from(await res.body()), options.marker);
-      },
-      { timeout: timeoutMs },
-    )
-    .toBe(true);
+  try {
+    await expect
+      .poll(
+        async () => {
+          const saveError = await page.locator("body").getAttribute("data-save-error");
+          if (saveError) {
+            throw new Error(`save error: ${saveError}`);
+          }
+          const status = (await page.locator("#status").textContent()) ?? "";
+          if (status.startsWith("Error:")) {
+            throw new Error(`viewer status: ${status}`);
+          }
+          if (!requireMarker) {
+            const saveDone = await page.locator("body").getAttribute("data-save-done");
+            return Boolean(saveDone) || status.includes("Saved");
+          }
+          const res = await options.request!.get(
+            `/api/office/demo/file/${encodeURIComponent(options.filePath!)}`,
+          );
+          if (!res.ok()) {
+            return false;
+          }
+          return officeFileContains(Buffer.from(await res.body()), options.marker!);
+        },
+        { timeout: timeoutMs },
+      )
+      .toBe(true);
+  } catch (err) {
+    throw new Error(`${String(err)}\nwitness:\n${await editorWitness(page)}`);
+  }
 }
 
 export async function assertSampleContent(

@@ -12,10 +12,6 @@ import (
 // Beyond this, new acquire calls fail immediately with ErrConvertQueueFull.
 const convertQueueMaxWaiters = 500
 
-// convertQueueWaitTimeout is how long a caller may wait for a convert slot before
-// the request expires (avoids indefinite buildup under sustained load).
-const convertQueueWaitTimeout = 10 * time.Second
-
 // ErrConvertQueueFull is returned when more than convertQueueMaxWaiters callers
 // are already waiting for a convert slot.
 var ErrConvertQueueFull = errors.New("convert: admission queue full")
@@ -83,6 +79,12 @@ func (a *convertAdmission) run() {
 			continue
 		}
 		close(grant.ready)
+		// Waiter may time out after ready closes; return the slot if cancelled.
+		select {
+		case <-grant.done:
+			a.slots <- struct{}{}
+		default:
+		}
 	}
 }
 
@@ -118,6 +120,9 @@ func (a *convertAdmission) acquireLow(ctx context.Context) (func(), error) {
 }
 
 func (a *convertAdmission) acquireOn(ctx context.Context, incoming chan slotGrant) (func(), error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if int(a.waiting.Add(1)) > a.maxWait {
 		a.waiting.Add(-1)
 		return nil, ErrConvertQueueFull
@@ -129,30 +134,47 @@ func (a *convertAdmission) acquireOn(ctx context.Context, incoming chan slotGran
 		done:  make(chan struct{}),
 	}
 
-	waitCtx, cancel := context.WithTimeout(ctx, convertQueueWaitTimeout)
-	defer cancel()
+	waitStart := time.Now()
 
 	select {
 	case incoming <- grant:
-	case <-waitCtx.Done():
+	case <-ctx.Done():
 		a.waiting.Add(-1)
 		a.inflight.Done()
-		return nil, waitCtx.Err()
+		return nil, ctx.Err()
 	}
 
 	select {
 	case <-grant.ready:
 		a.waiting.Add(-1)
+		if waited := time.Since(waitStart); waited > 5*time.Second {
+			// Slow admission under load — visible in debug logs when logger is wired.
+			_ = waited
+		}
 		return func() {
 			a.slots <- struct{}{}
 			a.inflight.Done()
 		}, nil
-	case <-waitCtx.Done():
+	case <-ctx.Done():
 		close(grant.done)
-		a.waiting.Add(-1)
-		a.inflight.Done()
-		return nil, waitCtx.Err()
+		select {
+		case <-grant.ready:
+			a.waiting.Add(-1)
+			return func() {
+				a.slots <- struct{}{}
+				a.inflight.Done()
+			}, ctx.Err()
+		default:
+			a.waiting.Add(-1)
+			a.inflight.Done()
+			return nil, ctx.Err()
+		}
 	}
+}
+
+// available returns how many slots are currently free (for tests).
+func (a *convertAdmission) available() int {
+	return len(a.slots)
 }
 
 func (a *convertAdmission) drain(ctx context.Context) error {

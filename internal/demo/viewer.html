@@ -109,21 +109,37 @@
       document.body.removeAttribute("data-save-error");
       var attempts = 0;
       var baseline = saveBaselineBytes;
+      var pendingBytes = null;
+      var stableCount = 0;
       function tick() {
         attempts += 1;
         fetchDemoFileBytes()
           .then(function (bytes) {
             if (bytes !== baseline) {
-              lastSavedFileBytes = bytes;
-              saveBaselineBytes = bytes;
-              clearSaveWatchdog();
-              document.body.setAttribute("data-save-done", String(Date.now()));
-              document.body.removeAttribute("data-dirty");
-              document.body.removeAttribute("data-saving");
-              document.body.removeAttribute("data-save-error");
-              setStatus("Saved", "ok");
+              if (pendingBytes === bytes) {
+                stableCount += 1;
+              } else {
+                pendingBytes = bytes;
+                stableCount = 1;
+              }
+              if (stableCount >= 2) {
+                lastSavedFileBytes = bytes;
+                saveBaselineBytes = bytes;
+                clearSaveWatchdog();
+                document.body.setAttribute("data-save-done", String(Date.now()));
+                document.body.removeAttribute("data-dirty");
+                document.body.removeAttribute("data-saving");
+                document.body.removeAttribute("data-save-error");
+                setStatus("Saved", "ok");
+                return;
+              }
+              if (attempts < SAVE_POLL_MAX_ATTEMPTS) {
+                autosavePollTimer = setTimeout(tick, SAVE_POLL_INTERVAL_MS);
+              }
               return;
             }
+            pendingBytes = null;
+            stableCount = 0;
             if (attempts < SAVE_POLL_MAX_ATTEMPTS) {
               autosavePollTimer = setTimeout(tick, SAVE_POLL_INTERVAL_MS);
             } else {
@@ -176,6 +192,7 @@
             var documentReady = false;
             config.events = {
               onDocumentReady: function () {
+                document.body.removeAttribute("data-content-ready");
                 documentReady = true;
                 document.body.setAttribute("data-document-ready", "true");
                 setStatus("Document ready", "ok");
@@ -187,6 +204,19 @@
                   .catch(function () { /* baseline optional */ });
                 if (typeof baseEvents.onDocumentReady === "function") {
                   baseEvents.onDocumentReady();
+                }
+              },
+              onDocumentContentReady: function () {
+                document.body.setAttribute("data-content-ready", "true");
+                if (typeof baseEvents.onDocumentContentReady === "function") {
+                  baseEvents.onDocumentContentReady();
+                }
+              },
+              onRequestSaveResult: function (event) {
+                var ok = event && event.data === true;
+                document.body.setAttribute("data-save-result", ok ? "ok" : "error");
+                if (typeof baseEvents.onRequestSaveResult === "function") {
+                  baseEvents.onRequestSaveResult(event);
                 }
               },
               onDocumentStateChange: function (event) {

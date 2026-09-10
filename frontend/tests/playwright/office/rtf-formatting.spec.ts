@@ -1,9 +1,7 @@
 import { test, expect } from "../test-setup";
 import {
   warmDemoFile,
-  waitForEditorReady,
-  waitForEditorInteractive,
-  insertSaveMarker,
+  editWordForSave,
   formatWordSelection,
   triggerEditorSave,
   waitForSaveDone,
@@ -23,10 +21,8 @@ test("rtf bold persists", async ({ page, request }, testInfo) => {
   await warmDemoFile(request, file);
   await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
-  await waitForEditorReady(page, "word");
-  await waitForEditorInteractive(page, "word");
 
-  await insertSaveMarker(page, "word", marker);
+  await editWordForSave(page, "word", marker);
   await triggerEditorSave(page, "word");
   await waitForSaveDone(page, { request, filePath: file, marker });
   await formatWordSelection(page, marker, { bold: true });
@@ -43,10 +39,8 @@ test("rtf italic persists", async ({ page, request }, testInfo) => {
   await warmDemoFile(request, file);
   await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
-  await waitForEditorReady(page, "word");
-  await waitForEditorInteractive(page, "word");
 
-  await insertSaveMarker(page, "word", marker);
+  await editWordForSave(page, "word", marker);
   await triggerEditorSave(page, "word");
   await waitForSaveDone(page, { request, filePath: file, marker });
   await formatWordSelection(page, marker, { italic: true });
@@ -63,10 +57,8 @@ test("rtf highlight persists", async ({ page, request }, testInfo) => {
   await warmDemoFile(request, file);
   await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
-  await waitForEditorReady(page, "word");
-  await waitForEditorInteractive(page, "word");
 
-  await insertSaveMarker(page, "word", marker);
+  await editWordForSave(page, "word", marker);
   await triggerEditorSave(page, "word");
   await waitForSaveDone(page, { request, filePath: file, marker });
   await formatWordSelection(page, marker, { highlight: true });

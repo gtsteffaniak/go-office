@@ -1,11 +1,9 @@
 import { test, expect } from "../test-setup";
 import {
   warmDemoFile,
-  waitForEditorReady,
-  waitForEditorInteractive,
-  setCellContentForSave,
+  editCellForSave,
+  editWordForSave,
   waitForSaveDone,
-  insertSaveMarker,
   triggerEditorSave,
   assertDemoFileContains,
 } from "../editor";
@@ -57,10 +55,8 @@ test("docx save round-trip via demo file API", async ({ page, request }, testInf
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
   });
-  await waitForEditorReady(page, "word");
-  await waitForEditorInteractive(page, "word");
 
-  await insertSaveMarker(page, "word", DOCX_MARKER);
+  await editWordForSave(page, "word", DOCX_MARKER);
   await triggerEditorSave(page, "word");
   await waitForSaveDone(page, {
     request,
@@ -79,10 +75,8 @@ test("csv save round-trip via demo file API", async ({ page, request }, testInfo
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
   });
-  await waitForEditorReady(page, "cell");
-  await waitForEditorInteractive(page, "cell");
 
-  await setCellContentForSave(page, "cell", CSV_CELL, CSV_REPLACEMENT);
+  await editCellForSave(page, "cell", CSV_CELL, CSV_REPLACEMENT);
   await triggerEditorSave(page, "cell");
   await waitForSaveDone(page, {
     request,
@@ -102,10 +96,8 @@ test("txt save round-trip via demo file API", async ({ page, request }, testInfo
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
   });
-  await waitForEditorReady(page, "word");
-  await waitForEditorInteractive(page, "word");
 
-  await insertSaveMarker(page, "word", TXT_MARKER);
+  await editWordForSave(page, "word", TXT_MARKER);
   await triggerEditorSave(page, "word");
   await waitForSaveDone(page, {
     request,
@@ -126,10 +118,8 @@ test("rtf save round-trip via demo file API", async ({ page, request }, testInfo
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
   });
-  await waitForEditorReady(page, "word");
-  await waitForEditorInteractive(page, "word");
 
-  await insertSaveMarker(page, "word", "PW_RTF_SAVE_ROUNDTRIP");
+  await editWordForSave(page, "word", "PW_RTF_SAVE_ROUNDTRIP");
   await triggerEditorSave(page, "word");
   await waitForSaveDone(page, {
     request,
@@ -152,10 +142,8 @@ test("ods save round-trip via demo file API", async ({ page, request }, testInfo
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
   });
-  await waitForEditorReady(page, "cell");
-  await waitForEditorInteractive(page, "cell");
 
-  await setCellContentForSave(page, "cell", ODS_CELL, ODS_REPLACEMENT);
+  await editCellForSave(page, "cell", ODS_CELL, ODS_REPLACEMENT);
   await triggerEditorSave(page, "cell");
   await waitForSaveDone(page, {
     request,
@@ -175,10 +163,8 @@ test("ppt save round-trip via demo file API", async ({ page, request }, testInfo
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
   });
-  await waitForEditorReady(page, "slide");
-  await waitForEditorInteractive(page, "slide");
 
-  await insertSaveMarker(page, "slide", PPT_MARKER);
+  await editWordForSave(page, "slide", PPT_MARKER);
   await triggerEditorSave(page, "slide");
   await waitForSaveDone(page, {
     request,

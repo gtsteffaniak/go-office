@@ -1,8 +1,6 @@
 import { test, expect } from "../test-setup";
 import {
   warmDemoFile,
-  waitForEditorReady,
-  waitForEditorInteractive,
   applyMinimalSaveEdit,
   triggerEditorSave,
   waitForSaveDone,
@@ -25,8 +23,6 @@ for (const sample of STABLE_SAMPLES) {
     await warmDemoFile(request, file);
     await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
     await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
-    await waitForEditorReady(page, sample.editor);
-    await waitForEditorInteractive(page, sample.editor);
 
     await applyMinimalSaveEdit(page, sample.editor, marker);
     await triggerEditorSave(page, sample.editor);
@@ -44,8 +40,6 @@ test("post-save rapid double save: sample.docx", async ({ page, request }, testI
   await warmDemoFile(request, file);
   await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
-  await waitForEditorReady(page, "word");
-  await waitForEditorInteractive(page, "word");
 
   await applyMinimalSaveEdit(page, "word", markerA);
   await triggerEditorSave(page, "word");

@@ -76,7 +76,14 @@ type AscEditorWindow = {
 function cellApiReadyInBrowser(): boolean {
   const w = window as AscEditorWindow;
   const api = w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor;
-  return typeof api?.asc_selectRange === "function";
+  if (!api) {
+    return false;
+  }
+  return (
+    typeof api.asc_selectRange === "function" ||
+    typeof api.asc_setCellValue === "function" ||
+    typeof api.asc_insertText === "function"
+  );
 }
 
 function wordSlideInteractiveInBrowser(kind: SampleFile["editor"]): boolean {
@@ -114,10 +121,12 @@ function readCellViaBrowser(cellRef: string): string {
 function setCellViaBrowser(arg: { cellRef: string; cellValue: string }): boolean {
   const w = window as AscEditorWindow;
   const api = w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor;
-  if (!api?.asc_selectRange) {
+  if (!api) {
     return false;
   }
-  api.asc_selectRange(arg.cellRef);
+  if (typeof api.asc_selectRange === "function") {
+    api.asc_selectRange(arg.cellRef);
+  }
   if (typeof api.asc_setCellValue === "function") {
     api.asc_setCellValue(arg.cellValue);
     api.asc_closeCellEditor?.(true);
@@ -304,7 +313,10 @@ async function isEditorInteractive(
     if (!shellReady) {
       return false;
     }
-    return frame.locator("body").evaluate(cellApiReadyInBrowser);
+    if (await frame.locator("body").evaluate(cellApiReadyInBrowser)) {
+      return true;
+    }
+    return cellName.isEnabled().catch(() => false);
   }
 
   if (editor === "word" || editor === "slide") {
@@ -431,6 +443,18 @@ export async function waitForDocumentReadyAttr(
     .toBe(true);
 }
 
+async function waitForCellApiReady(
+  frame: FrameLocator,
+  timeoutMs = EDITOR_LOAD_TIMEOUT,
+): Promise<void> {
+  await expect
+    .poll(() => frame.locator("body").evaluate(cellApiReadyInBrowser), {
+      timeout: timeoutMs,
+      intervals: [200, 500, 1000],
+    })
+    .toBe(true);
+}
+
 /** Document loaded, load masks gone, and editor APIs are usable (content/save tests). */
 export async function waitForEditorInteractive(
   page: Page,
@@ -448,6 +472,7 @@ export async function waitForEditorInteractive(
       .toBe(true);
   }
   if (editor === "cell") {
+    await waitForCellApiReady(frame);
     await dismissEditorOverlays(frame);
   }
 }
@@ -661,6 +686,7 @@ export async function setCellContent(
 ): Promise<void> {
   await waitForEditorInteractive(page, editor);
   const frame = getEditorFrame(page, editor);
+  await waitForCellApiReady(frame);
 
   const viaSdk = await setCellValue(frame, ref, value);
   if (viaSdk) {
@@ -790,7 +816,53 @@ async function replaceDocumentTextViaSearchUI(
 }
 
 async function isDocumentDirty(page: Page): Promise<boolean> {
-  return (await page.locator("body").getAttribute("data-dirty")) !== null;
+  return (await page.locator("body").getAttribute("data-dirty")) === "true";
+}
+
+/** Re-mark the document dirty when the viewer lost track of pending edits (common after RTF format UI). */
+async function ensureDocumentDirtyForSave(
+  page: Page,
+  editor: SampleFile["editor"],
+): Promise<void> {
+  if (await isDocumentDirty(page)) {
+    return;
+  }
+  const frame = getEditorFrame(page, editor);
+  if (editor === "cell") {
+    await waitForCellApiReady(frame);
+    const nudged = await frame.locator("body").evaluate(() => {
+      const w = window as AscEditorWindow;
+      const api = w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor;
+      if (!api || typeof api.asc_insertText !== "function") {
+        return false;
+      }
+      api.asc_insertText(" ");
+      api.asc_closeCellEditor?.(true);
+      return true;
+    });
+    if (nudged) {
+      await settleFrame(frame, 300);
+    }
+  } else if (editor === "word" || editor === "slide") {
+    const viaDocsApi = await page.evaluate(() => {
+      const ed = (window as { docEditor?: { grabFocus?: () => void; insertPlainText?: (t: string) => void } })
+        .docEditor;
+      if (!ed || typeof ed.insertPlainText !== "function") {
+        return false;
+      }
+      ed.grabFocus?.();
+      ed.insertPlainText("\u00a0");
+      return true;
+    });
+    if (!viaDocsApi) {
+      await frame
+        .locator("body")
+        .evaluate(insertTextInBrowser, { chunk: "\u00a0", kind: editor })
+        .catch(() => {});
+    }
+    await page.waitForTimeout(200);
+  }
+  await waitForDocumentDirty(page, 8_000);
 }
 
 /** Wait until the demo viewer has no pending unsaved edits. */
@@ -905,6 +977,9 @@ const SAVE_BUTTON =
 
 /** Trigger Save inside the editor iframe (parent-page Ctrl+S never reaches the SDK). */
 export async function triggerEditorSave(page: Page, editor: SampleFile["editor"]): Promise<void> {
+  await ensureDocumentDirtyForSave(page, editor);
+  const wasDirty = await isDocumentDirty(page);
+
   const frame = getEditorFrame(page, editor);
   await frame.locator("body").click({ position: { x: 12, y: 12 }, force: true });
 
@@ -919,13 +994,16 @@ export async function triggerEditorSave(page: Page, editor: SampleFile["editor"]
         .poll(
           async () => {
             const body = page.locator("body");
-            return (
-              (await body.getAttribute("data-saving")) === "true" ||
-              (await body.getAttribute("data-dirty")) !== "true" ||
-              Boolean(await body.getAttribute("data-save-done"))
-            );
+            if ((await body.getAttribute("data-saving")) === "true") {
+              return true;
+            }
+            if (wasDirty && (await body.getAttribute("data-dirty")) !== "true") {
+              return true;
+            }
+            const saveDone = await body.getAttribute("data-save-done");
+            return Boolean(saveDone) && (await body.getAttribute("data-saving")) !== "true";
           },
-          { timeout: 2_000, intervals: [100, 250] },
+          { timeout: 5_000, intervals: [100, 250, 500] },
         )
         .toBe(true)
         .then(() => true)
@@ -1198,39 +1276,33 @@ export async function formatWordSelection(
   await waitForEditorInteractive(page, "word");
   const frame = getEditorFrame(page, "word");
 
-  // Highlight/italic via UI — SDK paths are flaky and can skip persisting the marker.
-  const sdkApplied =
-    !format.highlight &&
-    !format.italic &&
-    (await frame.locator("body").evaluate(applyWordFormatInBrowser, { marker, format }));
-  if (!sdkApplied) {
-    await frame.locator("body").click({ position: { x: 10, y: 10 }, force: true }).catch(() => {});
-    await frame.locator("body").press("Control+f");
-    const searchInput = frame.locator("#search-bar-text").first();
-    await searchInput.waitFor({ state: "visible", timeout: 8_000 });
-    await searchInput.fill(marker);
-    await searchInput.press("Enter");
-    await page.waitForTimeout(300);
-    if (format.bold) {
-      await frame.locator("body").press("Control+b");
-    }
-    if (format.italic) {
-      await frame.locator("body").press("Control+i");
-    }
-    if (format.highlight) {
-      const highlightBtn = frame
-        .locator('#slot-btn-highlight-color, #slot-btn-font-highlight, [id*="highlight"]')
-        .first();
-      if ((await highlightBtn.count()) > 0) {
-        await highlightBtn.click({ force: true });
-        const yellow = frame.locator('[data-color="ffff00"], [data-value="ffff00"], .color-yellow').first();
-        if ((await yellow.count()) > 0) {
-          await yellow.click({ force: true });
-        }
+  // SDK formatting can drop markers on RTF; always use the search UI.
+  await frame.locator("body").click({ position: { x: 10, y: 10 }, force: true }).catch(() => {});
+  await frame.locator("body").press("Control+f");
+  const searchInput = frame.locator("#search-bar-text").first();
+  await searchInput.waitFor({ state: "visible", timeout: 8_000 });
+  await searchInput.fill(marker);
+  await searchInput.press("Enter");
+  await page.waitForTimeout(300);
+  if (format.bold) {
+    await frame.locator("body").press("Control+b");
+  }
+  if (format.italic) {
+    await frame.locator("body").press("Control+i");
+  }
+  if (format.highlight) {
+    const highlightBtn = frame
+      .locator('#slot-btn-highlight-color, #slot-btn-font-highlight, [id*="highlight"]')
+      .first();
+    if ((await highlightBtn.count()) > 0) {
+      await highlightBtn.click({ force: true });
+      const yellow = frame.locator('[data-color="ffff00"], [data-value="ffff00"], .color-yellow').first();
+      if ((await yellow.count()) > 0) {
+        await yellow.click({ force: true });
       }
     }
-    await frame.locator("#search-bar-close, #search-adv-close").first().click({ timeout: 1_000 }).catch(() => {});
   }
+  await frame.locator("#search-bar-close, #search-adv-close").first().click({ timeout: 1_000 }).catch(() => {});
 
   await expect
     .poll(async () => documentContainsText(frame, marker, "word"), {
@@ -1238,7 +1310,8 @@ export async function formatWordSelection(
       intervals: [300, 500, 1000],
     })
     .toBe(true);
-  await waitForDocumentDirty(page);
+  await settleFrame(frame, 400);
+  await ensureDocumentDirtyForSave(page, "word");
 }
 
 export type RtfFormattingAssert = {

@@ -975,14 +975,40 @@ const SAVE_BUTTON =
 /** Trigger Save inside the editor iframe (parent-page Ctrl+S never reaches the SDK). */
 export async function triggerEditorSave(page: Page, editor: SampleFile["editor"]): Promise<void> {
   await ensureDocumentDirtyForSave(page, editor);
+  const saveDoneBefore = await page.locator("body").getAttribute("data-save-done");
 
   const frame = getEditorFrame(page, editor);
   await frame.locator("body").click({ position: { x: 12, y: 12 }, force: true });
 
   const saveBtn = frame.locator(SAVE_BUTTON).first();
-  if ((await saveBtn.count()) > 0) {
-    await saveBtn.click({ force: true, timeout: 5_000, noWaitAfter: true }).catch(() => {});
+  const clicked =
+    (await saveBtn.count()) > 0 &&
+    (await saveBtn
+      .click({ force: true, timeout: 5_000, noWaitAfter: true })
+      .then(() => true)
+      .catch(() => false));
+
+  if (clicked) {
+    const started = await expect
+      .poll(
+        async () => {
+          const body = page.locator("body");
+          if ((await body.getAttribute("data-saving")) === "true") {
+            return true;
+          }
+          const saveDone = await body.getAttribute("data-save-done");
+          return Boolean(saveDone && saveDone !== saveDoneBefore);
+        },
+        { timeout: 10_000, intervals: [100, 250, 500] },
+      )
+      .toBe(true)
+      .then(() => true)
+      .catch(() => false);
+    if (started) {
+      return;
+    }
   }
+
   await frame.locator("body").press("Control+s");
 }
 
@@ -1236,16 +1262,11 @@ function applyWordFormatInBrowser(arg: { marker: string; format: WordFormatOptio
   return true;
 }
 
-/** Find marker text in a word document and apply formatting via the Asc API. */
-export async function formatWordSelection(
-  page: Page,
+async function formatWordSelectionViaSearchUI(
+  frame: FrameLocator,
   marker: string,
   format: WordFormatOptions,
 ): Promise<void> {
-  await waitForEditorInteractive(page, "word");
-  const frame = getEditorFrame(page, "word");
-
-  // SDK formatting can drop markers on RTF; always use the search UI.
   await frame.locator("body").click({ position: { x: 10, y: 10 }, force: true }).catch(() => {});
   await frame.locator("body").press("Control+f");
   const searchInput = frame.locator("#search-bar-text").first();
@@ -1256,9 +1277,6 @@ export async function formatWordSelection(
   await expect
     .poll(async () => searchBarHasMatches(frame), { timeout: 8_000, intervals: [200, 500] })
     .toBe(true);
-  // Leave the search field without clicking the canvas (that drops the find selection).
-  await frame.locator("body").press("Escape");
-  await settleFrame(frame, 200);
   if (format.bold) {
     const boldBtn = frame
       .locator(
@@ -1295,7 +1313,24 @@ export async function formatWordSelection(
       }
     }
   }
-  await frame.locator("#search-bar-close, #search-adv-close").first().click({ timeout: 1_000 }).catch(() => {});
+  await closeSearchBar(frame);
+}
+
+/** Find marker text in a word document and apply formatting. */
+export async function formatWordSelection(
+  page: Page,
+  marker: string,
+  format: WordFormatOptions,
+): Promise<void> {
+  await waitForEditorInteractive(page, "word");
+  const frame = getEditorFrame(page, "word");
+
+  const sdkApplied = await frame
+    .locator("body")
+    .evaluate(applyWordFormatInBrowser, { marker, format });
+  if (!sdkApplied || !(await documentContainsText(frame, marker, "word"))) {
+    await formatWordSelectionViaSearchUI(frame, marker, format);
+  }
 
   await expect
     .poll(async () => documentContainsText(frame, marker, "word"), {

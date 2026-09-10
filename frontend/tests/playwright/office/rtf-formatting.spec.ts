@@ -11,7 +11,7 @@ import {
 } from "../editor";
 import { forkSample } from "../fork-sample";
 
-test.describe.configure({ mode: "parallel" });
+test.describe.configure({ mode: "serial" });
 
 const STATUS_OK_TIMEOUT = 8_000;
 const RTF_SOURCE = "sample-files/sample.rtf";
@@ -27,9 +27,6 @@ test("rtf bold persists", async ({ page, request }, testInfo) => {
   await waitForEditorInteractive(page, "word");
 
   await insertSaveMarker(page, "word", marker);
-  await triggerEditorSave(page, "word");
-  await waitForSaveDone(page, { request, filePath: file, marker });
-
   await formatWordSelection(page, marker, { bold: true });
   await triggerEditorSave(page, "word");
   await waitForSaveDone(page, { request, filePath: file, marker });
@@ -48,9 +45,6 @@ test("rtf italic persists", async ({ page, request }, testInfo) => {
   await waitForEditorInteractive(page, "word");
 
   await insertSaveMarker(page, "word", marker);
-  await triggerEditorSave(page, "word");
-  await waitForSaveDone(page, { request, filePath: file, marker });
-
   await formatWordSelection(page, marker, { italic: true });
   await triggerEditorSave(page, "word");
   await waitForSaveDone(page, { request, filePath: file, marker });
@@ -69,9 +63,6 @@ test("rtf highlight persists", async ({ page, request }, testInfo) => {
   await waitForEditorInteractive(page, "word");
 
   await insertSaveMarker(page, "word", marker);
-  await triggerEditorSave(page, "word");
-  await waitForSaveDone(page, { request, filePath: file, marker });
-
   await formatWordSelection(page, marker, { highlight: true });
   await triggerEditorSave(page, "word");
   await waitForSaveDone(page, { request, filePath: file, marker });

@@ -86,6 +86,32 @@ function cellApiReadyInBrowser(): boolean {
   );
 }
 
+function cellSetApiReadyInBrowser(): boolean {
+  const w = window as AscEditorWindow;
+  const api = w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor;
+  if (!api) {
+    return false;
+  }
+  const canSelect = typeof api.asc_selectRange === "function";
+  const canWrite =
+    typeof api.asc_setCellValue === "function" || typeof api.asc_insertText === "function";
+  return canSelect && canWrite;
+}
+
+function selectCellInBrowser(cellRef: string): boolean {
+  const w = window as AscEditorWindow;
+  const api = w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor;
+  if (!api?.asc_selectRange) {
+    return false;
+  }
+  try {
+    api.asc_selectRange(cellRef);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function wordSlideInteractiveInBrowser(kind: SampleFile["editor"]): boolean {
   const w = window as AscEditorWindow;
   const api =
@@ -306,11 +332,15 @@ async function isEditorInteractive(
 
   if (editor === "cell") {
     const cellName = frame.locator("#ce-cell-name").first();
-    if ((await cellName.count()) === 0) {
+    const formulaBar = frame.locator(CELL_VALUE_INPUT).first();
+    if ((await cellName.count()) === 0 || (await formulaBar.count()) === 0) {
       return false;
     }
     const shellReady = await isEditorShellReady(frame, editor);
     if (!shellReady) {
+      return false;
+    }
+    if (!(await formulaBar.isVisible().catch(() => false))) {
       return false;
     }
     if (await frame.locator("body").evaluate(cellApiReadyInBrowser)) {
@@ -489,18 +519,50 @@ export async function waitForDocumentReady(
   await waitForEditorInteractive(page, editor);
 }
 
+async function cellNameShowsRef(frame: FrameLocator, ref: string): Promise<boolean> {
+  const cellName = frame.locator(CELL_NAME_INPUT).first();
+  const name = await cellName.inputValue().catch(async () => (await cellName.innerText()) ?? "");
+  return name.toUpperCase().includes(ref.toUpperCase());
+}
+
+async function selectCellViaSdk(frame: FrameLocator, ref: string): Promise<boolean> {
+  const selected = await frame
+    .locator("body")
+    .evaluate(selectCellInBrowser, ref)
+    .catch(() => false);
+  if (!selected) {
+    return false;
+  }
+  return cellNameShowsRef(frame, ref);
+}
+
+async function selectCellViaUi(frame: FrameLocator, ref: string): Promise<boolean> {
+  const cellName = frame.locator(CELL_NAME_INPUT).first();
+  if (!(await cellName.isEnabled().catch(() => false))) {
+    return false;
+  }
+  await dismissEditorOverlays(frame);
+  await cellName.click({ timeout: 2_000 }).catch(() => {});
+  await cellName.fill(ref);
+  await cellName.press("Enter");
+  await settleFrame(frame, 200);
+  return cellNameShowsRef(frame, ref);
+}
+
+/** Select a spreadsheet cell via SDK when available, otherwise the name box UI. */
 async function selectCell(frame: FrameLocator, ref: string): Promise<void> {
   const cellName = frame.locator(CELL_NAME_INPUT).first();
   await expect(cellName).toBeEnabled({ timeout: EDITOR_LOAD_TIMEOUT });
-  await dismissEditorOverlays(frame);
-  await cellName.click();
-  await cellName.fill(ref);
-  await cellName.press("Enter");
   await expect
     .poll(
       async () => {
-        const name = await cellName.inputValue().catch(async () => (await cellName.innerText()) ?? "");
-        return name.toUpperCase().includes(ref.toUpperCase());
+        if (await isLoadMaskBlocking(frame)) {
+          return false;
+        }
+        if (await selectCellViaSdk(frame, ref)) {
+          return true;
+        }
+        return selectCellViaUi(frame, ref);
       },
       { timeout: EDITOR_LOAD_TIMEOUT, intervals: [200, 500, 1000] },
     )
@@ -695,18 +757,36 @@ export async function setCellContent(
   const frame = getEditorFrame(page, editor);
   await dismissEditorOverlays(frame);
 
-  const apiReady = await frame.locator("body").evaluate(cellApiReadyInBrowser).catch(() => false);
-  if (apiReady) {
-    const viaSdk = await setCellValue(frame, ref, value);
-    if (viaSdk) {
-      await commitCellEdit(frame);
-      await settleFrame(frame, 500);
-      return;
-    }
+  let viaSdk = false;
+  try {
+    await expect
+      .poll(
+        async () => {
+          if (await isLoadMaskBlocking(frame)) {
+            return false;
+          }
+          const apiReady = await frame
+            .locator("body")
+            .evaluate(cellSetApiReadyInBrowser)
+            .catch(() => false);
+          if (!apiReady) {
+            return false;
+          }
+          return setCellValue(frame, ref, value);
+        },
+        { timeout: EDITOR_LOAD_TIMEOUT, intervals: [200, 500, 1000] },
+      )
+      .toBe(true);
+    viaSdk = true;
+  } catch {
+    viaSdk = false;
   }
 
-  await selectCell(frame, ref);
-  await writeFormulaBarValue(frame, value);
+  if (!viaSdk) {
+    await selectCell(frame, ref);
+    await writeFormulaBarValue(frame, value);
+  }
+
   await commitCellEdit(frame);
   await settleFrame(frame, 500);
 }

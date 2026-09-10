@@ -874,7 +874,24 @@ export async function triggerEditorSave(page: Page, editor: SampleFile["editor"]
       .then(() => true)
       .catch(() => false);
     if (clicked) {
-      return;
+      const started = await expect
+        .poll(
+          async () => {
+            const body = page.locator("body");
+            return (
+              (await body.getAttribute("data-saving")) === "true" ||
+              (await body.getAttribute("data-dirty")) !== "true" ||
+              Boolean(await body.getAttribute("data-save-done"))
+            );
+          },
+          { timeout: 2_000, intervals: [100, 250] },
+        )
+        .toBe(true)
+        .then(() => true)
+        .catch(() => false);
+      if (started) {
+        return;
+      }
     }
   }
 

@@ -715,17 +715,6 @@ async function closeSearchBar(frame: FrameLocator): Promise<void> {
   await frame.locator("#search-bar-close, #search-adv-close").first().click({ timeout: 1_000 }).catch(() => {});
 }
 
-/** Move focus from the search bar back to the document canvas so formatting shortcuts apply to the match. */
-async function focusDocumentAfterSearch(frame: FrameLocator): Promise<void> {
-  const main = frame.locator("#id_main, #editor_sdk, #editor-container").first();
-  if ((await main.count()) > 0) {
-    await main.click({ position: { x: 320, y: 240 }, force: true }).catch(() => {});
-  } else {
-    await frame.locator("body").click({ position: { x: 200, y: 200 }, force: true }).catch(() => {});
-  }
-  await settleFrame(frame, 200);
-}
-
 async function searchBarHasMatches(frame: FrameLocator): Promise<boolean> {
   const results = frame.locator("#search-bar-results").first();
   const text = (await results.textContent({ timeout: 1_000 }).catch(() => "")) ?? "";
@@ -986,39 +975,14 @@ const SAVE_BUTTON =
 /** Trigger Save inside the editor iframe (parent-page Ctrl+S never reaches the SDK). */
 export async function triggerEditorSave(page: Page, editor: SampleFile["editor"]): Promise<void> {
   await ensureDocumentDirtyForSave(page, editor);
-  const saveDoneBefore = await page.locator("body").getAttribute("data-save-done");
 
   const frame = getEditorFrame(page, editor);
   await frame.locator("body").click({ position: { x: 12, y: 12 }, force: true });
 
   const saveBtn = frame.locator(SAVE_BUTTON).first();
-  const clickedSave =
-    (await saveBtn.count()) > 0 &&
-    (await saveBtn
-      .click({ force: true, timeout: 5_000, noWaitAfter: true })
-      .then(() => true)
-      .catch(() => false));
-
-  const saveStarted = async (): Promise<boolean> => {
-    const body = page.locator("body");
-    if ((await body.getAttribute("data-saving")) === "true") {
-      return true;
-    }
-    const saveDone = await body.getAttribute("data-save-done");
-    return Boolean(saveDone && saveDone !== saveDoneBefore);
-  };
-
-  if (clickedSave) {
-    const started = await expect
-      .poll(saveStarted, { timeout: 8_000, intervals: [100, 250, 500] })
-      .toBe(true)
-      .then(() => true)
-      .catch(() => false);
-    if (started) {
-      return;
-    }
+  if ((await saveBtn.count()) > 0) {
+    await saveBtn.click({ force: true, timeout: 5_000, noWaitAfter: true }).catch(() => {});
   }
-
   await frame.locator("body").press("Control+s");
 }
 
@@ -1288,8 +1252,13 @@ export async function formatWordSelection(
   await searchInput.waitFor({ state: "visible", timeout: 8_000 });
   await searchInput.fill(marker);
   await searchInput.press("Enter");
-  await page.waitForTimeout(300);
-  await focusDocumentAfterSearch(frame);
+  await settleFrame(frame, 400);
+  await expect
+    .poll(async () => searchBarHasMatches(frame), { timeout: 8_000, intervals: [200, 500] })
+    .toBe(true);
+  // Leave the search field without clicking the canvas (that drops the find selection).
+  await frame.locator("body").press("Escape");
+  await settleFrame(frame, 200);
   if (format.bold) {
     const boldBtn = frame
       .locator(

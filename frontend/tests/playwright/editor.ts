@@ -21,6 +21,7 @@ const EDITOR_SHELL = "#editor-container, #id_main, #editor_sdk, #id_view";
 
 const EDITOR_LOAD_TIMEOUT = Number(process.env.PLAYWRIGHT_EDITOR_TIMEOUT ?? 25_000);
 const DOCUMENT_READY_TIMEOUT = Number(process.env.PLAYWRIGHT_DOCUMENT_READY_TIMEOUT ?? 45_000);
+const DEMO_WARM_TIMEOUT = Number(process.env.PLAYWRIGHT_WARM_TIMEOUT ?? 90_000);
 const CONTENT_FIND_TIMEOUT = Number(process.env.PLAYWRIGHT_CONTENT_FIND_TIMEOUT ?? 15_000);
 const SAVE_DONE_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_DONE_TIMEOUT ?? 45_000);
 const INTERACTIVE_SETTLE_MS = 400;
@@ -357,30 +358,39 @@ export async function waitForEditorShell(
   });
 }
 
+/** Demo viewer finished synchronous warm (queue time not counted toward editor-ready timeout). */
+export async function waitForDemoWarm(page: Page, timeoutMs = DEMO_WARM_TIMEOUT): Promise<void> {
+  await page.waitForFunction(
+    () => document.body.getAttribute("data-warm-done") === "true",
+    { timeout: timeoutMs },
+  );
+}
+
 /** Editor iframe mounted and document is ready to use (open-format tests). */
 export async function waitForEditorReady(
   page: Page,
   editor: SampleFile["editor"],
 ): Promise<void> {
   try {
+    await waitForDemoWarm(page);
+    await page.waitForFunction(
+      () => {
+        const status = (document.getElementById("status")?.textContent ?? "").trim();
+        if (status.startsWith("Error:")) {
+          throw new Error(`viewer status: ${status}`);
+        }
+        return (
+          document.body.getAttribute("data-document-ready") === "true" ||
+          status === "Document ready"
+        );
+      },
+      { timeout: DOCUMENT_READY_TIMEOUT },
+    );
+    const frame = getEditorFrame(page, editor);
     await expect
-      .poll(
-        async () => {
-          const status = ((await page.locator("#status").textContent()) ?? "").trim();
-          if (status.startsWith("Error:")) {
-            throw new Error(`viewer status: ${status}`);
-          }
-          if ((await page.locator("body").getAttribute("data-document-ready")) === "true") {
-            return true;
-          }
-          if (status === "Document ready") {
-            return true;
-          }
-          const frame = getEditorFrame(page, editor);
-          return isEditorShellReady(frame, editor).catch(() => false);
-        },
-        { timeout: DOCUMENT_READY_TIMEOUT, intervals: [200, 400, 800, 1500] },
-      )
+      .poll(() => isEditorShellReady(frame, editor).catch(() => false), {
+        timeout: EDITOR_LOAD_TIMEOUT,
+      })
       .toBe(true);
   } catch (err) {
     throw new Error(`${String(err)}\nwitness:\n${await editorWitness(page, editor)}`);
@@ -1322,6 +1332,7 @@ export async function editorWitness(
   const body = page.locator("body");
   const status = (await page.locator("#status").textContent()) ?? "";
   const witness: Record<string, unknown> = {
+    warmDone: await body.getAttribute("data-warm-done"),
     documentReady: await body.getAttribute("data-document-ready"),
     dirty: await body.getAttribute("data-dirty"),
     saveDone: await body.getAttribute("data-save-done"),

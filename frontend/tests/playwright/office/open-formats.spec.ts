@@ -22,6 +22,12 @@ async function assertEditorOpens(page: import("@playwright/test").Page, sample: 
     }
   });
 
+  // Warm server-side before navigation so in-page warm returns quickly under parallel load.
+  const warm = await page.request.get(`/demo/warm?file=${encodeURIComponent(sample.path)}`);
+  if (!warm.ok()) {
+    throw new Error(`warm ${sample.path}: HTTP ${warm.status()} ${await warm.text()}`);
+  }
+
   await page.goto(`/demo/view?file=${encodeURIComponent(sample.path)}`);
 
   await expect(page.locator("#sample-path")).toContainText(sample.path.split("/").pop()!);

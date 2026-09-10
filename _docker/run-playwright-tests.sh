@@ -1,7 +1,6 @@
 #!/bin/sh
 set -eu
 
-LOG=/tmp/go-office.log
 PID=""
 
 cleanup() {
@@ -11,24 +10,6 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
-
-dump_log() {
-  echo "=== go-office server log (errors and editor clientLog) ===" >&2
-  if [ -f "$LOG" ]; then
-    bytes=$(wc -c <"$LOG" | tr -d ' ')
-    echo "(log file size: ${bytes} bytes)" >&2
-    if [ "$bytes" -gt 0 ]; then
-      grep -E 'clientLog|severity=error|severity=warn|level=ERROR|level=WARN|"level":"ERROR"|"level":"WARN"|document open|warm failed|warm convert|flush|save failed|saveChanges|forceSave|x2t|Editor\.bin' "$LOG" \
-        | tail -300 >&2 || true
-      echo "=== go-office server log (full tail) ===" >&2
-      tail -500 "$LOG" >&2 || true
-    else
-      echo "(log file is empty — check stderr capture)" >&2
-    fi
-  else
-    echo "(no log file at $LOG)" >&2
-  fi
-}
 
 healthcheck() {
   # playwright-base has Node but not curl/wget.
@@ -46,8 +27,7 @@ cd /app
 : "${OFFICE_CONVERT_LIMIT:=4}"
 export PLAYWRIGHT_WORKERS OFFICE_CONVERT_LIMIT
 
-: >"$LOG"
-# Line-buffer stderr so CI log dumps include recent server output.
+# Stream go-office logs to CI output as they happen (line-buffered when stdbuf exists).
 if command -v stdbuf >/dev/null 2>&1; then
   GO_STDERR=stdbuf
   GO_STDERR_ARGS="-oL -eL"
@@ -62,7 +42,7 @@ $GO_STDERR $GO_STDERR_ARGS ./go-office \
   -data /app \
   -samples sample-files \
   -public http://127.0.0.1:8080 \
-  >>"$LOG" 2>&1 &
+  >&2 &
 PID=$!
 
 deadline=$(( $(date +%s) + 120 ))
@@ -70,12 +50,10 @@ attempt=0
 until healthcheck; do
   if ! kill -0 "$PID" 2>/dev/null; then
     echo "go-office exited before health check (attempt $attempt)" >&2
-    dump_log
     exit 1
   fi
   if [ "$(date +%s)" -ge "$deadline" ]; then
     echo "health check timed out after ${attempt} attempts" >&2
-    dump_log
     exit 1
   fi
   attempt=$((attempt + 1))
@@ -91,24 +69,13 @@ if [ -f /app/_docker/warm-playwright-samples.mjs ]; then
     PLAYWRIGHT_SAMPLES_DIR="/app/sample-files" \
     node /app/_docker/warm-playwright-samples.mjs >&2 || {
     echo "sample pre-warm failed" >&2
-    dump_log
     exit 1
   }
 fi
 
 cd /app/frontend
-status=0
 if [ -n "${PLAYWRIGHT_PROJECT:-}" ]; then
-  if ! npx playwright test --project="$PLAYWRIGHT_PROJECT" --no-deps; then
-    status=1
-  fi
+  exec npx playwright test --project="$PLAYWRIGHT_PROJECT" --no-deps
 else
-  if ! npx playwright test; then
-    status=1
-  fi
+  exec npx playwright test
 fi
-
-if [ "$status" -ne 0 ]; then
-  dump_log
-fi
-exit "$status"

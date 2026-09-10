@@ -149,7 +149,11 @@
 
     function warmDocument() {
       var warmUrl = joinPath(officeBase, "/demo/warm?file=" + encodeURIComponent(SAMPLE_FILE));
-      return fetch(warmUrl, { cache: "no-store" }).catch(function () { /* best-effort */ });
+      return fetch(warmUrl, { cache: "no-store" })
+        .catch(function () { /* best-effort */ })
+        .finally(function () {
+          document.body.setAttribute("data-warm-done", "true");
+        });
     }
 
     function loadEditor() {

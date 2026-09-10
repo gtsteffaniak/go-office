@@ -443,18 +443,6 @@ export async function waitForDocumentReadyAttr(
     .toBe(true);
 }
 
-async function waitForCellApiReady(
-  frame: FrameLocator,
-  timeoutMs = EDITOR_LOAD_TIMEOUT,
-): Promise<void> {
-  await expect
-    .poll(() => frame.locator("body").evaluate(cellApiReadyInBrowser), {
-      timeout: timeoutMs,
-      intervals: [200, 500, 1000],
-    })
-    .toBe(true);
-}
-
 /** Document loaded, load masks gone, and editor APIs are usable (content/save tests). */
 export async function waitForEditorInteractive(
   page: Page,
@@ -472,7 +460,6 @@ export async function waitForEditorInteractive(
       .toBe(true);
   }
   if (editor === "cell") {
-    await waitForCellApiReady(frame);
     await dismissEditorOverlays(frame);
   }
 }
@@ -686,13 +673,16 @@ export async function setCellContent(
 ): Promise<void> {
   await waitForEditorInteractive(page, editor);
   const frame = getEditorFrame(page, editor);
-  await waitForCellApiReady(frame);
+  await dismissEditorOverlays(frame);
 
-  const viaSdk = await setCellValue(frame, ref, value);
-  if (viaSdk) {
-    // asc_setCellValue updates the model; readback via the name box can lag under load.
-    await settleFrame(frame, 500);
-    return;
+  const apiReady = await frame.locator("body").evaluate(cellApiReadyInBrowser).catch(() => false);
+  if (apiReady) {
+    const viaSdk = await setCellValue(frame, ref, value);
+    if (viaSdk) {
+      // asc_setCellValue updates the model; readback via the name box can lag under load.
+      await settleFrame(frame, 500);
+      return;
+    }
   }
 
   await selectCell(frame, ref);
@@ -829,18 +819,25 @@ async function ensureDocumentDirtyForSave(
   }
   const frame = getEditorFrame(page, editor);
   if (editor === "cell") {
-    await waitForCellApiReady(frame);
-    const nudged = await frame.locator("body").evaluate(() => {
-      const w = window as AscEditorWindow;
-      const api = w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor;
-      if (!api || typeof api.asc_insertText !== "function") {
-        return false;
+    const apiReady = await frame.locator("body").evaluate(cellApiReadyInBrowser).catch(() => false);
+    if (apiReady) {
+      const nudged = await frame.locator("body").evaluate(() => {
+        const w = window as AscEditorWindow;
+        const api = w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor;
+        if (!api || typeof api.asc_insertText !== "function") {
+          return false;
+        }
+        api.asc_insertText(" ");
+        api.asc_closeCellEditor?.(true);
+        return true;
+      });
+      if (nudged) {
+        await settleFrame(frame, 300);
       }
-      api.asc_insertText(" ");
-      api.asc_closeCellEditor?.(true);
-      return true;
-    });
-    if (nudged) {
+    } else {
+      await selectCell(frame, "A1");
+      const current = await readFormulaBarValue(frame);
+      await writeFormulaBarValue(frame, current.endsWith(" ") ? `${current}x` : `${current} `);
       await settleFrame(frame, 300);
     }
   } else if (editor === "word" || editor === "slide") {
@@ -979,6 +976,7 @@ const SAVE_BUTTON =
 export async function triggerEditorSave(page: Page, editor: SampleFile["editor"]): Promise<void> {
   await ensureDocumentDirtyForSave(page, editor);
   const wasDirty = await isDocumentDirty(page);
+  const saveDoneBefore = await page.locator("body").getAttribute("data-save-done");
 
   const frame = getEditorFrame(page, editor);
   await frame.locator("body").click({ position: { x: 12, y: 12 }, force: true });
@@ -1001,7 +999,7 @@ export async function triggerEditorSave(page: Page, editor: SampleFile["editor"]
               return true;
             }
             const saveDone = await body.getAttribute("data-save-done");
-            return Boolean(saveDone) && (await body.getAttribute("data-saving")) !== "true";
+            return Boolean(saveDone && saveDone !== saveDoneBefore);
           },
           { timeout: 5_000, intervals: [100, 250, 500] },
         )

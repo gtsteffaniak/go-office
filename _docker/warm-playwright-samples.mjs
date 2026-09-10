@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const base = (process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:8080").replace(/\/$/, "");
+const demoBase = (process.env.PLAYWRIGHT_DEMO_BASE ?? "/demo").replace(/\/$/, "");
 const samplesDir = process.env.PLAYWRIGHT_SAMPLES_DIR ?? "/app/sample-files";
 const convertLimit = Math.max(1, Number(process.env.OFFICE_CONVERT_LIMIT ?? 4));
 
@@ -26,7 +27,7 @@ function listSamples() {
 }
 
 async function warmFile(relPath) {
-  const url = `${base}/office/demo/warm?file=${encodeURIComponent(relPath)}`;
+  const url = `${base}${demoBase}/warm?file=${encodeURIComponent(relPath)}`;
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) {
     const body = await res.text();

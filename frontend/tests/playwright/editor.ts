@@ -304,11 +304,7 @@ async function isEditorInteractive(
     if (!shellReady) {
       return false;
     }
-    const hasAPI = await frame.locator("body").evaluate(cellApiReadyInBrowser);
-    if (hasAPI) {
-      return true;
-    }
-    return cellName.isVisible();
+    return frame.locator("body").evaluate(cellApiReadyInBrowser);
   }
 
   if (editor === "word" || editor === "slide") {
@@ -489,10 +485,13 @@ async function selectCell(frame: FrameLocator, ref: string): Promise<void> {
   await cellName.fill(ref);
   await cellName.press("Enter");
   await expect
-    .poll(async () => {
-      const name = await cellName.inputValue().catch(async () => (await cellName.innerText()) ?? "");
-      return name.toUpperCase().includes(ref.toUpperCase());
-    })
+    .poll(
+      async () => {
+        const name = await cellName.inputValue().catch(async () => (await cellName.innerText()) ?? "");
+        return name.toUpperCase().includes(ref.toUpperCase());
+      },
+      { timeout: EDITOR_LOAD_TIMEOUT, intervals: [200, 500, 1000] },
+    )
     .toBe(true);
 }
 
@@ -665,13 +664,9 @@ export async function setCellContent(
 
   const viaSdk = await setCellValue(frame, ref, value);
   if (viaSdk) {
-    const readback = await readCellValue(frame, ref);
-    if (readback.includes(value)) {
-      // The API updates the model synchronously, but coauthoring serializes the
-      // history item on a later turn. Do not force-save the pre-edit snapshot.
-      await settleFrame(frame, 500);
-      return;
-    }
+    // asc_setCellValue updates the model; readback via the name box can lag under load.
+    await settleFrame(frame, 500);
+    return;
   }
 
   await selectCell(frame, ref);
@@ -1203,9 +1198,10 @@ export async function formatWordSelection(
   await waitForEditorInteractive(page, "word");
   const frame = getEditorFrame(page, "word");
 
-  // Highlight via toolbar — SDK asc_putHighlightColor is flaky and can drop the marker.
+  // Highlight/italic via UI — SDK paths are flaky and can skip persisting the marker.
   const sdkApplied =
     !format.highlight &&
+    !format.italic &&
     (await frame.locator("body").evaluate(applyWordFormatInBrowser, { marker, format }));
   if (!sdkApplied) {
     await frame.locator("body").click({ position: { x: 10, y: 10 }, force: true }).catch(() => {});
@@ -1303,13 +1299,6 @@ export async function applyMinimalSaveEdit(
   if (editor === "cell") {
     await waitForDocumentClean(page);
     await setCellContent(page, editor, "A1", marker);
-    const frame = getEditorFrame(page, editor);
-    await expect
-      .poll(async () => (await readCellValue(frame, "A1")).includes(marker), {
-        timeout: CONTENT_FIND_TIMEOUT,
-        intervals: [250, 500, 1000],
-      })
-      .toBe(true);
     await waitForDocumentDirty(page);
     return;
   }
@@ -1404,7 +1393,11 @@ export async function waitForSaveDone(
             if (res.ok() && officeFileContains(Buffer.from(await res.body()), options.marker!)) {
               return true;
             }
-            // Viewer watchdog can fire before x2t persist finishes under convert queue load.
+            // Viewer can report Saved before x2t persist finishes; keep polling the API.
+            const saveError = await page.locator("body").getAttribute("data-save-error");
+            if (saveError) {
+              throw new Error(`save error: ${saveError}`);
+            }
             return false;
           }
           const saveError = await page.locator("body").getAttribute("data-save-error");

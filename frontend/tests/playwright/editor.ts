@@ -603,6 +603,46 @@ async function setCellValue(frame: FrameLocator, ref: string, value: string): Pr
   return frame.locator("body").evaluate(setCellViaBrowser, { cellRef: ref, cellValue: value });
 }
 
+async function cellShowsValue(
+  page: Page,
+  frame: FrameLocator,
+  editor: SampleFile["editor"],
+  ref: string,
+  expected: string,
+): Promise<boolean> {
+  const file = new URL(page.url()).searchParams.get("file");
+  if (file && (file.endsWith(".csv") || file.endsWith(".tsv"))) {
+    const res = await page.request.get(`/api/office/demo/file/${encodeURIComponent(file)}`, {
+      headers: { "Cache-Control": "no-cache" },
+    });
+    if (res.ok() && csvCellValue(await res.text(), ref).includes(expected)) {
+      return true;
+    }
+  }
+  if (!(await isEditorInteractive(page, frame, editor))) {
+    return false;
+  }
+  const value = await readCellValue(frame, ref);
+  return value.includes(expected);
+}
+
+/** Poll until a spreadsheet cell shows expected text in the editor (or CSV on disk). */
+export async function waitForCellContent(
+  page: Page,
+  editor: SampleFile["editor"],
+  ref: string,
+  expected: string,
+  timeoutMs = EDITOR_LOAD_TIMEOUT,
+): Promise<void> {
+  const frame = getEditorFrame(page, editor);
+  await expect
+    .poll(() => cellShowsValue(page, frame, editor, ref, expected), {
+      timeout: timeoutMs,
+      intervals: [200, 500, 1000],
+    })
+    .toBe(true);
+}
+
 export async function assertCellContent(
   page: Page,
   editor: SampleFile["editor"],
@@ -610,27 +650,7 @@ export async function assertCellContent(
   expected: string,
 ): Promise<void> {
   await waitForEditorReady(page, editor);
-  const frame = getEditorFrame(page, editor);
-  const file = new URL(page.url()).searchParams.get("file");
-
-  await expect
-    .poll(
-      async () => {
-        if (file && (file.endsWith(".csv") || file.endsWith(".tsv"))) {
-          const res = await page.request.get(`/api/office/demo/file/${encodeURIComponent(file)}`);
-          if (res.ok() && csvCellValue(await res.text(), ref).includes(expected)) {
-            return true;
-          }
-        }
-        if (!(await isEditorInteractive(page, frame, editor))) {
-          return false;
-        }
-        const value = await readCellValue(frame, ref);
-        return value.includes(expected);
-      },
-      { timeout: CONTENT_FIND_TIMEOUT },
-    )
-    .toBe(true);
+  await waitForCellContent(page, editor, ref, expected, CONTENT_FIND_TIMEOUT);
 }
 
 export async function assertDocumentContains(
@@ -679,7 +699,7 @@ export async function setCellContent(
   if (apiReady) {
     const viaSdk = await setCellValue(frame, ref, value);
     if (viaSdk) {
-      // asc_setCellValue updates the model; readback via the name box can lag under load.
+      await commitCellEdit(frame);
       await settleFrame(frame, 500);
       return;
     }
@@ -687,7 +707,16 @@ export async function setCellContent(
 
   await selectCell(frame, ref);
   await writeFormulaBarValue(frame, value);
+  await commitCellEdit(frame);
   await settleFrame(frame, 500);
+}
+
+async function commitCellEdit(frame: FrameLocator): Promise<void> {
+  const cellName = frame.locator(CELL_NAME_INPUT).first();
+  if ((await cellName.count()) > 0) {
+    await cellName.click({ timeout: 3_000 }).catch(() => {});
+  }
+  await settleFrame(frame, 250);
 }
 
 async function findDocumentTextViaSdk(
@@ -1398,8 +1427,12 @@ export async function applyMinimalSaveEdit(
   marker = "PW_STABLE",
 ): Promise<void> {
   if (editor === "cell") {
-    await waitForDocumentClean(page);
+    await expect
+      .poll(async () => !(await isDocumentDirty(page)), { timeout: 8_000 })
+      .toBe(true)
+      .catch(() => {});
     await setCellContent(page, editor, "A1", marker);
+    await waitForCellContent(page, editor, "A1", marker);
     await waitForDocumentDirty(page);
     return;
   }
@@ -1414,7 +1447,9 @@ export async function fetchDemoFileBody(
   request: APIRequestContext,
   filePath: string,
 ): Promise<Buffer> {
-  const res = await request.get(`/api/office/demo/file/${encodeURIComponent(filePath)}`);
+  const res = await request.get(`/api/office/demo/file/${encodeURIComponent(filePath)}`, {
+    headers: { "Cache-Control": "no-cache" },
+  });
   expect(res.ok()).toBeTruthy();
   return Buffer.from(await res.body());
 }
@@ -1490,6 +1525,7 @@ export async function waitForSaveDone(
           if (requireMarker) {
             const res = await options.request!.get(
               `/api/office/demo/file/${encodeURIComponent(options.filePath!)}`,
+              { headers: { "Cache-Control": "no-cache" } },
             );
             if (res.ok() && officeFileContains(Buffer.from(await res.body()), options.marker!)) {
               return true;

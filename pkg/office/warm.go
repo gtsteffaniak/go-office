@@ -41,7 +41,7 @@ func (s *Server) EnsureEditorBin(ctx context.Context, docKey, sourcePath, ext st
 	if s.opts.Logger != nil {
 		s.opts.Logger.Debug("warm convert start", "key", docKey, "ext", ext)
 	}
-	err = conv.ToEditorBin(ctx, sourcePath, outDir)
+	err = conv.ToEditorBinLow(ctx, sourcePath, outDir)
 	if err != nil {
 		return err
 	}

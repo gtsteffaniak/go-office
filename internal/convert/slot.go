@@ -71,10 +71,7 @@ func newConvertAdmissionWithQueue(limit, maxWaiters int, queueWait time.Duration
 
 func (a *convertAdmission) run() {
 	for {
-		grant, ok := a.nextGrant()
-		if !ok {
-			return
-		}
+		grant := a.waitForGrant()
 		if grantIsCancelled(grant) {
 			continue
 		}
@@ -99,17 +96,34 @@ func (a *convertAdmission) run() {
 	}
 }
 
-func (a *convertAdmission) nextGrant() (slotGrant, bool) {
+// waitForGrant blocks until a waiter is queued, preferring hi over lo.
+func (a *convertAdmission) waitForGrant() slotGrant {
 	select {
 	case grant := <-a.hiIncoming:
-		return grant, true
+		return grant
 	default:
 	}
+	for {
+		select {
+		case grant := <-a.hiIncoming:
+			return grant
+		case grant := <-a.loIncoming:
+			select {
+			case hi := <-a.hiIncoming:
+				a.requeueLo(grant)
+				return hi
+			default:
+				return grant
+			}
+		}
+	}
+}
+
+func (a *convertAdmission) requeueLo(grant slotGrant) {
 	select {
-	case grant := <-a.hiIncoming:
-		return grant, true
-	case grant := <-a.loIncoming:
-		return grant, true
+	case a.loIncoming <- grant:
+	default:
+		go func(g slotGrant) { a.loIncoming <- g }(grant)
 	}
 }
 

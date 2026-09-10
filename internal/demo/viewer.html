@@ -237,7 +237,6 @@
     }
 
     function boot() {
-      warmDocument();
       if (!("serviceWorker" in navigator)) {
         loadEditor();
         return;

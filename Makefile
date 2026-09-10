@@ -183,15 +183,11 @@ endif
 
 fetch-assets-native:
 	@mkdir -p "$(BIN_DIR)" "$(OFFICE_ASSETS)"
-	@if [ -f "$(OFFICE_ASSETS)/.extracted" ] && [ -f "$(ALL_FONTS)" ] && [ -s "$(FONT_SELECTION)" ] && [ -f "$(X2T_BIN)" ]; then \
-		echo "==> Euro-Office assets already present in $(OFFICE_ASSETS)/"; \
-	else \
-		echo "==> Euro-Office assets → $(OFFICE_ASSETS)/"; \
-		$(GO) build -o "$(FETCH_ASSETS_BIN)" ./cmd/fetch-assets; \
-		$(FETCH_ASSETS_BIN) -out "$(OFFICE_ASSETS)"; \
-		test -f "$(ALL_FONTS)" || (echo "error: fetch-assets did not create $(ALL_FONTS)" && exit 1); \
-		test -s "$(FONT_SELECTION)" || (echo "error: fetch-assets did not create $(FONT_SELECTION)" && exit 1); \
-	fi
+	@echo "==> Euro-Office assets → $(OFFICE_ASSETS)/"
+	@$(GO) build -o "$(FETCH_ASSETS_BIN)" ./cmd/fetch-assets
+	@$(FETCH_ASSETS_BIN) -out "$(OFFICE_ASSETS)"
+	@test -f "$(ALL_FONTS)" || (echo "error: fetch-assets did not create $(ALL_FONTS)" && exit 1)
+	@test -s "$(FONT_SELECTION)" || (echo "error: fetch-assets did not create $(FONT_SELECTION)" && exit 1)
 
 ensure-assets: fetch-assets check-assets
 

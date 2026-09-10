@@ -64,8 +64,10 @@ func (o *Opener) Open(ctx context.Context, origin, basePath, docKey string, cmd 
 	}
 
 	outDir := filepath.Join(o.CacheDir, docKey)
-	// Drop stale coauthoring blobs from a prior session; authChanges is always empty on connect.
-	clearChanges(outDir)
+	// Drop stale coauthoring blobs from a prior session unless edits are still pending.
+	if !hasPendingChanges(outDir) {
+		clearChanges(outDir)
+	}
 
 	if packets, ok, err := o.openFromCache(cmd, origin, basePath, docKey, ext, outDir); ok || err != nil {
 		if err != nil {

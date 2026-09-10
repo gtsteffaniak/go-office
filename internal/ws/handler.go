@@ -179,14 +179,19 @@ func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey st
 		for _, packet := range parsePostPackets(string(body)) {
 			switch {
 			case strings.HasPrefix(packet, "40"):
-				sess.onConnect(connectAuthData(packet))
-				if req, ok := parseAuthPacket(packet); ok {
+				authData := connectAuthData(packet)
+				req, hasAuth := parseAuthPacket(packet)
+				if hasAuth {
 					if err := verifyAuthJWT(h.JWTSecret, req.Token, docKey); err != nil {
 						if h.Logger != nil {
 							h.Logger.Warn("coauthoring auth jwt rejected", "key", docKey, "err", err)
 						}
+						sess.onConnect(nil)
 						continue
 					}
+				}
+				sess.onConnect(authData)
+				if hasAuth {
 					h.registerDocumentSession(docKey, req)
 					if sess.needsDocumentOpen(req) {
 						sess.startOpen(h.documentOpener(), req, CoauthoringOrigin(h.PublicOrigin, r))

@@ -119,6 +119,7 @@ function setCellViaBrowser(arg: { cellRef: string; cellValue: string }): boolean
   api.asc_selectRange(arg.cellRef);
   if (typeof api.asc_setCellValue === "function") {
     api.asc_setCellValue(arg.cellValue);
+    api.asc_closeCellEditor?.(true);
     return true;
   }
   if (typeof api.asc_insertText === "function") {
@@ -363,11 +364,27 @@ export async function waitForEditorReady(
   page: Page,
   editor: SampleFile["editor"],
 ): Promise<void> {
-  await waitForEditorShell(page, editor);
   const frame = getEditorFrame(page, editor);
-  await expect
-    .poll(async () => isEditorShellReady(frame, editor), { timeout: EDITOR_LOAD_TIMEOUT })
-    .toBe(true);
+  try {
+    await expect
+      .poll(
+        async () => {
+          const status = (await page.locator("#status").textContent()) ?? "";
+          if (status.startsWith("Error:")) {
+            throw new Error(`viewer status: ${status}`);
+          }
+          const shell = frame.locator(EDITOR_SHELL).first();
+          if (!(await shell.isVisible().catch(() => false))) {
+            return false;
+          }
+          return isEditorShellReady(frame, editor);
+        },
+        { timeout: EDITOR_LOAD_TIMEOUT },
+      )
+      .toBe(true);
+  } catch (err) {
+    throw new Error(`${String(err)}\nwitness:\n${await editorWitness(page)}`);
+  }
 }
 
 /** Wait until DocsAPI reports the document is ready to edit. */
@@ -614,12 +631,16 @@ export async function setCellContent(
   if (viaSdk) {
     const readback = await readCellValue(frame, ref);
     if (readback.includes(value)) {
+      // The API updates the model synchronously, but coauthoring serializes the
+      // history item on a later turn. Do not force-save the pre-edit snapshot.
+      await settleFrame(frame, 500);
       return;
     }
   }
 
   await selectCell(frame, ref);
   await writeFormulaBarValue(frame, value);
+  await settleFrame(frame, 500);
 }
 
 async function findDocumentTextViaSdk(
@@ -851,7 +872,9 @@ export async function triggerEditorSave(page: Page, editor: SampleFile["editor"]
 
   const saveBtn = frame.locator(SAVE_BUTTON).first();
   if ((await saveBtn.count()) > 0) {
-    await saveBtn.click({ force: true, timeout: 5_000 });
+    // The SDK occasionally leaves a pending navigation task after dispatching
+    // the save click. The keyboard fallback below must still be sent.
+    await saveBtn.click({ force: true, timeout: 5_000, noWaitAfter: true }).catch(() => {});
   }
 
   await frame.locator("body").press("Control+s");

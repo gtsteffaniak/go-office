@@ -13,6 +13,7 @@ import (
 
 	"github.com/quantumx-apps/go-office/internal/changes"
 	"github.com/quantumx-apps/go-office/internal/fsutil"
+	"golang.org/x/sync/singleflight"
 )
 
 // Options configures the x2t subprocess converter.
@@ -37,6 +38,7 @@ type Converter struct {
 	fontSelection []byte // converter/bin/font_selection.bin frozen at startup
 	admission     *convertAdmission
 	runner        X2TRunner
+	editorBinSF   singleflight.Group
 }
 
 // New creates a converter. Returns an error when x2t is missing.
@@ -103,15 +105,28 @@ func (c *Converter) acquireConvertSlotLow(ctx context.Context) (func(), error) {
 
 // ToEditorBin converts sourcePath into outDir/Editor.bin.
 func (c *Converter) ToEditorBin(ctx context.Context, sourcePath, outDir string) error {
+	return c.editorBinConvert(ctx, sourcePath, outDir, false)
+}
+
+// ToEditorBinLow is like ToEditorBin but uses low-priority admission (demo warm).
+func (c *Converter) ToEditorBinLow(ctx context.Context, sourcePath, outDir string) error {
+	return c.editorBinConvert(ctx, sourcePath, outDir, true)
+}
+
+func (c *Converter) editorBinConvert(ctx context.Context, sourcePath, outDir string, lowPriority bool) error {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
-	return withCacheDirLock(outDir, func() error {
-		return c.toEditorBin(ctx, sourcePath, outDir)
+	_, err, _ := c.editorBinSF.Do(outDir, func() (interface{}, error) {
+		err := withCacheDirLock(outDir, func() error {
+			return c.toEditorBin(ctx, sourcePath, outDir, lowPriority)
+		})
+		return nil, err
 	})
+	return err
 }
 
-func (c *Converter) toEditorBin(ctx context.Context, sourcePath, outDir string) error {
+func (c *Converter) toEditorBin(ctx context.Context, sourcePath, outDir string, lowPriority bool) error {
 	outFile := filepath.Join(outDir, "Editor.bin")
 	partFile := filepath.Join(outDir, "Editor.bin.part")
 	convertPath := sourcePath
@@ -176,6 +191,9 @@ func (c *Converter) toEditorBin(ctx context.Context, sourcePath, outDir string) 
 		}
 	}
 	srcHash = editorImportSourceHash(srcHash, ext)
+	if editorBinReusable(outDir, srcHash) {
+		return ensureDocumentFonts(c, outDir)
+	}
 	if openNeedsDocxPrelude(ext) {
 		var docxFile *os.File
 		docxFile, err = os.CreateTemp("", "go-office-open-*.docx")
@@ -192,14 +210,16 @@ func (c *Converter) toEditorBin(ctx context.Context, sourcePath, outDir string) 
 		convertPath = docxPath
 		sourceExt = ".docx"
 	}
-	if editorBinReusable(outDir, srcHash) {
-		return ensureDocumentFonts(c, outDir)
-	}
 	_ = os.Remove(outFile)
 	_ = os.Remove(partFile)
 	_ = os.Remove(sourceHashPath(outDir))
 
-	release, err := c.acquireConvertSlot(ctx)
+	var release func()
+	if lowPriority {
+		release, err = c.acquireConvertSlotLow(ctx)
+	} else {
+		release, err = c.acquireConvertSlot(ctx)
+	}
 	if err != nil {
 		return err
 	}

@@ -82,7 +82,7 @@ func TestSessionReconnectSkipsReopen(t *testing.T) {
 	}
 }
 
-func TestSessionReconnectWithoutSessionIDSkipsReopen(t *testing.T) {
+func TestSessionReconnectWithoutSessionIDReopens(t *testing.T) {
 	ResetSessionsForTest()
 	opener := &countingOpener{}
 	sess := getSession(defaultSessionID, "doc-key", ParseBuild("9.3.4"), "")
@@ -102,10 +102,10 @@ func TestSessionReconnectWithoutSessionIDSkipsReopen(t *testing.T) {
 	raw := connectAuthData(`40{"data":{"type":"auth","docid":"doc-key","user":{"id":"demo-user","username":"Demo"},"openCmd":{"c":"open","id":"doc-key","format":"rtf","url":"http://localhost/f.rtf"}}}`)
 	sess.onConnect(raw)
 	sess.startOpen(opener, authRequest{Open: req.Open}, "http://localhost")
-	time.Sleep(20 * time.Millisecond)
+	waitForOpenComplete(t, opener, 2)
 
-	if opener.callCount() != 1 {
-		t.Fatalf("reconnect without sessionId should not reopen, calls = %d", opener.callCount())
+	if opener.callCount() != 2 {
+		t.Fatalf("connect without sessionId must reopen, calls = %d", opener.callCount())
 	}
 }
 

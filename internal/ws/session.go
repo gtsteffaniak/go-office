@@ -28,6 +28,8 @@ type session struct {
 	authSent       bool
 	openStarted    bool
 	documentOpened bool
+	openGen        uint64
+	openCancel     context.CancelFunc
 
 	sessionID string
 	indexUser int
@@ -94,15 +96,6 @@ func (s *session) setEioSID(sid string) {
 	s.mu.Unlock()
 }
 
-func (s *session) transportSID() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.eioSID != "" {
-		return s.eioSID
-	}
-	return defaultSessionID
-}
-
 func (s *session) applyBuildBase(build BuildInfo, basePath string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -125,14 +118,29 @@ func ClearAllSessions() {
 	coauthoringSessions.clear()
 }
 
-// ClearDocumentSession drops the default demo coauthoring session for a document key.
+// ClearDocumentSession drops all coauthoring sessions for a document key.
 // Call when a new editor page loads so polling reconnect is not confused with reload.
 func ClearDocumentSession(docKey string) {
 	if docKey == "" {
 		return
 	}
 	bumpDocumentConfigEpoch(docKey)
-	coauthoringSessions.delete(sessionKey(defaultSessionID, docKey))
+	coauthoringSessions.deleteAllForDoc(docKey)
+}
+
+func (r *sessionRegistry) deleteAllForDoc(docKey string) {
+	r.mu.Lock()
+	var cancelled []*session
+	for key, s := range r.sessions {
+		if s.docKey == docKey {
+			cancelled = append(cancelled, s)
+			delete(r.sessions, key)
+		}
+	}
+	r.mu.Unlock()
+	for _, s := range cancelled {
+		s.cancelOpen()
+	}
 }
 
 func (r *sessionRegistry) delete(key string) {
@@ -237,12 +245,10 @@ func (s *session) isReconnectAuth(req authRequest) bool {
 	if !s.documentOpened || s.sessionID == "" {
 		return false
 	}
-	if req.SessionID != "" {
-		return req.SessionID == s.sessionID
+	if req.SessionID == "" {
+		return false
 	}
-	// Engine.IO packet 40 on polling reconnect often omits sessionId; the editor
-	// still holds the open document and resends sessionId on the follow-up auth.
-	return true
+	return req.SessionID == s.sessionID
 }
 
 func (s *session) needsDocumentOpen(req authRequest) bool {
@@ -284,12 +290,15 @@ func (s *session) onConnect(authData []byte) {
 		}
 	}
 
-	// Engine.IO packet 40 is a new transport session. The demo client always
-	// reuses sid=go-office, so a CSV reload would otherwise skip auth and hang.
-	// When the client reconnects with the same coauthoring sessionId, resend auth
-	// but do not re-open the document — the editor still holds in-memory state.
+	// Engine.IO packet 40 is a new transport session. When the client reconnects
+	// with the same coauthoring sessionId, resend auth but do not re-open the
+	// document — the editor still holds in-memory state.
 	s.authSent = false
 	if !reconnect {
+		if s.openCancel != nil {
+			s.openCancel()
+			s.openCancel = nil
+		}
 		s.documentOpened = false
 		s.openStarted = false
 	}
@@ -356,6 +365,12 @@ func (s *session) startOpen(opener DocumentOpener, req authRequest, origin strin
 		return
 	}
 	s.openStarted = true
+	s.openGen++
+	gen := s.openGen
+	if s.openCancel != nil {
+		s.openCancel()
+		s.openCancel = nil
+	}
 	docKey := s.docKey
 	basePath := s.basePath
 	open := *req.Open
@@ -365,15 +380,31 @@ func (s *session) startOpen(opener DocumentOpener, req authRequest, origin strin
 	go func() {
 		defer docOpenInflight.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-		defer cancel()
+		s.mu.Lock()
+		if s.openGen == gen {
+			s.openCancel = cancel
+		}
+		s.mu.Unlock()
+		defer func() {
+			cancel()
+			s.mu.Lock()
+			if s.openGen == gen {
+				s.openCancel = nil
+				s.openStarted = false
+			}
+			s.mu.Unlock()
+		}()
 		packets, err := opener.Open(ctx, origin, basePath, docKey, open)
 		if err != nil {
-			s.mu.Lock()
-			s.openStarted = false
-			s.mu.Unlock()
+			if ctx.Err() != nil {
+				return
+			}
 			if pkt, perr := documentOpenPacket(open.Command, "error", err.Error()); perr == nil {
 				s.enqueue(pkt)
 			}
+			return
+		}
+		if ctx.Err() != nil {
 			return
 		}
 		if len(packets) > 0 {
@@ -382,10 +413,18 @@ func (s *session) startOpen(opener DocumentOpener, req authRequest, origin strin
 			s.documentOpened = true
 			s.mu.Unlock()
 		}
-		s.mu.Lock()
-		s.openStarted = false
-		s.mu.Unlock()
 	}()
+}
+
+func (s *session) cancelOpen() {
+	s.mu.Lock()
+	cancel := s.openCancel
+	s.openCancel = nil
+	s.openStarted = false
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 func (s *session) signalWaitersLocked() {

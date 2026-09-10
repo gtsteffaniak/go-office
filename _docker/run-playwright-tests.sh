@@ -65,12 +65,16 @@ done
 echo "go-office healthy after ${attempt} attempt(s)" >&2
 
 cd /app/frontend
+status=0
 if [ -n "${PLAYWRIGHT_PROJECT:-}" ]; then
-  npx playwright test --project="$PLAYWRIGHT_PROJECT" --no-deps
+  if ! npx playwright test --project="$PLAYWRIGHT_PROJECT" --no-deps; then
+    status=1
+  fi
 else
-  npx playwright test
+  if ! npx playwright test; then
+    status=1
+  fi
 fi
-status=$?
 
 if [ "$status" -ne 0 ]; then
   dump_log

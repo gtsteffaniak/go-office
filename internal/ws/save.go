@@ -541,6 +541,27 @@ func (h *Handler) handleForceSaveStart(sess *session, docKey string, r *http.Req
 	h.Scheduler.armForceSave(docKey, origin, onDone)
 }
 
+func clientLogSeverity(text, level string) string {
+	if strings.Contains(text, "Write_ToBinary2") ||
+		strings.Contains(text, "Uncaught TypeError") ||
+		strings.Contains(text, "Uncaught Error") {
+		return "error"
+	}
+	if level == "error" || level == "warn" {
+		return "warn"
+	}
+	if strings.Contains(text, "changesError") &&
+		strings.Contains(text, "_CheckCanNotAddChanges") &&
+		!strings.Contains(text, "Uncaught") {
+		// sdkjs load-path diagnostic only; open continues unless paired with Uncaught*.
+		return "debug"
+	}
+	if strings.Contains(text, "Error") {
+		return "warn"
+	}
+	return "debug"
+}
+
 func (h *Handler) logClientMessage(docKey string, msg map[string]any) {
 	if h.Logger == nil {
 		return
@@ -550,20 +571,13 @@ func (h *Handler) logClientMessage(docKey string, msg map[string]any) {
 		return
 	}
 	level, _ := msg["level"].(string)
-	switch level {
+	switch clientLogSeverity(text, level) {
 	case "error":
-		h.Logger.Warn("editor clientLog", "key", docKey, "level", level, "msg", text)
+		h.Logger.Warn("editor clientLog", "key", docKey, "level", level, "severity", "error", "msg", text)
 	case "warn":
-		h.Logger.Warn("editor clientLog", "key", docKey, "level", level, "msg", text)
+		h.Logger.Warn("editor clientLog", "key", docKey, "level", level, "severity", "warn", "msg", text)
 	default:
-		if strings.Contains(text, "changesError") {
-			// Non-fatal sdkjs diagnostic during binary document load; not a save failure.
-			h.Logger.Debug("editor clientLog", "key", docKey, "level", level, "msg", text)
-		} else if strings.Contains(text, "Error") {
-			h.Logger.Warn("editor clientLog", "key", docKey, "level", level, "msg", text)
-		} else {
-			h.Logger.Debug("editor clientLog", "key", docKey, "level", level, "msg", text)
-		}
+		h.Logger.Debug("editor clientLog", "key", docKey, "level", level, "severity", "debug", "msg", text)
 	}
 }
 

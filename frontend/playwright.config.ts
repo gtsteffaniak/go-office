@@ -22,7 +22,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: 0,
   workers,
-  reporter: "line",
+  reporter: process.env.CI ? [["list"], ["line"]] : "line",
   grep: process.env.PLAYWRIGHT_GREP ? new RegExp(process.env.PLAYWRIGHT_GREP) : undefined,
   use: sharedUse,
   projects: [

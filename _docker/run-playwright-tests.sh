@@ -13,9 +13,12 @@ cleanup() {
 trap cleanup EXIT
 
 dump_log() {
-  echo "=== go-office server log ===" >&2
+  echo "=== go-office server log (errors and editor clientLog) ===" >&2
   if [ -f "$LOG" ]; then
-    cat "$LOG" >&2 || true
+    grep -E 'clientLog|severity=error|severity=warn|\[ERROR|\[WARN|document open|warm failed|flush|save failed' "$LOG" \
+      | tail -200 >&2 || true
+    echo "=== go-office server log (full tail) ===" >&2
+    tail -400 "$LOG" >&2 || true
   else
     echo "(no log file at $LOG)" >&2
   fi

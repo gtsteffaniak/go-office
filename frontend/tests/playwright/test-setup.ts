@@ -98,16 +98,36 @@ export function setupErrorTracking(page: Page) {
 
 export const test = base.extend<Fixtures>({
   collectPageErrors: [
-    async ({ page }, use) => {
-      const errors: string[] = [];
-      page.on("pageerror", (err) => errors.push(err.message));
+    async ({ page }, use, testInfo) => {
+      const pageErrors: string[] = [];
+      const consoleErrors: string[] = [];
+      page.on("pageerror", (err) => {
+        pageErrors.push(err.stack ?? err.message);
+      });
       page.on("console", (msg) => {
-        if (msg.type() === "error" && !isHarmlessConsoleError(msg.text())) {
-          errors.push(msg.text());
+        if (msg.type() !== "error" || isHarmlessConsoleError(msg.text())) {
+          return;
         }
+        consoleErrors.push(msg.text());
       });
       await use();
-      const fatal = errors.filter((e) => /fonts are not loaded/i.test(e));
+      if (testInfo.status !== testInfo.expectedStatus) {
+        if (pageErrors.length > 0) {
+          console.error("\n=== browser page errors ===");
+          pageErrors.forEach((err, i) => {
+            console.error(`\n[pageerror ${i + 1}]\n${err}\n---`);
+          });
+        }
+        if (consoleErrors.length > 0) {
+          console.error("\n=== browser console errors ===");
+          consoleErrors.forEach((err, i) => {
+            console.error(`\n[console.error ${i + 1}]\n${err}\n---`);
+          });
+        }
+      }
+      const fatal = [...pageErrors, ...consoleErrors].filter((e) =>
+        /fonts are not loaded/i.test(e),
+      );
       expect(fatal, `browser errors: ${fatal.join("; ")}`).toHaveLength(0);
     },
     { auto: true },

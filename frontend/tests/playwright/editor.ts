@@ -380,7 +380,7 @@ export async function waitForEditorReady(
       )
       .toBe(true);
   } catch (err) {
-    throw new Error(`${String(err)}\nwitness:\n${await editorWitness(page)}`);
+    throw new Error(`${String(err)}\nwitness:\n${await editorWitness(page, editor)}`);
   }
 }
 
@@ -1312,10 +1312,13 @@ export type SaveDoneOptions = {
   marker?: string;
 };
 
-export async function editorWitness(page: Page): Promise<string> {
+export async function editorWitness(
+  page: Page,
+  editor?: SampleFile["editor"],
+): Promise<string> {
   const body = page.locator("body");
   const status = (await page.locator("#status").textContent()) ?? "";
-  const attrs = {
+  const witness: Record<string, unknown> = {
     documentReady: await body.getAttribute("data-document-ready"),
     dirty: await body.getAttribute("data-dirty"),
     saveDone: await body.getAttribute("data-save-done"),
@@ -1324,7 +1327,21 @@ export async function editorWitness(page: Page): Promise<string> {
     status,
     statusClass: (await page.locator("#status").getAttribute("class")) ?? "",
   };
-  return JSON.stringify(attrs, null, 2);
+  if (editor) {
+    try {
+      const frame = getEditorFrame(page, editor);
+      witness.iframeSrc = await page
+        .locator(`iframe[src*="/${EDITOR_APP[editor]}/"]`)
+        .first()
+        .getAttribute("src");
+      witness.shellReady = await isEditorShellReady(frame, editor);
+      witness.loadMaskBlocking = await isLoadMaskBlocking(frame);
+      witness.interactive = await isEditorInteractive(page, frame, editor);
+    } catch (err) {
+      witness.frameProbeError = String(err);
+    }
+  }
+  return JSON.stringify(witness, null, 2);
 }
 
 export async function waitForSaveDone(

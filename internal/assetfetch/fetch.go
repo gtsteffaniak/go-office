@@ -60,6 +60,9 @@ func fetchLocked(ctx context.Context, opts Options, version string) error {
 		if err := ensureConverterExecutables(filepath.Join(opts.OutDir, "converter", "bin")); err != nil {
 			return err
 		}
+		if err := patchSDKJS(opts.OutDir); err != nil {
+			return err
+		}
 		return fixDoctRendererConfig(filepath.Join(opts.OutDir, "converter", "bin"))
 	}
 	if needsConverterBin(opts.OutDir) {
@@ -141,6 +144,9 @@ func fetchLocked(ctx context.Context, opts Options, version string) error {
 	}
 
 	if err := GenerateAllFonts(opts.OutDir); err != nil {
+		return err
+	}
+	if err := patchSDKJS(opts.OutDir); err != nil {
 		return err
 	}
 

@@ -172,6 +172,7 @@
             config.events = {
               onDocumentReady: function () {
                 document.body.setAttribute("data-document-ready", "true");
+                setStatus("Document ready", "ok");
                 fetchDemoFileBytes()
                   .then(function (bytes) {
                     lastSavedFileBytes = bytes;
@@ -226,7 +227,7 @@
               },
             };
             window.docEditor = new DocsAPI.DocEditor("editor", config);
-            setStatus("Editor ready");
+            setStatus("Loading document…");
           })
           .catch(function (err) {
             setStatus("Error: " + err.message, "error");

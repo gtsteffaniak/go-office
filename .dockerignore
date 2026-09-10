@@ -3,6 +3,7 @@
 .github
 bin/*
 !bin/go-office
+!bin/playwright-limits
 
 # Not needed for the demo image build (Playwright Dockerfiles copy selectively)
 frontend/*

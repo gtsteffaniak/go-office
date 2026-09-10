@@ -759,6 +759,13 @@ async function isDocumentDirty(page: Page): Promise<boolean> {
   return (await page.locator("body").getAttribute("data-dirty")) !== null;
 }
 
+/** Wait until the demo viewer has no pending unsaved edits. */
+export async function waitForDocumentClean(page: Page, timeoutMs = 15_000): Promise<void> {
+  await expect
+    .poll(async () => !(await isDocumentDirty(page)), { timeout: timeoutMs })
+    .toBe(true);
+}
+
 /** Wait until the demo viewer marks the document as having unsaved edits. */
 export async function waitForDocumentDirty(page: Page, timeoutMs = 10_000): Promise<void> {
   await expect
@@ -1255,7 +1262,15 @@ export async function applyMinimalSaveEdit(
   marker = "PW_STABLE",
 ): Promise<void> {
   if (editor === "cell") {
+    await waitForDocumentClean(page);
     await setCellContent(page, editor, "A1", marker);
+    const frame = getEditorFrame(page, editor);
+    await expect
+      .poll(async () => (await readCellValue(frame, "A1")).includes(marker), {
+        timeout: CONTENT_FIND_TIMEOUT,
+        intervals: [250, 500, 1000],
+      })
+      .toBe(true);
     await waitForDocumentDirty(page);
     return;
   }

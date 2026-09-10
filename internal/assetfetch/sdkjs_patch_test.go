@@ -31,20 +31,19 @@ func TestPatchSDKJSDisablesCustomXMLManagerHistory(t *testing.T) {
 		t.Fatal("CustomXmlManager constructor was not moved outside history")
 	}
 
-	// Asset checks run on every build, so the patch must be idempotent.
 	if err := patchSDKJS(root); err != nil {
 		t.Fatalf("second patch: %v", err)
 	}
 }
 
-func TestPatchSDKJSDisablesWordMetadataInitializationHistory(t *testing.T) {
+func TestPatchSDKJSWrapsWordInitEditorInNoHistory(t *testing.T) {
 	root := t.TempDir()
 	wordDir := filepath.Join(root, "sdkjs", "word")
 	if err := os.MkdirAll(wordDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(wordDir, "sdk-all.js")
-	input := append([]byte("before,"), wordMetadataHistoryBug...)
+	path := filepath.Join(wordDir, "sdk-all-min.js")
+	input := append([]byte("before,"), wordInitEditorBug...)
 	input = append(input, []byte(",after")...)
 	if err := os.WriteFile(path, input, 0o644); err != nil {
 		t.Fatal(err)
@@ -57,11 +56,36 @@ func TestPatchSDKJSDisablesWordMetadataInitializationHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(got, wordMetadataHistoryFix) {
-		t.Fatal("Word metadata constructors were not moved outside history")
+	if !bytes.Contains(got, wordInitEditorFix) {
+		t.Fatal("Word InitEditor was not wrapped in ExecuteNoHistory")
 	}
 	if err := patchSDKJS(root); err != nil {
 		t.Fatalf("second patch: %v", err)
+	}
+}
+
+func TestPatchSDKJSWrapsSlideInitEditorInNoHistory(t *testing.T) {
+	root := t.TempDir()
+	slideDir := filepath.Join(root, "sdkjs", "slide")
+	if err := os.MkdirAll(slideDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(slideDir, "sdk-all-min.js")
+	input := append([]byte("before,"), slideInitEditorBug...)
+	input = append(input, []byte(",after")...)
+	if err := os.WriteFile(path, input, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := patchSDKJS(root); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(got, slideInitEditorFix) {
+		t.Fatal("Slide InitEditor was not wrapped in ExecuteNoHistory")
 	}
 }
 

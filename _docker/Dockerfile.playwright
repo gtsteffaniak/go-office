@@ -13,15 +13,16 @@ LABEL org.opencontainers.image.source="https://github.com/quantumx-apps/go-offic
       org.opencontainers.image.licenses="AGPL-3.0"
 
 COPY bin/go-office ./go-office
+COPY bin/playwright-limits ./bin/playwright-limits
 COPY assets/ ./assets/
 COPY sample-files/ ./sample-files/
 
-RUN chmod +x /app/go-office /app/assets/converter/bin/* 2>/dev/null || true
+RUN chmod +x /app/go-office /app/bin/playwright-limits /app/assets/converter/bin/* 2>/dev/null || true
 
 ENV OFFICE_ASSETS=/app/assets \
     OFFICE_DEBUG_LOGGING=1 \
     OFFICE_POLL_HOLD=0 \
-    OFFICE_CONVERT_LIMIT=6 \
+    OFFICE_CONVERT_LIMIT=4 \
     OFFICE_SAVE_DELAY=500ms \
     PLAYWRIGHT_BASE_URL=http://127.0.0.1:8080 \
     PLAYWRIGHT_STRICT=1
@@ -49,9 +50,10 @@ ENV PLAYWRIGHT_PROJECT=${PLAYWRIGHT_PROJECT}
 
 WORKDIR /app
 COPY bin/go-office ./go-office
+COPY bin/playwright-limits ./bin/playwright-limits
 COPY assets/ ./assets/
 COPY sample-files/ ./sample-files/
-RUN chmod +x /app/go-office /app/assets/converter/bin/* 2>/dev/null || true
+RUN chmod +x /app/go-office /app/bin/playwright-limits /app/assets/converter/bin/* 2>/dev/null || true
 
 WORKDIR /app/frontend
 COPY frontend/playwright.config.ts ./
@@ -62,7 +64,7 @@ RUN chmod +x /usr/local/bin/run-playwright-tests.sh
 ENV OFFICE_ASSETS=/app/assets \
     OFFICE_DEBUG_LOGGING=1 \
     OFFICE_POLL_HOLD=0 \
-    OFFICE_CONVERT_LIMIT=6 \
+    OFFICE_CONVERT_LIMIT=4 \
     OFFICE_SAVE_DELAY=500ms \
     PLAYWRIGHT_BASE_URL=http://127.0.0.1:8080 \
     PLAYWRIGHT_SAVE_DONE_TIMEOUT=45000 \

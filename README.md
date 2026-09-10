@@ -153,6 +153,31 @@ make check-sample-matrix
 make test-playwright
 ```
 
+## Concurrency and Playwright CI
+
+Playwright E2E runs up to ten Chromium workers and several concurrent `x2t` conversions. On constrained hosts, oversubscribing CPU or memory causes editor initialization failures, save races, and OOM kills.
+
+Measured x2t RSS on Euro-Office 9.3.4 sample files (Linux, `go test -run TestMeasureX2TMemoryProfile ./internal/convert/`):
+
+| Workload | Peak RSS |
+|----------|----------|
+| Single forward open (doc/docx/xlsx/pptx) | ~87–96 MiB |
+| Six parallel forward opens | ~319 MiB total (~53 MiB per active slot) |
+
+CI and Docker Playwright derive limits from cgroup/host memory and this profile via `bin/playwright-limits`:
+
+- `PLAYWRIGHT_WORKERS` — Chromium parallelism (max 10 on large runners)
+- `OFFICE_CONVERT_LIMIT` — concurrent x2t subprocess cap (max 4 for Playwright; adaptive below that on small runners)
+
+Re-measure after upgrading Euro-Office or changing sample files:
+
+```bash
+go test -run TestMeasureX2TMemoryProfile -v ./internal/convert/
+# optional: X2T_MEMORY_PROFILE_OUT=/tmp/x2t-profile.json go test ...
+```
+
+Update `internal/runlimit/x2t_profile.go` when the benchmark output changes materially.
+
 ## Layout
 
 | Path | Purpose |

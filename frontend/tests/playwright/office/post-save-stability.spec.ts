@@ -1,5 +1,6 @@
 import { test, expect } from "../test-setup";
 import {
+  warmDemoFile,
   waitForEditorReady,
   waitForEditorInteractive,
   applyMinimalSaveEdit,
@@ -17,10 +18,11 @@ const STABLE_MS = Number(process.env.POST_SAVE_STABLE_MS ?? 10_000);
 
 const STABLE_SAMPLES = samplesForTier(3).filter((s) => s.editor !== "pdf" && sampleExists(s.path));
 for (const sample of STABLE_SAMPLES) {
-  test(`post-save stable: ${sample.path}`, async ({ page }, testInfo) => {
+  test(`post-save stable: ${sample.path}`, async ({ page, request }, testInfo) => {
     const marker = `PW_STABLE_${testInfo.testId.slice(-6)}`;
     const file = forkSample(sample.path, testInfo);
 
+    await warmDemoFile(request, file);
     await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
     await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
     await waitForEditorReady(page, sample.editor);
@@ -39,6 +41,7 @@ test("post-save rapid double save: sample.docx", async ({ page, request }, testI
   const markerA = `PW_RAPID_A_${testInfo.testId.slice(-4)}`;
   const markerB = `PW_RAPID_B_${testInfo.testId.slice(-4)}`;
 
+  await warmDemoFile(request, file);
   await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
   await waitForEditorReady(page, "word");

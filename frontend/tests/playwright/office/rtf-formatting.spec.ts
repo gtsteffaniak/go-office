@@ -1,5 +1,6 @@
 import { test, expect } from "../test-setup";
 import {
+  warmDemoFile,
   waitForEditorReady,
   waitForEditorInteractive,
   insertSaveMarker,
@@ -19,6 +20,7 @@ test("rtf bold persists", async ({ page, request }, testInfo) => {
   const marker = "PW_RTF_BOLD_MARKER";
   const file = forkSample(RTF_SOURCE, testInfo);
 
+  await warmDemoFile(request, file);
   await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
   await waitForEditorReady(page, "word");
@@ -36,6 +38,7 @@ test("rtf italic persists", async ({ page, request }, testInfo) => {
   const marker = "PW_RTF_ITALIC_MARKER";
   const file = forkSample(RTF_SOURCE, testInfo);
 
+  await warmDemoFile(request, file);
   await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
   await waitForEditorReady(page, "word");
@@ -53,6 +56,7 @@ test("rtf highlight persists", async ({ page, request }, testInfo) => {
   const marker = "PW_RTF_HIGHLIGHT_MARKER";
   const file = forkSample(RTF_SOURCE, testInfo);
 
+  await warmDemoFile(request, file);
   await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
   await waitForEditorReady(page, "word");

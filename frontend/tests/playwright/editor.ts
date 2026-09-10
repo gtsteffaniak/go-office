@@ -260,21 +260,30 @@ async function isEditorShellReady(
   frame: FrameLocator,
   editor: SampleFile["editor"],
 ): Promise<boolean> {
-  if (editor === "pdf") {
-    return frame.locator("#id_view, #id_main").evaluateAll((nodes) =>
-      nodes.some((node) => {
-        const rect = node.getBoundingClientRect();
-        return rect.width > 50 && rect.height > 50;
-      }),
-    );
-  }
+  const probeTimeout = 3_000;
+  try {
+    if (editor === "pdf") {
+      return await frame.locator("#id_view, #id_main").evaluateAll(
+        (nodes) =>
+          nodes.some((node) => {
+            const rect = node.getBoundingClientRect();
+            return rect.width > 50 && rect.height > 50;
+          }),
+        { timeout: probeTimeout },
+      );
+    }
 
-  return frame.locator(EDITOR_SHELL).evaluateAll((nodes) =>
-    nodes.some((node) => {
-      const rect = node.getBoundingClientRect();
-      return rect.width > 50 && rect.height > 50;
-    }),
-  );
+    return await frame.locator(EDITOR_SHELL).evaluateAll(
+      (nodes) =>
+        nodes.some((node) => {
+          const rect = node.getBoundingClientRect();
+          return rect.width > 50 && rect.height > 50;
+        }),
+      { timeout: probeTimeout },
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function isEditorInteractive(
@@ -366,6 +375,17 @@ export async function waitForDemoWarm(page: Page, timeoutMs = DEMO_WARM_TIMEOUT)
   );
 }
 
+/** Block until x2t has produced Editor.bin for file (use before goto for forked save paths). */
+export async function warmDemoFile(
+  request: APIRequestContext,
+  filePath: string,
+): Promise<void> {
+  const warm = await request.get(`/demo/warm?file=${encodeURIComponent(filePath)}`);
+  if (!warm.ok()) {
+    throw new Error(`warm ${filePath}: HTTP ${warm.status()} ${await warm.text()}`);
+  }
+}
+
 /** Editor iframe mounted and document is ready to use (open-format tests). */
 export async function waitForEditorReady(
   page: Page,
@@ -386,9 +406,14 @@ export async function waitForEditorReady(
       },
       { timeout: DOCUMENT_READY_TIMEOUT },
     );
+    const app = EDITOR_APP[editor];
+    await page
+      .locator(`iframe[src*="/${app}/"]`)
+      .first()
+      .waitFor({ state: "attached", timeout: EDITOR_LOAD_TIMEOUT });
     const frame = getEditorFrame(page, editor);
     await expect
-      .poll(() => isEditorShellReady(frame, editor).catch(() => false), {
+      .poll(() => isEditorShellReady(frame, editor), {
         timeout: EDITOR_LOAD_TIMEOUT,
       })
       .toBe(true);

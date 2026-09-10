@@ -1,5 +1,6 @@
 import { test, expect } from "../test-setup";
 import {
+  warmDemoFile,
   waitForEditorReady,
   waitForEditorInteractive,
   setCellContent,
@@ -39,11 +40,20 @@ const PPT_SOURCE = "sample-files/sample.ppt";
 const PPT_FIND = "My Presentation";
 const PPT_MARKER = "PW_SAVE_PPT_MARKER";
 
+async function openForkedDemo(
+  page: import("@playwright/test").Page,
+  request: import("@playwright/test").APIRequestContext,
+  file: string,
+): Promise<void> {
+  await warmDemoFile(request, file);
+  await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
+}
+
 test("docx save round-trip via demo file API", async ({ page, request }, testInfo) => {
   const file = forkSample(DOCX_SOURCE, testInfo);
   await assertDemoFileContains(request, file, DOCX_ORIGINAL);
 
-  await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
+  await openForkedDemo(page, request, file);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
   });
@@ -65,7 +75,7 @@ test("csv save round-trip via demo file API", async ({ page, request }, testInfo
   const file = forkSample(CSV_SOURCE, testInfo);
   await assertDemoFileContains(request, file, CSV_ORIGINAL);
 
-  await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
+  await openForkedDemo(page, request, file);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
   });
@@ -88,7 +98,7 @@ test("txt save round-trip via demo file API", async ({ page, request }, testInfo
   const file = forkSample(TXT_SOURCE, testInfo);
   await assertDemoFileContains(request, file, TXT_ORIGINAL);
 
-  await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
+  await openForkedDemo(page, request, file);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
   });
@@ -112,7 +122,7 @@ test("rtf save round-trip via demo file API", async ({ page, request }, testInfo
   await assertDemoFileContains(request, file, "&amp;", { present: false });
   await assertDemoFileContains(request, file, "> Reminder");
 
-  await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
+  await openForkedDemo(page, request, file);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
   });
@@ -138,7 +148,7 @@ test("ods save round-trip via demo file API", async ({ page, request }, testInfo
   const file = forkSample(ODS_SOURCE, testInfo);
   await assertDemoFileContains(request, file, ODS_ORIGINAL);
 
-  await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
+  await openForkedDemo(page, request, file);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
   });
@@ -161,7 +171,7 @@ test("ppt save round-trip via demo file API", async ({ page, request }, testInfo
   const file = forkSample(PPT_SOURCE, testInfo);
   await assertDemoFileContains(request, file, PPT_FIND);
 
-  await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
+  await openForkedDemo(page, request, file);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
   });

@@ -1,5 +1,5 @@
 import { test, expect } from "../test-setup";
-import { waitForEditorReady } from "../editor";
+import { warmDemoFile, waitForEditorReady } from "../editor";
 import {
   REPO_ROOT,
   sampleExists,
@@ -23,10 +23,7 @@ async function assertEditorOpens(page: import("@playwright/test").Page, sample: 
   });
 
   // Warm server-side before navigation so in-page warm returns quickly under parallel load.
-  const warm = await page.request.get(`/demo/warm?file=${encodeURIComponent(sample.path)}`);
-  if (!warm.ok()) {
-    throw new Error(`warm ${sample.path}: HTTP ${warm.status()} ${await warm.text()}`);
-  }
+  await warmDemoFile(page.request, sample.path);
 
   await page.goto(`/demo/view?file=${encodeURIComponent(sample.path)}`);
 

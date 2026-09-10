@@ -19,7 +19,9 @@ func TestNewSlogProducesLogger(t *testing.T) {
 			if log == nil {
 				t.Fatal("logger is nil")
 			}
-			log.Info("test message", "component", "logging")
+			if !log.Enabled(context.Background(), slog.LevelInfo) {
+				t.Fatal("info should be enabled")
+			}
 		})
 	}
 }

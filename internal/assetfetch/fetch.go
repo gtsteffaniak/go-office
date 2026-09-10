@@ -63,6 +63,9 @@ func fetchLocked(ctx context.Context, opts Options, version string) error {
 		if err := patchSDKJS(opts.OutDir); err != nil {
 			return err
 		}
+		if err := ensureSlideThemesJS(opts.OutDir); err != nil {
+			return err
+		}
 		return fixDoctRendererConfig(filepath.Join(opts.OutDir, "converter", "bin"))
 	}
 	if needsConverterBin(opts.OutDir) {
@@ -147,6 +150,9 @@ func fetchLocked(ctx context.Context, opts Options, version string) error {
 		return err
 	}
 	if err := patchSDKJS(opts.OutDir); err != nil {
+		return err
+	}
+	if err := ensureSlideThemesJS(opts.OutDir); err != nil {
 		return err
 	}
 

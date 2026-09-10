@@ -357,7 +357,7 @@ export async function waitForEditorShell(
   });
 }
 
-/** Editor iframe mounted and shell has usable dimensions (open-format tests). */
+/** Editor iframe mounted and document is ready to use (open-format tests). */
 export async function waitForEditorReady(
   page: Page,
   editor: SampleFile["editor"],
@@ -374,9 +374,12 @@ export async function waitForEditorReady(
           if ((await page.locator("body").getAttribute("data-document-ready")) === "true") {
             return true;
           }
-          return isEditorShellReady(frame, editor).catch(() => false);
+          if (status === "Document ready") {
+            return true;
+          }
+          return isEditorInteractive(page, frame, editor).catch(() => false);
         },
-        { timeout: EDITOR_LOAD_TIMEOUT },
+        { timeout: DOCUMENT_READY_TIMEOUT, intervals: [200, 400, 800, 1500] },
       )
       .toBe(true);
   } catch (err) {

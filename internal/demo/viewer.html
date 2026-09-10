@@ -169,8 +169,10 @@
             document.getElementById("doc-title").textContent = config.document.title;
             setStatus("Opening " + config.document.title + "…");
             var baseEvents = config.events || {};
+            var documentReady = false;
             config.events = {
               onDocumentReady: function () {
+                documentReady = true;
                 document.body.setAttribute("data-document-ready", "true");
                 setStatus("Document ready", "ok");
                 fetchDemoFileBytes()
@@ -226,8 +228,11 @@
                 }
               },
             };
-            window.docEditor = new DocsAPI.DocEditor("editor", config);
             setStatus("Loading document…");
+            window.docEditor = new DocsAPI.DocEditor("editor", config);
+            if (documentReady) {
+              setStatus("Document ready", "ok");
+            }
           })
           .catch(function (err) {
             setStatus("Error: " + err.message, "error");

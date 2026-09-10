@@ -15,10 +15,16 @@ trap cleanup EXIT
 dump_log() {
   echo "=== go-office server log (errors and editor clientLog) ===" >&2
   if [ -f "$LOG" ]; then
-    grep -E 'clientLog|severity=error|severity=warn|\[ERROR|\[WARN|document open|warm failed|flush|save failed' "$LOG" \
-      | tail -200 >&2 || true
-    echo "=== go-office server log (full tail) ===" >&2
-    tail -400 "$LOG" >&2 || true
+    bytes=$(wc -c <"$LOG" | tr -d ' ')
+    echo "(log file size: ${bytes} bytes)" >&2
+    if [ "$bytes" -gt 0 ]; then
+      grep -E 'clientLog|severity=error|severity=warn|level=ERROR|level=WARN|"level":"ERROR"|"level":"WARN"|document open|warm failed|warm convert|flush|save failed|saveChanges|forceSave|x2t|Editor\.bin' "$LOG" \
+        | tail -300 >&2 || true
+      echo "=== go-office server log (full tail) ===" >&2
+      tail -500 "$LOG" >&2 || true
+    else
+      echo "(log file is empty — check stderr capture)" >&2
+    fi
   else
     echo "(no log file at $LOG)" >&2
   fi
@@ -41,7 +47,16 @@ cd /app
 export PLAYWRIGHT_WORKERS OFFICE_CONVERT_LIMIT
 
 : >"$LOG"
-./go-office \
+# Line-buffer stderr so CI log dumps include recent server output.
+if command -v stdbuf >/dev/null 2>&1; then
+  GO_STDERR=stdbuf
+  GO_STDERR_ARGS="-oL -eL"
+else
+  GO_STDERR=""
+  GO_STDERR_ARGS=""
+fi
+$GO_STDERR $GO_STDERR_ARGS ./go-office \
+  -debug \
   -assets /app/assets \
   -addr :8080 \
   -data /app \

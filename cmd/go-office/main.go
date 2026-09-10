@@ -159,29 +159,30 @@ func main() {
 	if officeBase == origin {
 		officeBase = origin
 	}
-	log.Printf("go-office listening on %s", cfg.Addr)
-	if debug {
-		log.Printf("  debug:   enabled")
-	}
-	log.Printf("  site:    %s/", strings.TrimSuffix(origin, "/"))
-	log.Printf("  health:  %s/health", officeBase)
-	log.Printf("  api.js:  %s/web-apps/apps/api/documents/api.js", officeBase)
+	logger.Info("go-office listening", "addr", cfg.Addr, "debug", debug)
+	logger.Info("go-office routes",
+		"site", strings.TrimSuffix(origin, "/")+"/",
+		"health", officeBase+"/health",
+		"apiJS", officeBase+"/web-apps/apps/api/documents/api.js",
+		"assets", cfg.AssetDir,
+	)
 	if cfg.samplesEnabled() {
-		log.Printf("  demo:    %s/demo/", officeBase)
-		log.Printf("  api:     %s/demo/config", strings.TrimSuffix(origin, "/")+strings.TrimSuffix(cfg.APIBase, "/"))
-		log.Printf("  samples: %s", samplesPath)
+		logger.Info("go-office demo",
+			"demo", officeBase+"/demo/",
+			"config", strings.TrimSuffix(origin, "/")+strings.TrimSuffix(cfg.APIBase, "/")+"/demo/config",
+			"samples", samplesPath,
+		)
 	}
 	if cfg.JWTSecret != "" {
-		log.Printf("  jwt:     enabled (OFFICE_JWT_SECRET or JWT_SECRET)")
+		logger.Info("go-office jwt enabled")
 	}
-	log.Printf("  assets:  %s", cfg.AssetDir)
 
 	httpSrv := &http.Server{Addr: cfg.Addr, Handler: mux}
 	go func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
-		log.Printf("shutting down…")
+		logger.Info("shutting down")
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		_ = httpSrv.Shutdown(ctx)

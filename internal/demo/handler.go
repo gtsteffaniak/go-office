@@ -225,11 +225,22 @@ func (h *Handler) serveWarm(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	go func() {
-		ctx := context.WithoutCancel(r.Context())
-		h.warm.schedule(ctx, doc)
-	}()
-	w.WriteHeader(http.StatusAccepted)
+	ctx := r.Context()
+	if err := h.warmDocument(ctx, doc); err != nil {
+		if h.office.EditorBinCached(doc.Key) {
+			if h.opts.Logger != nil {
+				h.opts.Logger.Debug("demo warm error but cache ready",
+					"file", doc.RelPath, "key", doc.Key, "err", err)
+			}
+		} else {
+			if h.opts.Logger != nil {
+				h.opts.Logger.Warn("demo warm failed", "file", doc.RelPath, "key", doc.Key, "err", err)
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func (h *Handler) warmDocument(ctx context.Context, doc sampleDoc) error {

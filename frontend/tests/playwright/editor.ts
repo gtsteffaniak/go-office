@@ -715,6 +715,17 @@ async function closeSearchBar(frame: FrameLocator): Promise<void> {
   await frame.locator("#search-bar-close, #search-adv-close").first().click({ timeout: 1_000 }).catch(() => {});
 }
 
+/** Move focus from the search bar back to the document canvas so formatting shortcuts apply to the match. */
+async function focusDocumentAfterSearch(frame: FrameLocator): Promise<void> {
+  const main = frame.locator("#id_main, #editor_sdk, #editor-container").first();
+  if ((await main.count()) > 0) {
+    await main.click({ position: { x: 320, y: 240 }, force: true }).catch(() => {});
+  } else {
+    await frame.locator("body").click({ position: { x: 200, y: 200 }, force: true }).catch(() => {});
+  }
+  await settleFrame(frame, 200);
+}
+
 async function searchBarHasMatches(frame: FrameLocator): Promise<boolean> {
   const results = frame.locator("#search-bar-results").first();
   const text = (await results.textContent({ timeout: 1_000 }).catch(() => "")) ?? "";
@@ -975,40 +986,36 @@ const SAVE_BUTTON =
 /** Trigger Save inside the editor iframe (parent-page Ctrl+S never reaches the SDK). */
 export async function triggerEditorSave(page: Page, editor: SampleFile["editor"]): Promise<void> {
   await ensureDocumentDirtyForSave(page, editor);
-  const wasDirty = await isDocumentDirty(page);
   const saveDoneBefore = await page.locator("body").getAttribute("data-save-done");
 
   const frame = getEditorFrame(page, editor);
   await frame.locator("body").click({ position: { x: 12, y: 12 }, force: true });
 
   const saveBtn = frame.locator(SAVE_BUTTON).first();
-  if ((await saveBtn.count()) > 0) {
-    const clicked = await saveBtn
+  const clickedSave =
+    (await saveBtn.count()) > 0 &&
+    (await saveBtn
       .click({ force: true, timeout: 5_000, noWaitAfter: true })
       .then(() => true)
+      .catch(() => false));
+
+  const saveStarted = async (): Promise<boolean> => {
+    const body = page.locator("body");
+    if ((await body.getAttribute("data-saving")) === "true") {
+      return true;
+    }
+    const saveDone = await body.getAttribute("data-save-done");
+    return Boolean(saveDone && saveDone !== saveDoneBefore);
+  };
+
+  if (clickedSave) {
+    const started = await expect
+      .poll(saveStarted, { timeout: 8_000, intervals: [100, 250, 500] })
+      .toBe(true)
+      .then(() => true)
       .catch(() => false);
-    if (clicked) {
-      const started = await expect
-        .poll(
-          async () => {
-            const body = page.locator("body");
-            if ((await body.getAttribute("data-saving")) === "true") {
-              return true;
-            }
-            if (wasDirty && (await body.getAttribute("data-dirty")) !== "true") {
-              return true;
-            }
-            const saveDone = await body.getAttribute("data-save-done");
-            return Boolean(saveDone && saveDone !== saveDoneBefore);
-          },
-          { timeout: 5_000, intervals: [100, 250, 500] },
-        )
-        .toBe(true)
-        .then(() => true)
-        .catch(() => false);
-      if (started) {
-        return;
-      }
+    if (started) {
+      return;
     }
   }
 
@@ -1282,11 +1289,30 @@ export async function formatWordSelection(
   await searchInput.fill(marker);
   await searchInput.press("Enter");
   await page.waitForTimeout(300);
+  await focusDocumentAfterSearch(frame);
   if (format.bold) {
-    await frame.locator("body").press("Control+b");
+    const boldBtn = frame
+      .locator(
+        '#slot-btn-font-bold, #id-toolbar-btn-bold, [id*="font-bold"], button[aria-label*="Bold" i]',
+      )
+      .first();
+    if ((await boldBtn.count()) > 0 && (await boldBtn.isVisible().catch(() => false))) {
+      await boldBtn.click({ force: true });
+    } else {
+      await frame.locator("body").press("Control+b");
+    }
   }
   if (format.italic) {
-    await frame.locator("body").press("Control+i");
+    const italicBtn = frame
+      .locator(
+        '#slot-btn-font-italic, #id-toolbar-btn-italic, [id*="font-italic"], button[aria-label*="Italic" i]',
+      )
+      .first();
+    if ((await italicBtn.count()) > 0 && (await italicBtn.isVisible().catch(() => false))) {
+      await italicBtn.click({ force: true });
+    } else {
+      await frame.locator("body").press("Control+i");
+    }
   }
   if (format.highlight) {
     const highlightBtn = frame

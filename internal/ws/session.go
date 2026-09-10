@@ -143,12 +143,6 @@ func (r *sessionRegistry) deleteAllForDoc(docKey string) {
 	}
 }
 
-func (r *sessionRegistry) delete(key string) {
-	r.mu.Lock()
-	delete(r.sessions, key)
-	r.mu.Unlock()
-}
-
 func (r *sessionRegistry) clear() {
 	r.mu.Lock()
 	r.sessions = make(map[string]*session)
@@ -246,7 +240,9 @@ func (s *session) isReconnectAuth(req authRequest) bool {
 		return false
 	}
 	if req.SessionID == "" {
-		return false
+		// Current sdkjs builds omit the coauthoring sessionId when they repeat
+		// packet 40 on an already-connected Engine.IO polling transport.
+		return s.namespaceAck
 	}
 	return req.SessionID == s.sessionID
 }
@@ -282,6 +278,7 @@ func (s *session) shouldLogReconnect(req authRequest) bool {
 func (s *session) onConnect(authData []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.syncConfigEpochLocked()
 
 	reconnect := false
 	if len(authData) > 0 {

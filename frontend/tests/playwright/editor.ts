@@ -260,22 +260,20 @@ async function isEditorShellReady(
   editor: SampleFile["editor"],
 ): Promise<boolean> {
   if (editor === "pdf") {
-    const view = frame.locator("#id_view, #id_main").first();
-    if (!(await view.isVisible())) {
-      return false;
-    }
-    const box = await view.boundingBox();
-    return box !== null && box.height > 50;
+    return frame.locator("#id_view, #id_main").evaluateAll((nodes) =>
+      nodes.some((node) => {
+        const rect = node.getBoundingClientRect();
+        return rect.width > 50 && rect.height > 50;
+      }),
+    );
   }
 
-  const shell = frame.locator(EDITOR_SHELL).first();
-  if (!(await shell.isVisible())) {
-    return false;
-  }
-  return shell.evaluate((el) => {
-    const rect = el.getBoundingClientRect();
-    return rect.width > 50 && rect.height > 50;
-  });
+  return frame.locator(EDITOR_SHELL).evaluateAll((nodes) =>
+    nodes.some((node) => {
+      const rect = node.getBoundingClientRect();
+      return rect.width > 50 && rect.height > 50;
+    }),
+  );
 }
 
 async function isEditorInteractive(
@@ -373,11 +371,10 @@ export async function waitForEditorReady(
           if (status.startsWith("Error:")) {
             throw new Error(`viewer status: ${status}`);
           }
-          const shell = frame.locator(EDITOR_SHELL).first();
-          if (!(await shell.isVisible().catch(() => false))) {
-            return false;
+          if ((await page.locator("body").getAttribute("data-document-ready")) === "true") {
+            return true;
           }
-          return isEditorShellReady(frame, editor);
+          return isEditorShellReady(frame, editor).catch(() => false);
         },
         { timeout: EDITOR_LOAD_TIMEOUT },
       )
@@ -872,13 +869,15 @@ export async function triggerEditorSave(page: Page, editor: SampleFile["editor"]
 
   const saveBtn = frame.locator(SAVE_BUTTON).first();
   if ((await saveBtn.count()) > 0) {
-    // The SDK occasionally leaves a pending navigation task after dispatching
-    // the save click. The keyboard fallback below must still be sent.
-    await saveBtn.click({ force: true, timeout: 5_000, noWaitAfter: true }).catch(() => {});
+    const clicked = await saveBtn
+      .click({ force: true, timeout: 5_000, noWaitAfter: true })
+      .then(() => true)
+      .catch(() => false);
+    if (clicked) {
+      return;
+    }
   }
 
-  await frame.locator("body").press("Control+s");
-  await page.waitForTimeout(200);
   await frame.locator("body").press("Control+s");
 }
 
@@ -1240,6 +1239,7 @@ export async function applyMinimalSaveEdit(
 ): Promise<void> {
   if (editor === "cell") {
     await setCellContent(page, editor, "A1", marker);
+    await waitForDocumentDirty(page);
     return;
   }
   if (editor === "word" || editor === "slide") {

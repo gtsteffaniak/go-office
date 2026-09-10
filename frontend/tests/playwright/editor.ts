@@ -681,11 +681,25 @@ async function cellShowsValue(
       return true;
     }
   }
+
+  try {
+    const viaSdk = await frame.locator("body").evaluate(readCellViaBrowser, ref);
+    if (viaSdk.includes(expected)) {
+      return true;
+    }
+  } catch {
+    // fall through to UI readback
+  }
+
   if (!(await isEditorInteractive(page, frame, editor))) {
     return false;
   }
-  const value = await readCellValue(frame, ref);
-  return value.includes(expected);
+  try {
+    const value = await readCellValue(frame, ref);
+    return value.includes(expected);
+  } catch {
+    return false;
+  }
 }
 
 /** Poll until a spreadsheet cell shows expected text in the editor (or CSV on disk). */
@@ -788,6 +802,11 @@ export async function setCellContent(
   }
 
   await commitCellEdit(frame);
+  if (!(await cellShowsValue(page, frame, editor, ref, value))) {
+    await selectCell(frame, ref);
+    await writeFormulaBarValue(frame, value);
+    await commitCellEdit(frame);
+  }
   await settleFrame(frame, 500);
 }
 
@@ -798,12 +817,27 @@ export async function setCellContentForSave(
   ref: string,
   value: string,
 ): Promise<void> {
-  await setCellContent(page, editor, ref, value);
-  await waitForCellContent(page, editor, ref, value, EDITOR_LOAD_TIMEOUT);
+  const frame = getEditorFrame(page, editor);
+  await expect
+    .poll(
+      async () => {
+        if (await cellShowsValue(page, frame, editor, ref, value)) {
+          return true;
+        }
+        await setCellContent(page, editor, ref, value);
+        return cellShowsValue(page, frame, editor, ref, value);
+      },
+      { timeout: EDITOR_LOAD_TIMEOUT, intervals: [500, 1000, 2000] },
+    )
+    .toBe(true);
   await ensureSavePending(page, editor);
 }
 
 async function commitCellEdit(frame: FrameLocator): Promise<void> {
+  const valueLoc = frame.locator(CELL_VALUE_INPUT).first();
+  if ((await valueLoc.count()) > 0) {
+    await valueLoc.press("Enter").catch(() => {});
+  }
   const cellName = frame.locator(CELL_NAME_INPUT).first();
   if ((await cellName.count()) > 0) {
     await cellName.click({ timeout: 3_000 }).catch(() => {});
@@ -1433,9 +1467,7 @@ async function formatWordSelectionViaSearchUI(
   await expect
     .poll(async () => searchBarHasMatches(frame), { timeout: 8_000, intervals: [200, 500] })
     .toBe(true);
-  // Close search so Ctrl+B/I apply to the selected document text, not the search field.
-  await frame.locator("body").press("Escape");
-  await settleFrame(frame, 300);
+  // Apply via toolbar while the search selection is still active (Escape clears it).
   if (format.bold) {
     const boldBtn = frame
       .locator(
@@ -1445,6 +1477,8 @@ async function formatWordSelectionViaSearchUI(
     if ((await boldBtn.count()) > 0 && (await boldBtn.isVisible().catch(() => false))) {
       await boldBtn.click({ force: true });
     } else {
+      await closeSearchBar(frame);
+      await settleFrame(frame, 300);
       await frame.locator("body").press("Control+b");
     }
   }
@@ -1457,6 +1491,8 @@ async function formatWordSelectionViaSearchUI(
     if ((await italicBtn.count()) > 0 && (await italicBtn.isVisible().catch(() => false))) {
       await italicBtn.click({ force: true });
     } else {
+      await closeSearchBar(frame);
+      await settleFrame(frame, 300);
       await frame.locator("body").press("Control+i");
     }
   }
@@ -1566,9 +1602,7 @@ export async function applyMinimalSaveEdit(
       .poll(async () => !(await isDocumentDirty(page)), { timeout: 8_000 })
       .toBe(true)
       .catch(() => {});
-    await setCellContent(page, editor, "A1", marker);
-    await waitForCellContent(page, editor, "A1", marker);
-    await ensureSavePending(page, editor);
+    await setCellContentForSave(page, editor, "A1", marker);
     return;
   }
   if (editor === "word" || editor === "slide") {

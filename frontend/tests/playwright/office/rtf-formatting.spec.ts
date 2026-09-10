@@ -27,6 +27,8 @@ test("rtf bold persists", async ({ page, request }, testInfo) => {
   await waitForEditorInteractive(page, "word");
 
   await insertSaveMarker(page, "word", marker);
+  await triggerEditorSave(page, "word");
+  await waitForSaveDone(page, { request, filePath: file, marker });
   await formatWordSelection(page, marker, { bold: true });
   await triggerEditorSave(page, "word");
   await waitForSaveDone(page, { request, filePath: file, marker });
@@ -45,6 +47,8 @@ test("rtf italic persists", async ({ page, request }, testInfo) => {
   await waitForEditorInteractive(page, "word");
 
   await insertSaveMarker(page, "word", marker);
+  await triggerEditorSave(page, "word");
+  await waitForSaveDone(page, { request, filePath: file, marker });
   await formatWordSelection(page, marker, { italic: true });
   await triggerEditorSave(page, "word");
   await waitForSaveDone(page, { request, filePath: file, marker });
@@ -63,6 +67,8 @@ test("rtf highlight persists", async ({ page, request }, testInfo) => {
   await waitForEditorInteractive(page, "word");
 
   await insertSaveMarker(page, "word", marker);
+  await triggerEditorSave(page, "word");
+  await waitForSaveDone(page, { request, filePath: file, marker });
   await formatWordSelection(page, marker, { highlight: true });
   await triggerEditorSave(page, "word");
   await waitForSaveDone(page, { request, filePath: file, marker });

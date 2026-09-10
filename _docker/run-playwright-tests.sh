@@ -24,7 +24,7 @@ healthcheck() {
 
 cd /app
 : "${PLAYWRIGHT_WORKERS:=10}"
-: "${OFFICE_CONVERT_LIMIT:=4}"
+: "${OFFICE_CONVERT_LIMIT:=6}"
 export PLAYWRIGHT_WORKERS OFFICE_CONVERT_LIMIT
 
 # Stream go-office logs to CI output as they happen (line-buffered when stdbuf exists).

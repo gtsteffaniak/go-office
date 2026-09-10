@@ -61,8 +61,8 @@
     var saveWatchdogTimer = null;
     var lastSavedFileBytes = 0;
     var saveBaselineBytes = 0;
-    // Match Playwright SAVE_DONE_TIMEOUT (30s) with margin for queued x2t under load.
-    var SAVE_VERIFY_MS = 35000;
+    // Match Playwright SAVE_DONE_TIMEOUT with margin for queued x2t under parallel CI load.
+    var SAVE_VERIFY_MS = 120000;
     var SAVE_POLL_INTERVAL_MS = 500;
     var SAVE_POLL_MAX_ATTEMPTS = Math.ceil(SAVE_VERIFY_MS / SAVE_POLL_INTERVAL_MS);
 

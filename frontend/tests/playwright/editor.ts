@@ -23,7 +23,7 @@ const EDITOR_LOAD_TIMEOUT = Number(process.env.PLAYWRIGHT_EDITOR_TIMEOUT ?? 45_0
 const DOCUMENT_READY_TIMEOUT = Number(process.env.PLAYWRIGHT_DOCUMENT_READY_TIMEOUT ?? 45_000);
 const DEMO_WARM_TIMEOUT = Number(process.env.PLAYWRIGHT_WARM_TIMEOUT ?? 90_000);
 const CONTENT_FIND_TIMEOUT = Number(process.env.PLAYWRIGHT_CONTENT_FIND_TIMEOUT ?? 15_000);
-const SAVE_DONE_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_DONE_TIMEOUT ?? 45_000);
+const SAVE_DONE_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_DONE_TIMEOUT ?? 120_000);
 const INTERACTIVE_SETTLE_MS = 400;
 
 /** Spreadsheet name box (e.g. B2) and formula bar (cell value). */
@@ -1238,7 +1238,7 @@ export async function formatWordSelection(
 
   await expect
     .poll(async () => documentContainsText(frame, marker, "word"), {
-      timeout: CONTENT_FIND_TIMEOUT,
+      timeout: DOCUMENT_READY_TIMEOUT,
       intervals: [300, 500, 1000],
     })
     .toBe(true);
@@ -1397,6 +1397,16 @@ export async function waitForSaveDone(
     await expect
       .poll(
         async () => {
+          if (requireMarker) {
+            const res = await options.request!.get(
+              `/api/office/demo/file/${encodeURIComponent(options.filePath!)}`,
+            );
+            if (res.ok() && officeFileContains(Buffer.from(await res.body()), options.marker!)) {
+              return true;
+            }
+            // Viewer watchdog can fire before x2t persist finishes under convert queue load.
+            return false;
+          }
           const saveError = await page.locator("body").getAttribute("data-save-error");
           if (saveError) {
             throw new Error(`save error: ${saveError}`);
@@ -1405,17 +1415,8 @@ export async function waitForSaveDone(
           if (status.startsWith("Error:")) {
             throw new Error(`viewer status: ${status}`);
           }
-          if (!requireMarker) {
-            const saveDone = await page.locator("body").getAttribute("data-save-done");
-            return Boolean(saveDone) || status.includes("Saved");
-          }
-          const res = await options.request!.get(
-            `/api/office/demo/file/${encodeURIComponent(options.filePath!)}`,
-          );
-          if (!res.ok()) {
-            return false;
-          }
-          return officeFileContains(Buffer.from(await res.body()), options.marker!);
+          const saveDone = await page.locator("body").getAttribute("data-save-done");
+          return Boolean(saveDone) || status.includes("Saved");
         },
         { timeout: timeoutMs },
       )

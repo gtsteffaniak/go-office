@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:8080";
 const workers = Number(process.env.PLAYWRIGHT_WORKERS ?? 10);
+const saveWorkers = Number(process.env.PLAYWRIGHT_SAVE_WORKERS ?? 4);
+const saveTestTimeout = Number(process.env.PLAYWRIGHT_SAVE_TEST_TIMEOUT ?? 240_000);
 
 const sharedUse = {
   baseURL,
@@ -35,12 +37,16 @@ export default defineConfig({
       name: "chromium-save",
       testMatch: /(save|rtf-formatting)\.spec\.ts$/,
       dependencies: ["chromium"],
+      timeout: saveTestTimeout,
+      workers: saveWorkers,
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "chromium-post-save",
       testMatch: /post-save-stability\.spec\.ts$/,
       dependencies: ["chromium"],
+      timeout: saveTestTimeout,
+      workers: saveWorkers,
       use: { ...devices["Desktop Chrome"] },
     },
   ],

@@ -86,6 +86,16 @@ until healthcheck; do
 done
 echo "go-office healthy after ${attempt} attempt(s)" >&2
 
+if [ -f /app/_docker/warm-playwright-samples.mjs ]; then
+  PLAYWRIGHT_BASE_URL="http://127.0.0.1:8080" \
+    PLAYWRIGHT_SAMPLES_DIR="/app/sample-files" \
+    node /app/_docker/warm-playwright-samples.mjs >&2 || {
+    echo "sample pre-warm failed" >&2
+    dump_log
+    exit 1
+  }
+fi
+
 cd /app/frontend
 status=0
 if [ -n "${PLAYWRIGHT_PROJECT:-}" ]; then

@@ -57,6 +57,7 @@ WORKDIR /app/frontend
 COPY frontend/playwright.config.ts ./
 COPY frontend/tests/ ./tests/
 COPY _docker/run-playwright-tests.sh /usr/local/bin/run-playwright-tests.sh
+COPY _docker/warm-playwright-samples.mjs /app/_docker/warm-playwright-samples.mjs
 RUN chmod +x /usr/local/bin/run-playwright-tests.sh
 
 ENV OFFICE_ASSETS=/app/assets \

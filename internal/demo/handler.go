@@ -45,7 +45,6 @@ type Handler struct {
 
 	landingTmpl *template.Template
 	viewerTmpl  *template.Template
-	warm        *warmScheduler
 	thumbs      *thumbnailCoordinator
 }
 
@@ -107,7 +106,6 @@ func New(srv *office.Server, store office.Storage, opts Options) (*Handler, erro
 		landingTmpl: landingTmpl,
 		viewerTmpl:  viewerTmpl,
 	}
-	h.warm = newWarmScheduler(h)
 	h.thumbs = newThumbnailCoordinator()
 	return h, nil
 }

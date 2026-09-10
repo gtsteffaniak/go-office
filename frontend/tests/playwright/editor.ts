@@ -362,12 +362,11 @@ export async function waitForEditorReady(
   page: Page,
   editor: SampleFile["editor"],
 ): Promise<void> {
-  const frame = getEditorFrame(page, editor);
   try {
     await expect
       .poll(
         async () => {
-          const status = (await page.locator("#status").textContent()) ?? "";
+          const status = ((await page.locator("#status").textContent()) ?? "").trim();
           if (status.startsWith("Error:")) {
             throw new Error(`viewer status: ${status}`);
           }
@@ -377,7 +376,8 @@ export async function waitForEditorReady(
           if (status === "Document ready") {
             return true;
           }
-          return isEditorInteractive(page, frame, editor).catch(() => false);
+          const frame = getEditorFrame(page, editor);
+          return isEditorShellReady(frame, editor).catch(() => false);
         },
         { timeout: DOCUMENT_READY_TIMEOUT, intervals: [200, 400, 800, 1500] },
       )

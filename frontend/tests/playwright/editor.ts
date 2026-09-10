@@ -791,6 +791,18 @@ export async function setCellContent(
   await settleFrame(frame, 500);
 }
 
+/** Set a cell value and verify it is visible before triggering a save. */
+export async function setCellContentForSave(
+  page: Page,
+  editor: SampleFile["editor"],
+  ref: string,
+  value: string,
+): Promise<void> {
+  await setCellContent(page, editor, ref, value);
+  await waitForCellContent(page, editor, ref, value, EDITOR_LOAD_TIMEOUT);
+  await waitForDocumentDirty(page);
+}
+
 async function commitCellEdit(frame: FrameLocator): Promise<void> {
   const cellName = frame.locator(CELL_NAME_INPUT).first();
   if ((await cellName.count()) > 0) {
@@ -1041,6 +1053,7 @@ export async function insertSaveMarker(
   marker: string,
 ): Promise<void> {
   await typeInDocument(page, editor, ` ${marker}`);
+  await assertDocumentContains(page, editor, marker);
   await waitForDocumentDirty(page);
 }
 
@@ -1084,6 +1097,9 @@ const SAVE_BUTTON =
 /** Trigger Save inside the editor iframe (parent-page Ctrl+S never reaches the SDK). */
 export async function triggerEditorSave(page: Page, editor: SampleFile["editor"]): Promise<void> {
   await ensureDocumentDirtyForSave(page, editor);
+  if (!(await isDocumentDirty(page))) {
+    throw new Error(`document not dirty before save\nwitness:\n${await editorWitness(page, editor)}`);
+  }
   const saveDoneBefore = await page.locator("body").getAttribute("data-save-done");
 
   const frame = getEditorFrame(page, editor);
@@ -1386,6 +1402,9 @@ async function formatWordSelectionViaSearchUI(
   await expect
     .poll(async () => searchBarHasMatches(frame), { timeout: 8_000, intervals: [200, 500] })
     .toBe(true);
+  // Close search so Ctrl+B/I apply to the selected document text, not the search field.
+  await frame.locator("body").press("Escape");
+  await settleFrame(frame, 300);
   if (format.bold) {
     const boldBtn = frame
       .locator(
@@ -1433,10 +1452,15 @@ export async function formatWordSelection(
 ): Promise<void> {
   await waitForEditorInteractive(page, "word");
   const frame = getEditorFrame(page, "word");
+  const file = new URL(page.url()).searchParams.get("file") ?? "";
+  const preferSearchUi = file.endsWith(".rtf");
 
-  const sdkApplied = await frame
-    .locator("body")
-    .evaluate(applyWordFormatInBrowser, { marker, format });
+  let sdkApplied = false;
+  if (!preferSearchUi) {
+    sdkApplied = await frame
+      .locator("body")
+      .evaluate(applyWordFormatInBrowser, { marker, format });
+  }
   if (!sdkApplied || !(await documentContainsText(frame, marker, "word"))) {
     await formatWordSelectionViaSearchUI(frame, marker, format);
   }
@@ -1448,7 +1472,12 @@ export async function formatWordSelection(
     })
     .toBe(true);
   await settleFrame(frame, 400);
-  await ensureDocumentDirtyForSave(page, "word");
+  try {
+    await waitForDocumentDirty(page, 8_000);
+  } catch {
+    await ensureDocumentDirtyForSave(page, "word");
+    await waitForDocumentDirty(page, 8_000);
+  }
 }
 
 export type RtfFormattingAssert = {

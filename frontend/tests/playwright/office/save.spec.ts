@@ -3,7 +3,7 @@ import {
   warmDemoFile,
   waitForEditorReady,
   waitForEditorInteractive,
-  setCellContent,
+  setCellContentForSave,
   waitForSaveDone,
   insertSaveMarker,
   triggerEditorSave,
@@ -82,7 +82,7 @@ test("csv save round-trip via demo file API", async ({ page, request }, testInfo
   await waitForEditorReady(page, "cell");
   await waitForEditorInteractive(page, "cell");
 
-  await setCellContent(page, "cell", CSV_CELL, CSV_REPLACEMENT);
+  await setCellContentForSave(page, "cell", CSV_CELL, CSV_REPLACEMENT);
   await triggerEditorSave(page, "cell");
   await waitForSaveDone(page, {
     request,
@@ -155,7 +155,7 @@ test("ods save round-trip via demo file API", async ({ page, request }, testInfo
   await waitForEditorReady(page, "cell");
   await waitForEditorInteractive(page, "cell");
 
-  await setCellContent(page, "cell", ODS_CELL, ODS_REPLACEMENT);
+  await setCellContentForSave(page, "cell", ODS_CELL, ODS_REPLACEMENT);
   await triggerEditorSave(page, "cell");
   await waitForSaveDone(page, {
     request,

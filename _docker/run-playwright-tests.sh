@@ -21,25 +21,6 @@ dump_log() {
   fi
 }
 
-dump_resource_state() {
-  echo "=== resource state ===" >&2
-  if [ -x /app/bin/playwright-limits ]; then
-    /app/bin/playwright-limits >&2 || true
-  fi
-  for path in /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory/memory.usage_in_bytes; do
-    if [ -f "$path" ]; then
-      echo "cgroup memory: $(cat "$path") ($path)" >&2
-    fi
-  done
-  for path in /sys/fs/cgroup/memory.events /sys/fs/cgroup/memory/memory.failcnt; do
-    if [ -f "$path" ]; then
-      echo "cgroup memory events ($path):" >&2
-      cat "$path" >&2 || true
-    fi
-  done
-  echo "process counts: chromium=$(pgrep -c chromium 2>/dev/null || echo 0) x2t=$(pgrep -c x2t 2>/dev/null || echo 0)" >&2
-}
-
 healthcheck() {
   # playwright-base has Node but not curl/wget.
   node -e "
@@ -52,12 +33,6 @@ healthcheck() {
 }
 
 cd /app
-
-if [ -x /app/bin/playwright-limits ]; then
-  # Adaptive concurrency from cgroup limits and measured x2t RSS profile.
-  eval "$(/app/bin/playwright-limits)"
-  echo "adaptive concurrency: PLAYWRIGHT_WORKERS=${PLAYWRIGHT_WORKERS} OFFICE_CONVERT_LIMIT=${OFFICE_CONVERT_LIMIT}" >&2
-fi
 : "${PLAYWRIGHT_WORKERS:=10}"
 : "${OFFICE_CONVERT_LIMIT:=4}"
 export PLAYWRIGHT_WORKERS OFFICE_CONVERT_LIMIT
@@ -106,7 +81,6 @@ else
 fi
 
 if [ "$status" -ne 0 ]; then
-  dump_resource_state
   dump_log
 fi
 exit "$status"

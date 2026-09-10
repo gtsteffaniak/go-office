@@ -650,7 +650,7 @@ func TestSaveChangesXlsConcurrentPlaywrightLoad(t *testing.T) {
 
 	const (
 		workers      = 10
-		convertLimit = 4
+		convertLimit = 6
 	)
 
 	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: convertLimit})
@@ -1028,7 +1028,7 @@ func TestSharedAllFontsUnmodifiedDuringConcurrentSave(t *testing.T) {
 
 func TestSaveChangesCSVConcurrentPlaywrightLoad(t *testing.T) {
 	// Regression for Playwright save.spec.ts "csv save round-trip" under 10 workers with
-	// OFFICE_CONVERT_LIMIT=4. Without per-run DoctRenderer isolation, reverse x2t hits:
+	// OFFICE_CONVERT_LIMIT=6. Without per-run DoctRenderer isolation, reverse x2t hits:
 	//   exit status 86: CFontFileLoader.LoadFontFromData ... length of null
 	repo := testutil.RepoRoot(t)
 	assets := testutil.AssetsDirOrSkip(t, repo)
@@ -1043,7 +1043,7 @@ func TestSaveChangesCSVConcurrentPlaywrightLoad(t *testing.T) {
 
 	const (
 		workers      = 10 // PLAYWRIGHT_WORKERS default in playwright.config.ts
-		convertLimit = 4 // OFFICE_CONVERT_LIMIT in _docker/Dockerfile.playwright
+		convertLimit = 6 // Playwright load regression (OFFICE_CONVERT_LIMIT=4 in Docker)
 	)
 
 	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: convertLimit})
@@ -1117,7 +1117,7 @@ func TestSaveChangesCSVConcurrentWithDocumentOpens(t *testing.T) {
 	const (
 		savers       = 6
 		openers      = 10
-		convertLimit = 4
+		convertLimit = 6
 	)
 
 	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: convertLimit})
@@ -1287,7 +1287,7 @@ func TestConcurrentToEditorBinSameDir(t *testing.T) {
 
 	work := testutil.NewWorkspace(t)
 	docxPath := filepath.Join(work.Root, filepath.FromSlash(work.CopySample("sample-files/sample.docx")))
-	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: 4})
+	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: 6})
 	if err != nil {
 		t.Fatal(err)
 	}

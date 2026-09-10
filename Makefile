@@ -24,7 +24,6 @@ USE_DOCKER_DEV := $(if $(filter Linux,$(UNAME_S)),,1)
 SERVE_PORT ?= $(if $(findstring :,$(ADDR)),$(lastword $(subst :, ,$(ADDR))),$(ADDR))
 
 GO_OFFICE_BIN := $(BIN_DIR)/go-office
-PLAYWRIGHT_LIMITS_BIN := $(BIN_DIR)/playwright-limits
 FETCH_ASSETS_BIN := $(BIN_DIR)/fetch-assets
 
 API_JS := $(OFFICE_ASSETS)/web-apps/apps/api/documents/api.js
@@ -61,7 +60,7 @@ help:
 	@echo "  make serve   Build (if needed) and run the document server on $(ADDR)"
 	@echo "  make test    Run unit tests (no assets required)"
 	@echo "  make test-x2t  Run x2t conversion on the sample .doc (needs assets)"
-	@echo "  make test-x2t-concurrent  Concurrent CSV save regression (10 workers, limit 4)"
+	@echo "  make test-x2t-concurrent  Concurrent CSV save regression (10 workers, limit 6)"
 	@echo "  make doctor    Diagnose x2t permissions, libs, and sample conversion"
 	@echo "  make fonts     Regenerate AllFonts.js and font_selection.bin (host paths; remapped at runtime)"
 	@echo ""
@@ -205,7 +204,6 @@ compile-native:
 	@mkdir -p "$(BIN_DIR)"
 	$(GO) run ./cmd/gen-assets-version
 	$(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
-	$(GO) build -o "$(PLAYWRIGHT_LIMITS_BIN)" ./cmd/playwright-limits
 
 check-assets:
 	@if [ ! -f "$(API_JS)" ] && [ ! -f "$(API_JS_TPL)" ]; then \
@@ -359,7 +357,6 @@ playwright-npm:
 test-playwright: ensure-assets check-sample-matrix check-docker
 	@echo "==> Playwright E2E (Docker, all projects)"
 	GOOS=linux $(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
-	GOOS=linux $(GO) build -o "$(PLAYWRIGHT_LIMITS_BIN)" ./cmd/playwright-limits
 	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_IMAGE)" --target test -f "$(PLAYWRIGHT_DOCKERFILE)" .
 
 test-playwright-project: ensure-assets check-sample-matrix check-docker
@@ -369,7 +366,6 @@ test-playwright-project: ensure-assets check-sample-matrix check-docker
 	fi
 	@echo "==> Playwright E2E (Docker, project=$(PLAYWRIGHT_PROJECT))"
 	GOOS=linux $(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
-	GOOS=linux $(GO) build -o "$(PLAYWRIGHT_LIMITS_BIN)" ./cmd/playwright-limits
 	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_IMAGE)-$(PLAYWRIGHT_PROJECT)" \
 		--build-arg PLAYWRIGHT_PROJECT="$(PLAYWRIGHT_PROJECT)" \
 		--target test -f "$(PLAYWRIGHT_DOCKERFILE)" .

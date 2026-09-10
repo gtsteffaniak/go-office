@@ -72,7 +72,9 @@ func TestPollingExcelStringChangesWritten(t *testing.T) {
 	})
 	h.PollHold = 0
 
-	body := `42["message",{"type":"saveChanges","changes":"[\"14;CgAAAAFiAAAA/wAAAAA=\",\"128;fAAAAAFkBwAABXIAAAAAAAE=\"]","startSaveChanges":true,"endSaveChanges":true,"isExcel":true,"deleteIndex":null}]`
+	// Omit endSaveChanges: that path schedules an immediate async flush which clears
+	// changes0.json after a successful nop flush, racing this assertion.
+	body := `42["message",{"type":"saveChanges","changes":"[\"14;CgAAAAFiAAAA/wAAAAA=\",\"128;fAAAAAFkBwAABXIAAAAAAAE=\"]","isExcel":true,"deleteIndex":null}]`
 	req := httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(body))
 	h.ServePath(httptest.NewRecorder(), req, "/doc/csv-key/c")
 

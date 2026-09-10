@@ -410,17 +410,11 @@ async function isEditorInteractive(
   });
 }
 
-async function isEditorEditable(
+async function editorApisReady(
   page: Page,
   frame: FrameLocator,
   editor: SampleFile["editor"],
 ): Promise<boolean> {
-  if ((await page.locator("body").getAttribute("data-content-ready")) !== "true") {
-    return false;
-  }
-  if (await isLoadMaskBlocking(frame)) {
-    return false;
-  }
   if (editor === "cell") {
     return frame.locator("body").evaluate(cellSetApiReadyInBrowser).catch(() => false);
   }
@@ -435,6 +429,26 @@ async function isEditorEditable(
     return frame.locator("body").evaluate(wordSlideEditableInBrowser, editor).catch(() => false);
   }
   return isEditorInteractive(page, frame, editor);
+}
+
+async function isEditorEditable(
+  page: Page,
+  frame: FrameLocator,
+  editor: SampleFile["editor"],
+): Promise<boolean> {
+  if (await isLoadMaskBlocking(frame)) {
+    return false;
+  }
+  const apisReady = await editorApisReady(page, frame, editor);
+  if (!apisReady) {
+    return false;
+  }
+  const body = page.locator("body");
+  const contentReady = await body.getAttribute("data-content-ready");
+  if (contentReady === "true") {
+    return true;
+  }
+  return (await body.getAttribute("data-document-ready")) === "true";
 }
 
 /**

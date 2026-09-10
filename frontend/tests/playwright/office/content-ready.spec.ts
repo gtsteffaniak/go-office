@@ -1,5 +1,5 @@
 import { test, expect } from "../test-setup";
-import { warmDemoFile, waitForEditorEditable } from "../editor";
+import { warmDemoFile, waitForEditorReady, waitForEditorEditable } from "../editor";
 
 test.describe.configure({ mode: "parallel" });
 
@@ -16,12 +16,7 @@ for (const [file, editor] of [
       timeout: STATUS_OK_TIMEOUT,
     });
 
-    await expect
-      .poll(async () => (await page.locator("body").getAttribute("data-document-ready")) === "true", {
-        timeout: 45_000,
-      })
-      .toBe(true);
-
+    await waitForEditorReady(page, editor);
     await waitForEditorEditable(page, editor);
 
     await expect(page.locator("body")).toHaveAttribute("data-content-ready", "true");

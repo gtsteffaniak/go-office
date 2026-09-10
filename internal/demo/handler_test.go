@@ -90,6 +90,9 @@ func TestDemoLandingAndConfig(t *testing.T) {
 	if !strings.Contains(body, "/demo/warm?file=") {
 		t.Fatal("expected warm endpoint hook in viewer page")
 	}
+	if !strings.Contains(body, "data-content-ready") || !strings.Contains(body, "beginContentReadyPoll") {
+		t.Fatal("expected content-ready API polling in viewer page")
+	}
 	if !strings.Contains(body, "rel=\"preload\"") {
 		t.Fatal("expected api.js preload in viewer page")
 	}

@@ -58,7 +58,10 @@
     }
 
     var autosavePollTimer = null;
+    var contentReadyPollTimer = null;
     var saveWatchdogTimer = null;
+    var CONTENT_READY_POLL_INTERVAL_MS = 500;
+    var CONTENT_READY_POLL_MAX_ATTEMPTS = 180;
     var lastSavedFileBytes = 0;
     var saveBaselineBytes = 0;
     // Match Playwright SAVE_DONE_TIMEOUT with margin for queued x2t under parallel CI load.
@@ -163,6 +166,86 @@
       autosavePollTimer = setTimeout(tick, 400);
     }
 
+    function clearContentReadyPoll() {
+      if (contentReadyPollTimer) {
+        clearTimeout(contentReadyPollTimer);
+        contentReadyPollTimer = null;
+      }
+    }
+
+    function markContentReady() {
+      document.body.setAttribute("data-content-ready", "true");
+      clearContentReadyPoll();
+    }
+
+    function findEditorIframe() {
+      var iframes = document.querySelectorAll("#editor iframe");
+      for (var i = 0; i < iframes.length; i++) {
+        var src = iframes[i].getAttribute("src") || "";
+        if (
+          src.indexOf("/spreadsheeteditor/") >= 0 ||
+          src.indexOf("/documenteditor/") >= 0 ||
+          src.indexOf("/presentationeditor/") >= 0
+        ) {
+          return iframes[i];
+        }
+      }
+      return iframes.length > 0 ? iframes[iframes.length - 1] : null;
+    }
+
+    function probeEditorContentReady() {
+      if (window.docEditor && typeof window.docEditor.insertPlainText === "function") {
+        return true;
+      }
+      var iframe = findEditorIframe();
+      if (!iframe || !iframe.contentWindow) {
+        return false;
+      }
+      try {
+        var w = iframe.contentWindow;
+        var api = (w.Asc && (w.Asc.spreadsheet || w.Asc.editor || w.Asc.presentation)) || w.editor;
+        if (!api) {
+          return false;
+        }
+        var canSelect = typeof api.asc_selectRange === "function";
+        var canWriteCell =
+          typeof api.asc_setCellValue === "function" || typeof api.asc_insertText === "function";
+        if (canSelect && canWriteCell) {
+          return true;
+        }
+        return (
+          typeof api.asc_insertText === "function" ||
+          typeof api.asc_AddText === "function" ||
+          typeof api.asc_enterText === "function"
+        );
+      } catch (err) {
+        return false;
+      }
+    }
+
+    function beginContentReadyPoll() {
+      clearContentReadyPoll();
+      if (document.body.getAttribute("data-content-ready") === "true") {
+        return;
+      }
+      var attempts = 0;
+      function tick() {
+        attempts += 1;
+        if (document.body.getAttribute("data-content-ready") === "true") {
+          clearContentReadyPoll();
+          return;
+        }
+        if (probeEditorContentReady()) {
+          markContentReady();
+          return;
+        }
+        if (attempts < CONTENT_READY_POLL_MAX_ATTEMPTS) {
+          contentReadyPollTimer = setTimeout(tick, CONTENT_READY_POLL_INTERVAL_MS);
+        }
+      }
+      contentReadyPollTimer = setTimeout(tick, CONTENT_READY_POLL_INTERVAL_MS);
+    }
+
     function warmDocument() {
       var warmUrl = joinPath(officeBase, "/demo/warm?file=" + encodeURIComponent(SAMPLE_FILE));
       return fetch(warmUrl, { cache: "no-store" })
@@ -196,6 +279,7 @@
                 documentReady = true;
                 document.body.setAttribute("data-document-ready", "true");
                 setStatus("Document ready", "ok");
+                beginContentReadyPoll();
                 fetchDemoFileBytes()
                   .then(function (bytes) {
                     lastSavedFileBytes = bytes;
@@ -207,7 +291,7 @@
                 }
               },
               onDocumentContentReady: function () {
-                document.body.setAttribute("data-content-ready", "true");
+                markContentReady();
                 if (typeof baseEvents.onDocumentContentReady === "function") {
                   baseEvents.onDocumentContentReady();
                 }
@@ -298,6 +382,7 @@
     boot();
 
     function destroyDemoEditor() {
+      clearContentReadyPoll();
       var editor = window.docEditor;
       if (!editor) {
         return;

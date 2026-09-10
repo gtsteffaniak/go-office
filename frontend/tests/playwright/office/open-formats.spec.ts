@@ -1,5 +1,6 @@
 import { test, expect } from "../test-setup";
 import { waitForEditorReady } from "../editor";
+import { forkSample } from "../fork-sample";
 import {
   REPO_ROOT,
   sampleExists,
@@ -36,12 +37,13 @@ async function assertEditorOpens(page: import("@playwright/test").Page, sample: 
 }
 
 for (const sample of samplesForTier(maxTier)) {
-  test(`opens ${sample.path} (${sample.editor})`, async ({ page }) => {
+  test(`opens ${sample.path} (${sample.editor})`, async ({ page }, testInfo) => {
     if (!sampleExists(sample.path)) {
       throw new Error(
         `missing sample ${sample.path} — commit it under ${REPO_ROOT}/sample-files/ (see make check-sample-matrix)`,
       );
     }
-    await assertEditorOpens(page, sample);
+    const file = forkSample(sample.path, testInfo);
+    await assertEditorOpens(page, { ...sample, path: file });
   });
 }

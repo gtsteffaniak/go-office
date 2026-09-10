@@ -556,7 +556,10 @@ func (h *Handler) logClientMessage(docKey string, msg map[string]any) {
 	case "warn":
 		h.Logger.Warn("editor clientLog", "key", docKey, "level", level, "msg", text)
 	default:
-		if strings.Contains(text, "changesError") || strings.Contains(text, "Error") {
+		if strings.Contains(text, "changesError") {
+			// Non-fatal sdkjs diagnostic during binary document load; not a save failure.
+			h.Logger.Debug("editor clientLog", "key", docKey, "level", level, "msg", text)
+		} else if strings.Contains(text, "Error") {
 			h.Logger.Warn("editor clientLog", "key", docKey, "level", level, "msg", text)
 		} else {
 			h.Logger.Debug("editor clientLog", "key", docKey, "level", level, "msg", text)

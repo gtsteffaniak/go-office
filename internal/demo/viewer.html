@@ -149,7 +149,7 @@
 
     function warmDocument() {
       var warmUrl = joinPath(officeBase, "/demo/warm?file=" + encodeURIComponent(SAMPLE_FILE));
-      fetch(warmUrl, { cache: "no-store" }).catch(function () { /* best-effort */ });
+      return fetch(warmUrl, { cache: "no-store" }).catch(function () { /* best-effort */ });
     }
 
     function loadEditor() {
@@ -237,18 +237,21 @@
     }
 
     function boot() {
+      function start() {
+        warmDocument().finally(loadEditor);
+      }
       if (!("serviceWorker" in navigator)) {
-        loadEditor();
+        start();
         return;
       }
       navigator.serviceWorker.getRegistrations()
         .then(function (regs) {
           return Promise.all(regs.map(function (reg) { return reg.unregister(); }));
         })
-        .then(loadEditor)
+        .then(start)
         .catch(function (err) {
           console.warn("service worker unregister failed", err);
-          loadEditor();
+          start();
         });
     }
 

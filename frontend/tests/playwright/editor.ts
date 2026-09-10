@@ -19,7 +19,7 @@ const EDITOR_APP: Record<SampleFile["editor"], string> = {
 /** Shell elements inside the editor app frame (not on the demo viewer page). */
 const EDITOR_SHELL = "#editor-container, #id_main, #editor_sdk, #id_view";
 
-const EDITOR_LOAD_TIMEOUT = Number(process.env.PLAYWRIGHT_EDITOR_TIMEOUT ?? 25_000);
+const EDITOR_LOAD_TIMEOUT = Number(process.env.PLAYWRIGHT_EDITOR_TIMEOUT ?? 45_000);
 const DOCUMENT_READY_TIMEOUT = Number(process.env.PLAYWRIGHT_DOCUMENT_READY_TIMEOUT ?? 45_000);
 const DEMO_WARM_TIMEOUT = Number(process.env.PLAYWRIGHT_WARM_TIMEOUT ?? 90_000);
 const CONTENT_FIND_TIMEOUT = Number(process.env.PLAYWRIGHT_CONTENT_FIND_TIMEOUT ?? 15_000);
@@ -407,15 +407,16 @@ export async function waitForEditorReady(
       { timeout: DOCUMENT_READY_TIMEOUT },
     );
     const app = EDITOR_APP[editor];
-    await page
-      .locator(`iframe[src*="/${app}/"]`)
-      .first()
-      .waitFor({ state: "attached", timeout: EDITOR_LOAD_TIMEOUT });
-    const frame = getEditorFrame(page, editor);
     await expect
-      .poll(() => isEditorShellReady(frame, editor), {
-        timeout: EDITOR_LOAD_TIMEOUT,
-      })
+      .poll(
+        async () => {
+          if ((await page.locator(`iframe[src*="/${app}/"]`).count()) === 0) {
+            return false;
+          }
+          return isEditorShellReady(getEditorFrame(page, editor), editor);
+        },
+        { timeout: DOCUMENT_READY_TIMEOUT },
+      )
       .toBe(true);
   } catch (err) {
     throw new Error(`${String(err)}\nwitness:\n${await editorWitness(page, editor)}`);

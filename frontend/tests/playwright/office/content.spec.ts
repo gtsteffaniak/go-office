@@ -1,5 +1,5 @@
 import { test, expect } from "../test-setup";
-import { waitForEditorReady, assertSampleContent } from "../editor";
+import { warmDemoFile, waitForEditorReady, assertSampleContent } from "../editor";
 import {
   REPO_ROOT,
   sampleExists,
@@ -31,10 +31,15 @@ function trackCoauthoring(page: import("@playwright/test").Page) {
   });
 }
 
-async function openSample(page: import("@playwright/test").Page, sample: SampleFile) {
+async function openSample(
+  page: import("@playwright/test").Page,
+  request: import("@playwright/test").APIRequestContext,
+  sample: SampleFile,
+) {
   coauthoringFailures.length = 0;
   trackCoauthoring(page);
 
+  await warmDemoFile(request, sample.path);
   await page.goto(`/demo/view?file=${encodeURIComponent(sample.path)}`);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
@@ -55,7 +60,7 @@ function manifestCases(): SampleManifestEntry[] {
 }
 
 for (const entry of manifestCases()) {
-  test(`content ${entry.path}`, async ({ page }) => {
+  test(`content ${entry.path}`, async ({ page, request }) => {
     if (!sampleExists(entry.path)) {
       throw new Error(
         `missing sample ${entry.path} — commit it under ${REPO_ROOT}/sample-files/`,
@@ -66,7 +71,7 @@ for (const entry of manifestCases()) {
       tier: entry.tier,
       editor: entry.editor,
     };
-    await openSample(page, sample);
+    await openSample(page, request, sample);
     await assertSampleContent(page, entry);
   });
 }

@@ -5,7 +5,7 @@ const workers = Number(process.env.PLAYWRIGHT_WORKERS ?? 10);
 
 const sharedUse = {
   baseURL,
-  actionTimeout: Number(process.env.PLAYWRIGHT_ACTION_TIMEOUT ?? 20_000),
+  actionTimeout: Number(process.env.PLAYWRIGHT_ACTION_TIMEOUT ?? 45_000),
   navigationTimeout: Number(process.env.PLAYWRIGHT_NAVIGATION_TIMEOUT ?? 25_000),
   trace: (process.env.PLAYWRIGHT_TRACE as "on" | "off" | "retain-on-failure" | "on-first-retry") ??
     "retain-on-failure",

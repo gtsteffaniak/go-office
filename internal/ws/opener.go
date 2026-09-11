@@ -62,18 +62,9 @@ func (o *Opener) Open(ctx context.Context, origin, basePath, docKey string, cmd 
 	outDir := filepath.Join(o.CacheDir, docKey)
 	pending := hasPendingChanges(outDir)
 
-	// When the on-disk cache matches the requested document, open immediately and
-	// flush orphaned change blobs in the background so reconnect is not blocked on x2t.
-	if pending && o.canServeCachedOpen(ctx, cmd, outDir, ext) {
-		if packets, ok, err := o.openFromCache(cmd, origin, basePath, docKey, ext, outDir); ok {
-			if err != nil {
-				return o.errorPackets(cmd.Command, err)
-			}
-			go o.flushPendingInBackground(docKey, origin)
-			return packets, nil
-		}
-	}
-
+	// Orphaned change blobs from a prior session must be applied before serving
+	// Editor.bin; never flush in the background while opening or the client can load
+	// a stale bin and race the in-flight x2t conversion.
 	if pending {
 		if err := o.flushPending(ctx, docKey, origin); err != nil && o.Logger != nil {
 			o.Logger.Error("flush pending changes before open", "key", docKey, "err", err)
@@ -212,21 +203,6 @@ func (o *Opener) openBrowserDocument(cmd openCmd, origin, basePath, docKey, ext,
 	return []string{pkt}, nil
 }
 
-func (o *Opener) canServeCachedOpen(ctx context.Context, cmd openCmd, outDir, ext string) bool {
-	if o == nil || cmd.URL == "" {
-		return false
-	}
-	if convert.IsBrowserEditorFormat(ext) {
-		if !convert.BrowserOriginCached(outDir, ext) {
-			return false
-		}
-	} else if !convert.EditorBinCached(outDir) {
-		return false
-	}
-	match, err := o.cacheMatchesURL(ctx, outDir, cmd.URL)
-	return err == nil && match
-}
-
 func (o *Opener) flushPending(ctx context.Context, docKey, origin string) error {
 	if o == nil || o.Saver == nil || o.CacheDir == "" || docKey == "" {
 		return nil
@@ -236,15 +212,7 @@ func (o *Opener) flushPending(ctx context.Context, docKey, origin string) error 
 	}
 	flushCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
-	return o.Saver.FlushDocument(flushCtx, docKey, origin, true)
-}
-
-func (o *Opener) flushPendingInBackground(docKey, origin string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-	if err := o.flushPending(ctx, docKey, origin); err != nil && o.Logger != nil {
-		o.Logger.Error("background flush pending changes after open", "key", docKey, "err", err)
-	}
+	return o.Saver.FlushDocument(flushCtx, docKey, origin, false)
 }
 
 func invalidateOpenCache(outDir, ext string) {

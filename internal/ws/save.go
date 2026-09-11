@@ -682,12 +682,12 @@ func (h *Handler) handleSaveChanges(sess *session, msg map[string]any, docKey st
 		if h.Scheduler.completeForceSaveIfArmed(docKey, origin) {
 			return
 		}
-		if h.Scheduler.takeSaveIntent(docKey) {
-			h.Scheduler.setPendingEndSave(docKey)
-			return
-		}
-		// Autosave batch complete — flush immediately (callback status 2).
-		h.Scheduler.scheduleImmediate(docKey, origin, false)
+		// isSaveLock marks intent for the editor save dance; do not defer autosave
+		// endSaveChanges until forceSaveStart or saves never persist (only forceSaveStart
+		// arms the waiter via completeForceSaveIfArmed above).
+		h.Scheduler.takeSaveIntent(docKey)
+		forceFlush := messageBool(msg, "reSave")
+		h.Scheduler.scheduleImmediate(docKey, origin, forceFlush)
 		return
 	}
 

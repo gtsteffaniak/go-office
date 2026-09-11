@@ -126,7 +126,7 @@ func TestCoauthoringOriginPrefersPublicOrigin(t *testing.T) {
 	}
 }
 
-func TestOpenerOpenFastPathWithPendingChangesAndValidCache(t *testing.T) {
+func TestOpenerOpenBlocksUntilPendingChangesFlushed(t *testing.T) {
 	cacheDir := t.TempDir()
 	key := "fast-open"
 	outDir := filepath.Join(cacheDir, key)
@@ -165,31 +165,42 @@ func TestOpenerOpenFastPathWithPendingChangesAndValidCache(t *testing.T) {
 	}))
 	t.Cleanup(fileSrv.Close)
 
-	start := time.Now()
-	packets, err := opener.Open(context.Background(), "http://example.com", "/office", key, openCmd{
-		Command: "open",
-		Format:  "csv",
-		URL:     fileSrv.URL,
-	})
-	if err != nil {
-		t.Fatal(err)
+	done := make(chan struct{})
+	go func() {
+		packets, err := opener.Open(context.Background(), "http://example.com", "/office", key, openCmd{
+			Command: "open",
+			Format:  "csv",
+			URL:     fileSrv.URL,
+		})
+		if err != nil {
+			t.Error(err)
+			close(done)
+			return
+		}
+		if len(packets) != 1 || !strings.Contains(packets[0], `"status":"ok"`) {
+			t.Errorf("unexpected packet: %v", packets)
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("open completed before pending flush was unblocked")
+	case <-time.After(50 * time.Millisecond):
 	}
-	if time.Since(start) > 500*time.Millisecond {
-		t.Fatalf("open blocked on flush for %v", time.Since(start))
-	}
-	if len(packets) != 1 || !strings.Contains(packets[0], `"status":"ok"`) {
-		t.Fatalf("unexpected packet: %v", packets)
+	if saver.calls != 1 {
+		t.Fatalf("expected synchronous flush to start while open blocks, got %d calls", saver.calls)
 	}
 
 	close(block)
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if saver.calls >= 1 {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("open did not complete after flush unblocked")
 	}
-	t.Fatal("expected background flush for orphaned pending changes")
+	if saver.calls != 1 {
+		t.Fatalf("expected exactly one synchronous flush, got %d", saver.calls)
+	}
 }
 
 type blockingFlushSaver struct {

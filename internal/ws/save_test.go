@@ -257,7 +257,7 @@ func TestPollingForceSaveStartLateEndSaveChanges(t *testing.T) {
 	}
 }
 
-func TestPollingEndSaveChangesBeforeForceSaveStart(t *testing.T) {
+func TestPollingEndSaveChangesAfterIsSaveLockFlushesImmediately(t *testing.T) {
 	ws.ResetSessionsForTest()
 	saver := &recordingSaver{}
 	delay := time.Hour
@@ -269,13 +269,38 @@ func TestPollingEndSaveChangesBeforeForceSaveStart(t *testing.T) {
 	end := `42["message",{"type":"saveChanges","changes":["cell-edit"],"isExcel":true,"startSaveChanges":true,"endSaveChanges":true,"deleteIndex":null}]`
 	h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(end)), "/doc/xlsm-key/c")
 
-	time.Sleep(20 * time.Millisecond)
-	if len(saver.flushCalls()) != 0 {
-		t.Fatalf("endSaveChanges after isSaveLock should wait for forceSaveStart: %+v", saver.flushCalls())
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if len(saver.flushCalls()) >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+	calls := saver.flushCalls()
+	if len(calls) != 1 {
+		t.Fatalf("autosave endSaveChanges after isSaveLock should flush immediately, got %+v", calls)
+	}
+	if calls[0].force {
+		t.Fatalf("autosave flush should be force=false: %+v", calls)
+	}
+}
+
+func TestPollingForceSaveStartThenEndSaveChanges(t *testing.T) {
+	ws.ResetSessionsForTest()
+	saver := &recordingSaver{}
+	delay := time.Hour
+	h := saveTestHandlerWithSaver(t, saver, delay)
 
 	h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office",
 		strings.NewReader(`42["message",{"type":"forceSaveStart"}]`)), "/doc/xlsm-key/c")
+
+	time.Sleep(20 * time.Millisecond)
+	if len(saver.flushCalls()) != 0 {
+		t.Fatalf("forceSaveStart alone should wait for endSaveChanges: %+v", saver.flushCalls())
+	}
+
+	end := `42["message",{"type":"saveChanges","changes":["cell-edit"],"isExcel":true,"startSaveChanges":true,"endSaveChanges":true,"deleteIndex":null}]`
+	h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(end)), "/doc/xlsm-key/c")
 
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
@@ -286,10 +311,10 @@ func TestPollingEndSaveChangesBeforeForceSaveStart(t *testing.T) {
 	}
 	calls := saver.flushCalls()
 	if len(calls) != 1 {
-		t.Fatalf("expected single immediate flush after forceSaveStart, got %+v", calls)
+		t.Fatalf("expected single flush after endSaveChanges, got %+v", calls)
 	}
 	if !calls[0].force {
-		t.Fatalf("save button flush should be force=true: %+v", calls)
+		t.Fatalf("manual save flush should be force=true: %+v", calls)
 	}
 }
 

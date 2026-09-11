@@ -20,7 +20,9 @@ func (s *Server) FlushDocument(ctx context.Context, docKey, origin string, force
 		return nil
 	}
 	callbackURL := strings.TrimSpace(doc.CallbackURL)
-	if callbackURL != "" && ackBlobs > 0 {
+	// Autosave (force=false) must still notify when a prior pass already converted
+	// blobs; only skip the integrator callback for redundant force-save with no work.
+	if callbackURL != "" && !(force && ackBlobs == 0) {
 		ext := strings.TrimPrefix(strings.ToLower(doc.FileType), ".")
 		if ext == "" {
 			return fmt.Errorf("office: missing file type for key %q", docKey)

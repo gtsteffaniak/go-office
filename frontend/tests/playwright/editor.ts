@@ -883,33 +883,19 @@ export async function setCellContent(
   await settleFrame(frame, 500);
 }
 
-/** Set a cell value for save tests (one SDK or UI write, then readback poll). */
+/** Set a cell value for save tests (SDK/UI write with retries, then readback poll). */
 export async function editCellForSave(
   page: Page,
   editor: SampleFile["editor"],
   ref: string,
   value: string,
 ): Promise<void> {
-  await waitForEditorEditable(page, editor);
+  await setCellContent(page, editor, ref, value);
   const frame = getEditorFrame(page, editor);
-  await dismissEditorOverlays(frame);
-
   const apiReady = await frame
     .locator("body")
     .evaluate(cellSetApiReadyInBrowser)
     .catch(() => false);
-
-  if (apiReady) {
-    const wrote = await setCellValue(frame, ref, value);
-    if (!wrote) {
-      throw new Error(`SDK cell write failed for ${ref}`);
-    }
-  } else {
-    await selectCell(frame, ref);
-    await writeFormulaBarValue(frame, value);
-    await commitCellEdit(frame);
-  }
-  await settleFrame(frame, 300);
 
   try {
     await expect

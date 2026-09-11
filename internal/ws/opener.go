@@ -231,7 +231,7 @@ func (o *Opener) cacheMatchesURL(ctx context.Context, outDir, rawURL string) (bo
 	}
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
-	if err := downloadURL(ctx, rawURL, tmp); err != nil {
+	if err = downloadURL(ctx, rawURL, tmp); err != nil {
 		return false, err
 	}
 	hash, err := convert.FileSHA256(tmpPath)

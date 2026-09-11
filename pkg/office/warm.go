@@ -33,7 +33,7 @@ func (s *Server) EnsureEditorBin(ctx context.Context, docKey, sourcePath, ext st
 		if convert.BrowserOriginCached(outDir, ext) && convert.SourceHashMatches(outDir, srcHash) {
 			return nil
 		}
-		if err := copyFile(sourcePath, dest); err != nil {
+		if err = copyFile(sourcePath, dest); err != nil {
 			return err
 		}
 		return convert.WriteSourceHash(outDir, srcHash)

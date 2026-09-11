@@ -199,12 +199,6 @@ func (s *saveScheduler) takeSaveIntent(docKey string) bool {
 	return true
 }
 
-func (s *saveScheduler) setPendingEndSave(docKey string) {
-	s.mu.Lock()
-	s.pendingEndSave[docKey] = true
-	s.mu.Unlock()
-}
-
 func (s *saveScheduler) takePendingEndSave(docKey string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

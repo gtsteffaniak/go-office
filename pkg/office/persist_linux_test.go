@@ -242,10 +242,10 @@ func TestPersistRefreshesEditorBinBeforeAck(t *testing.T) {
 		t.Fatal(err)
 	}
 	changesDir := filepath.Join(cacheDir, "changes")
-	if err := os.MkdirAll(changesDir, 0o755); err != nil {
+	if err = os.MkdirAll(changesDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(changesDir, "changes0.json"), fixture, 0o644); err != nil {
+	if err = os.WriteFile(filepath.Join(changesDir, "changes0.json"), fixture, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -303,7 +303,7 @@ func TestPersistCoalesceMidFlushSteps(t *testing.T) {
 		t.Fatal(err)
 	}
 	var firstBlobs []string
-	if err := json.Unmarshal(firstFixture, &firstBlobs); err != nil {
+	if err = json.Unmarshal(firstFixture, &firstBlobs); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = changes.Append(cacheDir, firstBlobs); err != nil {
@@ -324,7 +324,7 @@ func TestPersistCoalesceMidFlushSteps(t *testing.T) {
 		t.Fatal(err)
 	}
 	var secondBlobs []string
-	if err := json.Unmarshal(secondFixture, &secondBlobs); err != nil {
+	if err = json.Unmarshal(secondFixture, &secondBlobs); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = changes.Append(cacheDir, secondBlobs); err != nil {
@@ -388,7 +388,7 @@ func TestSequentialSaveChangesWithEditorBinRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	var firstBlobs []string
-	if err := json.Unmarshal(firstFixture, &firstBlobs); err != nil {
+	if err = json.Unmarshal(firstFixture, &firstBlobs); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = changes.Append(cacheDir, firstBlobs); err != nil {
@@ -407,7 +407,7 @@ func TestSequentialSaveChangesWithEditorBinRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	var secondBlobs []string
-	if err := json.Unmarshal(secondFixture, &secondBlobs); err != nil {
+	if err = json.Unmarshal(secondFixture, &secondBlobs); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = changes.Append(cacheDir, secondBlobs); err != nil {

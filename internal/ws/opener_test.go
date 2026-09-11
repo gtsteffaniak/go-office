@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -72,10 +73,10 @@ func TestOpenerOpenSkipsDownloadWhenEditorBinCached(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(outDir, "Editor.bin"), []byte("editor-bin"), 0o644); err != nil {
+	if err = os.WriteFile(filepath.Join(outDir, "Editor.bin"), []byte("editor-bin"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := convert.WriteSourceHash(outDir, srcHash); err != nil {
+	if err = convert.WriteSourceHash(outDir, srcHash); err != nil {
 		t.Fatal(err)
 	}
 
@@ -157,7 +158,8 @@ func TestOpenerOpenBlocksUntilPendingChangesFlushed(t *testing.T) {
 	}
 
 	block := make(chan struct{})
-	saver := &blockingFlushSaver{block: block}
+	started := make(chan struct{}, 1)
+	saver := &blockingFlushSaver{block: block, started: started}
 	opener := &Opener{CacheDir: cacheDir, Saver: saver, Logger: slog.Default()}
 
 	fileSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -185,11 +187,8 @@ func TestOpenerOpenBlocksUntilPendingChangesFlushed(t *testing.T) {
 
 	select {
 	case <-done:
-		t.Fatal("open completed before pending flush was unblocked")
-	case <-time.After(50 * time.Millisecond):
-	}
-	if saver.calls != 1 {
-		t.Fatalf("expected synchronous flush to start while open blocks, got %d calls", saver.calls)
+		t.Fatal("open completed before pending flush started")
+	case <-started:
 	}
 
 	close(block)
@@ -198,18 +197,25 @@ func TestOpenerOpenBlocksUntilPendingChangesFlushed(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("open did not complete after flush unblocked")
 	}
-	if saver.calls != 1 {
-		t.Fatalf("expected exactly one synchronous flush, got %d", saver.calls)
+	if saver.calls.Load() != 1 {
+		t.Fatalf("expected exactly one synchronous flush, got %d", saver.calls.Load())
 	}
 }
 
 type blockingFlushSaver struct {
-	block chan struct{}
-	calls int
+	block   chan struct{}
+	started chan struct{}
+	calls   atomic.Int32
 }
 
 func (s *blockingFlushSaver) FlushDocument(context.Context, string, string, bool) error {
-	s.calls++
+	s.calls.Add(1)
+	if s.started != nil {
+		select {
+		case s.started <- struct{}{}:
+		default:
+		}
+	}
 	if s.block != nil {
 		<-s.block
 	}

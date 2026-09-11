@@ -107,7 +107,8 @@ func (s *Server) persistDocument(ctx context.Context, docKey string, ackOnSucces
 		if round >= maxPersistCoalesceRounds {
 			return 0, fmt.Errorf("office: coalesce round limit exceeded for key %q", docKey)
 		}
-		beforePending, err := changes.Count(cacheDir)
+		var beforePending int
+		beforePending, err = changes.Count(cacheDir)
 		if err != nil {
 			return 0, err
 		}
@@ -115,7 +116,8 @@ func (s *Server) persistDocument(ctx context.Context, docKey string, ackOnSucces
 		if err != nil {
 			return 0, err
 		}
-		pendingCount, err := changes.Count(cacheDir)
+		var pendingCount int
+		pendingCount, err = changes.Count(cacheDir)
 		if err != nil {
 			return 0, err
 		}
@@ -135,14 +137,15 @@ func (s *Server) persistDocument(ctx context.Context, docKey string, ackOnSucces
 		}
 		// New blobs arrived during x2t. Rebuild Editor.bin from the partial output
 		// and acknowledge converted blobs before applying the remainder.
-		if err := s.refreshEditorBinFromSaved(ctx, cacheDir, outPath); err != nil {
+		if err = s.refreshEditorBinFromSaved(ctx, cacheDir, outPath); err != nil {
 			return 0, err
 		}
-		if err := changes.Acknowledge(cacheDir, ackBlobs); err != nil {
+		if err = changes.Acknowledge(cacheDir, ackBlobs); err != nil {
 			return 0, err
 		}
 		changes.RemoveSnapshot(cacheDir)
-		afterPending, err := changes.Count(cacheDir)
+		var afterPending int
+		afterPending, err = changes.Count(cacheDir)
 		if err != nil {
 			return 0, err
 		}

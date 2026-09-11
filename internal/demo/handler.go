@@ -500,22 +500,6 @@ func demoDocumentKey(file string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (h *Handler) fileFingerprint(ctx context.Context, file string, info office.FileInfo) string {
-	if h == nil || h.store == nil {
-		return fmt.Sprintf("%d:%d", info.Size, info.ModTime.UnixNano())
-	}
-	rc, err := h.store.Open(ctx, file)
-	if err != nil {
-		return fmt.Sprintf("%d:%d", info.Size, info.ModTime.UnixNano())
-	}
-	defer rc.Close()
-	sum := sha256.New()
-	if _, err := io.Copy(sum, io.LimitReader(rc, 32<<20)); err != nil {
-		return fmt.Sprintf("%d:%d", info.Size, info.ModTime.UnixNano())
-	}
-	return hex.EncodeToString(sum.Sum(nil))
-}
-
 func formatSize(size int64) string {
 	const unit = 1024
 	if size < unit {

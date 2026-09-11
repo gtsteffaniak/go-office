@@ -4,14 +4,65 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/quantumx-apps/go-office/internal/session"
 	office "github.com/quantumx-apps/go-office/pkg/office"
 )
+
+func TestFlushDocumentNoOpForceSkipsCallback(t *testing.T) {
+	var callbackPosts atomic.Int32
+	cbSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callbackPosts.Add(1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"error":0}`))
+	}))
+	t.Cleanup(cbSrv.Close)
+
+	assetDir := t.TempDir()
+	srv, err := office.New(nopStorage{}, office.Options{
+		AssetDir:     assetDir,
+		PublicOrigin: "http://localhost:8080",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	docKey := "noop-force"
+	srv.Sessions().UpsertDoc(session.Document{
+		Key:         docKey,
+		Path:        "sample-files/sample.xlsx",
+		FileType:    "xlsx",
+		CallbackURL: cbSrv.URL,
+	})
+
+	if err := srv.FlushDocument(context.Background(), docKey, "", true); err != nil {
+		t.Fatalf("noop force flush: %v", err)
+	}
+	if callbackPosts.Load() != 0 {
+		t.Fatalf("expected no callback POST for noop force flush, got %d", callbackPosts.Load())
+	}
+}
+
+func TestCacheFileURLFallsBackToPublicOrigin(t *testing.T) {
+	srv, err := office.New(nopStorage{}, office.Options{
+		AssetDir:     t.TempDir(),
+		PublicOrigin: "http://example.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := srv.CacheFileURL("", "doc-key", "saved.xlsx")
+	want := "http://example.com/cache/files/doc-key/saved.xlsx"
+	if got != want {
+		t.Fatalf("CacheFileURL() = %q, want %q", got, want)
+	}
+}
 
 func TestFlushDocumentUnknownKey(t *testing.T) {
 	srv, err := office.New(nopStorage{}, office.Options{AssetDir: t.TempDir()})

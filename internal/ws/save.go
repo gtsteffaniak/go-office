@@ -36,9 +36,10 @@ type flushJob struct {
 }
 
 type keyFlushCoordinator struct {
-	mu      sync.Mutex
-	running bool
-	queued  *flushJob
+	mu       sync.Mutex
+	running  bool
+	queued   *flushJob
+	afterRun []func(error)
 }
 
 type saveScheduler struct {
@@ -310,20 +311,28 @@ func (s *saveScheduler) submitFlush(docKey string, job flushJob) {
 			}
 
 			coord.mu.Lock()
+			after := coord.afterRun
+			coord.afterRun = nil
 			if coord.queued == nil {
 				coord.running = false
 				coord.mu.Unlock()
+				for _, fn := range after {
+					fn(err)
+				}
 				return
 			}
 			current = *coord.queued
 			coord.queued = nil
 			coord.mu.Unlock()
+			for _, fn := range after {
+				fn(err)
+			}
 		}
 	}()
 }
 
-// attachFlushOnDone chains a force-save completion callback onto the in-flight or
-// queued flush for docKey. Returns true when the callback was attached.
+// attachFlushOnDone chains a force-save completion callback onto the in-flight flush.
+// It does not queue another x2t pass; the waiter runs when the current flush finishes.
 func (s *saveScheduler) attachFlushOnDone(docKey string, onDone func(error)) bool {
 	if s == nil || onDone == nil {
 		return false
@@ -334,7 +343,7 @@ func (s *saveScheduler) attachFlushOnDone(docKey string, onDone func(error)) boo
 		coord.mu.Unlock()
 		return false
 	}
-	coord.queued = s.mergeFlushJob(coord.queued, flushJob{force: true, onDone: onDone})
+	coord.afterRun = append(coord.afterRun, onDone)
 	coord.mu.Unlock()
 	return true
 }

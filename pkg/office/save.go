@@ -319,7 +319,10 @@ func (s *Server) NotifyCallback(ctx context.Context, docKey, callbackURL, downlo
 
 // CacheFileURL builds a public URL for a file under cache/files/{key}/.
 func (s *Server) CacheFileURL(origin, docKey, name string) string {
-	origin = strings.TrimSuffix(origin, "/")
+	origin = strings.TrimSuffix(strings.TrimSpace(origin), "/")
+	if origin == "" {
+		origin = strings.TrimSuffix(strings.TrimSpace(s.opts.PublicOrigin), "/")
+	}
 	base := strings.TrimSuffix(s.opts.BasePath, "/")
 	if base == "" || base == "/" {
 		return origin + "/cache/files/" + docKey + "/" + name

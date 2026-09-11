@@ -348,9 +348,62 @@ func TestForceSaveStartInProgressWhileFlushRunning(t *testing.T) {
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		if len(saver.flushCalls()) >= 1 {
-			return
+			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("flush did not complete after unblock")
+	calls := saver.flushCalls()
+	if len(calls) != 1 {
+		t.Fatalf("forceSaveStart during flush should not queue second flush, got %+v", calls)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServePath(rec, httptest.NewRequest(http.MethodGet, "/?EIO=4&transport=polling&sid=go-office&t=fsdone", nil), "/doc/key/c")
+	out = rec.Body.String()
+	if !strings.Contains(out, `"success":true`) {
+		t.Fatalf("expected forceSave success after in-flight flush, got %q", out)
+	}
+}
+
+func TestForceSaveStartDuringAutosaveFlushSinglePass(t *testing.T) {
+	ws.ResetSessionsForTest()
+	block := make(chan struct{})
+	started := make(chan struct{}, 1)
+	saver := &recordingSaver{block: block, started: started}
+	delay := time.Hour
+	h := saveTestHandlerWithSaver(t, saver, delay)
+
+	end := `42["message",{"type":"saveChanges","changes":["cell-edit"],"isExcel":true,"startSaveChanges":true,"endSaveChanges":true,"deleteIndex":null}]`
+	h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(end)), "/doc/xls-key/c")
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("autosave flush did not start")
+	}
+
+	h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office",
+		strings.NewReader(`42["message",{"type":"forceSaveStart"}]`)), "/doc/xls-key/c")
+
+	close(block)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if len(saver.flushCalls()) >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	calls := saver.flushCalls()
+	if len(calls) != 1 {
+		t.Fatalf("expected exactly one flush, got %+v", calls)
+	}
+	if calls[0].force {
+		t.Fatalf("autosave flush should remain force=false, got %+v", calls)
+	}
+
+	rec := httptest.NewRecorder()
+	h.ServePath(rec, httptest.NewRequest(http.MethodGet, "/?EIO=4&transport=polling&sid=go-office&t=fsok", nil), "/doc/xls-key/c")
+	if !strings.Contains(rec.Body.String(), `"success":true`) {
+		t.Fatalf("expected forceSave success, got %q", rec.Body.String())
+	}
 }

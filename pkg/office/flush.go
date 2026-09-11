@@ -20,7 +20,7 @@ func (s *Server) FlushDocument(ctx context.Context, docKey, origin string, force
 		return nil
 	}
 	callbackURL := strings.TrimSpace(doc.CallbackURL)
-	if callbackURL != "" {
+	if callbackURL != "" && ackBlobs > 0 {
 		ext := strings.TrimPrefix(strings.ToLower(doc.FileType), ".")
 		if ext == "" {
 			return fmt.Errorf("office: missing file type for key %q", docKey)

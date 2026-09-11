@@ -292,3 +292,40 @@ func TestPollingEndSaveChangesBeforeForceSaveStart(t *testing.T) {
 		t.Fatalf("save button flush should be force=true: %+v", calls)
 	}
 }
+
+func TestForceSaveStartInProgressWhileFlushRunning(t *testing.T) {
+	ws.ResetSessionsForTest()
+	block := make(chan struct{})
+	started := make(chan struct{}, 1)
+	saver := &recordingSaver{block: block, started: started}
+	delay := time.Hour
+	h := saveTestHandlerWithSaver(t, saver, delay)
+
+	body := `42["message",{"type":"saveChanges","changes":["c1"],"reSave":true,"deleteIndex":-1}]`
+	h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(body)), "/doc/key/c")
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first flush did not start")
+	}
+
+	h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office",
+		strings.NewReader(`42["message",{"type":"forceSaveStart"}]`)), "/doc/key/c")
+	rec := httptest.NewRecorder()
+	h.ServePath(rec, httptest.NewRequest(http.MethodGet, "/?EIO=4&transport=polling&sid=go-office&t=fs", nil), "/doc/key/c")
+	out := rec.Body.String()
+	if !strings.Contains(out, `"inProgress":true`) {
+		t.Fatalf("expected forceSaveStart inProgress while flush running, got %q", out)
+	}
+
+	close(block)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if len(saver.flushCalls()) >= 1 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("flush did not complete after unblock")
+}

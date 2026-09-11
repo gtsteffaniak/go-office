@@ -107,6 +107,15 @@ func (s *session) applyBuildBase(build BuildInfo, basePath string) {
 	}
 }
 
+// SetActiveDocumentSessionForTest marks docKey as having an open editor (tests only).
+func SetActiveDocumentSessionForTest(docKey string) {
+	ResetSessionsForTest()
+	s := getSession("go-office-test", docKey, ParseBuild("9.3.4"), "")
+	s.mu.Lock()
+	s.documentOpened = true
+	s.mu.Unlock()
+}
+
 // ResetSessionsForTest clears in-memory coauthoring sessions (tests only).
 func ResetSessionsForTest() {
 	resetDocumentConfigEpochs()
@@ -275,7 +284,7 @@ func (s *session) shouldLogReconnect(req authRequest) bool {
 	return s.documentOpened && s.isReconnectAuth(req)
 }
 
-func (s *session) onConnect(authData []byte) {
+func (s *session) onConnect(authData []byte, deferAuth bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.syncConfigEpochLocked()
@@ -312,7 +321,7 @@ func (s *session) onConnect(authData []byte) {
 	s.namespaceAck = true
 	s.outbox = append(s.outbox, serverInfoPacket(s.build))
 	s.infoSent = true
-	if len(authData) > 0 {
+	if len(authData) > 0 && !deferAuth {
 		if req, ok := parseAuthPayload(authData); ok {
 			s.queueAuthLocked(req)
 		}
@@ -405,6 +414,18 @@ func (s *session) startOpen(opener DocumentOpener, req authRequest, origin strin
 			return
 		}
 		if len(packets) > 0 {
+			s.mu.Lock()
+			if !s.authSent {
+				s.authSent = true
+				if s.sessionID == "" {
+					s.sessionID = newSessionID()
+				}
+				authPkts := authResponsePackets(s.build, s.sessionID, s.indexUser, req)
+				s.mu.Unlock()
+				packets = append(authPkts, packets...)
+			} else {
+				s.mu.Unlock()
+			}
 			s.enqueue(packets...)
 			s.mu.Lock()
 			s.documentOpened = true

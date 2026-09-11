@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:8080";
-const workers = Number(process.env.PLAYWRIGHT_WORKERS ?? 10);
+const workers = Number(process.env.PLAYWRIGHT_WORKERS ?? 8);
 const saveTestTimeout = Number(process.env.PLAYWRIGHT_SAVE_TEST_TIMEOUT ?? 240_000);
 
 const sharedUse = {
@@ -19,6 +19,8 @@ export default defineConfig({
     timeout: Number(process.env.PLAYWRIGHT_EXPECT_TIMEOUT ?? 6_000),
   },
   testDir: "./tests/playwright/office",
+  globalSetup: "./tests/playwright/global-setup.ts",
+  globalTeardown: "./tests/playwright/global-teardown.ts",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: 0,

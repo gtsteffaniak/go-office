@@ -16,10 +16,11 @@ import (
 )
 
 type recordingSaver struct {
-	mu    sync.Mutex
-	calls []flushCall
-	err   error
-	block chan struct{}
+	mu      sync.Mutex
+	calls   []flushCall
+	err     error
+	block   chan struct{}
+	started chan struct{}
 }
 
 type flushCall struct {
@@ -29,6 +30,12 @@ type flushCall struct {
 }
 
 func (s *recordingSaver) FlushDocument(_ context.Context, docKey, origin string, force bool) error {
+	if s.started != nil {
+		select {
+		case s.started <- struct{}{}:
+		default:
+		}
+	}
 	if s.block != nil {
 		<-s.block
 	}

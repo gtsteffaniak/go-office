@@ -18,6 +18,10 @@ import (
 	"github.com/quantumx-apps/go-office/pkg/callback"
 )
 
+// maxPersistCoalesceRounds bounds mid-flush re-convert loops when change blobs arrive
+// during x2t; prevents unbounded work if the journal keeps growing.
+const maxPersistCoalesceRounds = 8
+
 // HandleCallback processes ONLYOFFICE editor callback POSTs (status 2/6 → persist).
 func (s *Server) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -81,9 +85,9 @@ func (s *Server) persistDocument(ctx context.Context, docKey string, ackOnSucces
 	}
 
 	cacheDir := filepath.Join(s.cacheDir(), docKey)
-	if !hasPendingChanges(cacheDir) && !convert.EditorBinCached(cacheDir) {
+	if !hasPendingChanges(cacheDir) {
 		if s.opts.Logger != nil {
-			s.opts.Logger.Debug("persist skipped; no pending changes or Editor.bin", "key", docKey)
+			s.opts.Logger.Debug("persist skipped; no pending changes", "key", docKey)
 		}
 		return 0, nil
 	}
@@ -98,9 +102,53 @@ func (s *Server) persistDocument(ctx context.Context, docKey string, ackOnSucces
 	if s.opts.Logger != nil {
 		s.opts.Logger.Debug("persist convert", "key", docKey, "path", doc.Path, "ext", ext, "pendingChanges", pending, "callbackOnly", callbackOnly)
 	}
-	ackBlobs, err := s.convertDocument(ctx, conv, cacheDir, outPath, ext)
-	if err != nil {
-		return 0, err
+	var ackBlobs int
+	for round := 0; ; round++ {
+		if round >= maxPersistCoalesceRounds {
+			return 0, fmt.Errorf("office: coalesce round limit exceeded for key %q", docKey)
+		}
+		beforePending, err := changes.Count(cacheDir)
+		if err != nil {
+			return 0, err
+		}
+		ackBlobs, err = s.convertDocument(ctx, conv, cacheDir, outPath, ext)
+		if err != nil {
+			return 0, err
+		}
+		pendingCount, err := changes.Count(cacheDir)
+		if err != nil {
+			return 0, err
+		}
+		if pendingCount <= ackBlobs {
+			break
+		}
+		if ackBlobs == 0 {
+			break
+		}
+		if s.opts.Logger != nil {
+			s.opts.Logger.Debug("persist coalescing mid-flush changes",
+				"key", docKey,
+				"converted", ackBlobs,
+				"pending", pendingCount,
+				"round", round+1,
+			)
+		}
+		// New blobs arrived during x2t. Rebuild Editor.bin from the partial output
+		// and acknowledge converted blobs before applying the remainder.
+		if err := s.refreshEditorBinFromSaved(ctx, cacheDir, outPath); err != nil {
+			return 0, err
+		}
+		if err := changes.Acknowledge(cacheDir, ackBlobs); err != nil {
+			return 0, err
+		}
+		changes.RemoveSnapshot(cacheDir)
+		afterPending, err := changes.Count(cacheDir)
+		if err != nil {
+			return 0, err
+		}
+		if afterPending >= beforePending {
+			return 0, fmt.Errorf("office: coalesce made no journal progress for key %q", docKey)
+		}
 	}
 
 	f, err := os.Open(outPath)
@@ -138,7 +186,11 @@ func (s *Server) persistDocument(ctx context.Context, docKey string, ackOnSucces
 	} else if s.opts.Logger != nil {
 		s.opts.Logger.Info("document converted for callback", "key", docKey, "bytes", len(raw))
 	}
-	_ = os.Remove(filepath.Join(cacheDir, "source.sha256"))
+	if ackBlobs > 0 {
+		if err := s.refreshEditorBinFromSaved(ctx, cacheDir, outPath); err != nil {
+			return 0, err
+		}
+	}
 	if ackOnSuccess {
 		if err := s.finalizePersist(docKey, ackBlobs); err != nil {
 			return 0, err

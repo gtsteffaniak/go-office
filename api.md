@@ -135,8 +135,9 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 | `42["message",{"type":"license",…}]` | ✅ | ✅ | Handshake type `3`, `buildVersion` from assets |
 | `auth` + `authChanges` | ✅ | ✅ | `openCmd` → download + x2t or PDF path |
 | `documentOpen` ok/error | ✅ | ✅ | Cache file list |
-| `isSaveLock` → `saveLock` | ✅ | ✅ | Golden fixture |
+| `isSaveLock` → `saveLock` | ✅ | ✅ | `saveLock:true` = blocked (flush running or lock held); `false` = proceed |
 | `saveChanges` → `unSaveLock` | ✅ | ✅ | Changes appended; debounced flush |
+| `forceSaveStart` → `forceSave` | ✅ | ✅ | `messages.inProgress:true` when a flush is already running; `forceSave` after x2t completes |
 | Other coauthoring messages (cursor, chat, presence, …) | ✅ | ❌ | Ignored (POST returns `ok`, no reply) |
 | Multi-user on same `key` | ✅ | ❌ | Single session per document key |
 

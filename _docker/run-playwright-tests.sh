@@ -23,8 +23,9 @@ healthcheck() {
 }
 
 cd /app
-: "${PLAYWRIGHT_WORKERS:=10}"
-: "${OFFICE_CONVERT_LIMIT:=6}"
+: "${PLAYWRIGHT_WORKERS:=8}"
+: "${OFFICE_CONVERT_LIMIT:=8}"
+: "${PLAYWRIGHT_PREWARM_DEADLINE_SEC:=60}"
 export PLAYWRIGHT_WORKERS OFFICE_CONVERT_LIMIT
 
 # Stream go-office logs to CI output as they happen (line-buffered when stdbuf exists).
@@ -65,15 +66,22 @@ done
 echo "go-office healthy after ${attempt} attempt(s)" >&2
 
 if [ -f /app/_docker/warm-playwright-samples.mjs ]; then
+  PREWARM_THUMBS=1
+  case "${PLAYWRIGHT_PROJECT:-}" in
+    chromium-save|chromium-post-save) PREWARM_THUMBS=0 ;;
+  esac
   PLAYWRIGHT_BASE_URL="http://127.0.0.1:8080" \
     PLAYWRIGHT_SAMPLES_DIR="/app/sample-files" \
-    node /app/_docker/warm-playwright-samples.mjs >&2 || {
-    echo "sample pre-warm failed" >&2
+    PLAYWRIGHT_PREWARM_THUMBNAILS="$PREWARM_THUMBS" \
+    PLAYWRIGHT_PREWARM_DEADLINE_MS="${PLAYWRIGHT_PREWARM_DEADLINE_MS:-60000}" \
+    timeout "$PLAYWRIGHT_PREWARM_DEADLINE_SEC" node /app/_docker/warm-playwright-samples.mjs >&2 || {
+    echo "sample pre-warm failed or exceeded ${PLAYWRIGHT_PREWARM_DEADLINE_SEC}s deadline" >&2
     exit 1
   }
 fi
 
 cd /app/frontend
+echo "starting playwright project=${PLAYWRIGHT_PROJECT:-all} workers=${PLAYWRIGHT_WORKERS}" >&2
 if [ -n "${PLAYWRIGHT_PROJECT:-}" ]; then
   exec npx playwright test --project="$PLAYWRIGHT_PROJECT" --no-deps
 else

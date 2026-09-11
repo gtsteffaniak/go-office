@@ -24,15 +24,25 @@ func (s *Server) EnsureEditorBin(ctx context.Context, docKey, sourcePath, ext st
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
+	srcHash, err := convert.FileSHA256(sourcePath)
+	if err != nil {
+		return err
+	}
 	if convert.IsBrowserEditorFormat(ext) {
-		if convert.BrowserOriginCached(outDir, ext) {
+		dest := filepath.Join(outDir, "origin."+ext)
+		if convert.BrowserOriginCached(outDir, ext) && convert.SourceHashMatches(outDir, srcHash) {
 			return nil
 		}
-		dest := filepath.Join(outDir, "origin."+ext)
-		return copyFile(sourcePath, dest)
+		if err := copyFile(sourcePath, dest); err != nil {
+			return err
+		}
+		return convert.WriteSourceHash(outDir, srcHash)
+	}
+	if convert.EditorBinReusable(outDir, srcHash) {
+		return nil
 	}
 	if convert.EditorBinCached(outDir) {
-		return nil
+		invalidateEditorBinCache(outDir)
 	}
 	conv, err := s.converter()
 	if err != nil {
@@ -49,6 +59,25 @@ func (s *Server) EnsureEditorBin(ctx context.Context, docKey, sourcePath, ext st
 		s.opts.Logger.Debug("warm convert ok", "key", docKey, "ext", ext)
 	}
 	return nil
+}
+
+// EditorBinFresh reports whether cache/{docKey} matches the current source file bytes.
+func (s *Server) EditorBinFresh(docKey, sourcePath, ext string) bool {
+	docKey = strings.TrimSpace(docKey)
+	sourcePath = strings.TrimSpace(sourcePath)
+	if docKey == "" || sourcePath == "" {
+		return false
+	}
+	srcHash, err := convert.FileSHA256(sourcePath)
+	if err != nil {
+		return false
+	}
+	outDir := filepath.Join(s.cacheDir(), docKey)
+	ext = strings.TrimPrefix(strings.ToLower(ext), ".")
+	if convert.IsBrowserEditorFormat(ext) {
+		return convert.BrowserOriginCached(outDir, ext) && convert.SourceHashMatches(outDir, srcHash)
+	}
+	return convert.EditorBinReusable(outDir, srcHash)
 }
 
 // EditorBinCached reports whether cache/{docKey} already has a usable Editor.bin.

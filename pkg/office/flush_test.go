@@ -45,7 +45,7 @@ func TestPersistDocumentNoOpWithoutEditorBin(t *testing.T) {
 	}
 }
 
-func TestPersistDocumentWritesStorage(t *testing.T) {
+func TestPersistDocumentSkipsStaleEditorBinWithoutChanges(t *testing.T) {
 	assetDir := t.TempDir()
 	cacheRoot := filepath.Join(assetDir, "cache")
 	docKey := "persist-key"
@@ -53,8 +53,7 @@ func TestPersistDocumentWritesStorage(t *testing.T) {
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Minimal Editor.bin placeholder; conversion will fail without real x2t/assets.
-	if err := os.WriteFile(filepath.Join(cacheDir, "Editor.bin"), []byte("not-a-real-editor-bin"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(cacheDir, "Editor.bin"), []byte("stale-editor-bin"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -70,11 +69,11 @@ func TestPersistDocumentWritesStorage(t *testing.T) {
 	})
 
 	err = srv.PersistDocument(context.Background(), docKey)
-	if err == nil {
-		t.Fatal("expected conversion error without real x2t")
+	if err != nil {
+		t.Fatalf("expected no-op without pending changes: %v", err)
 	}
 	if store.savedPath != "" {
-		t.Fatalf("should not save to storage on conversion failure, got %q", store.savedPath)
+		t.Fatalf("should not rewrite storage from stale Editor.bin, got %q", store.savedPath)
 	}
 }
 

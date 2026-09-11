@@ -59,14 +59,40 @@ func (o *Opener) Open(ctx context.Context, origin, basePath, docKey string, cmd 
 		ext = "doc"
 	}
 
-	if err := o.flushPending(ctx, docKey, origin); err != nil && o.Logger != nil {
-		o.Logger.Error("flush pending changes before open", "key", docKey, "err", err)
+	outDir := filepath.Join(o.CacheDir, docKey)
+	pending := hasPendingChanges(outDir)
+
+	// When the on-disk cache matches the requested document, open immediately and
+	// flush orphaned change blobs in the background so reconnect is not blocked on x2t.
+	if pending && o.canServeCachedOpen(ctx, cmd, outDir, ext) {
+		if packets, ok, err := o.openFromCache(cmd, origin, basePath, docKey, ext, outDir); ok {
+			if err != nil {
+				return o.errorPackets(cmd.Command, err)
+			}
+			go o.flushPendingInBackground(docKey, origin)
+			return packets, nil
+		}
 	}
 
-	outDir := filepath.Join(o.CacheDir, docKey)
+	if pending {
+		if err := o.flushPending(ctx, docKey, origin); err != nil && o.Logger != nil {
+			o.Logger.Error("flush pending changes before open", "key", docKey, "err", err)
+		}
+	}
+
 	// Drop stale coauthoring blobs from a prior session unless edits are still pending.
 	if !hasPendingChanges(outDir) {
 		clearChanges(outDir)
+	}
+
+	if cmd.URL != "" && (convert.EditorBinCached(outDir) || convert.BrowserOriginCached(outDir, ext)) {
+		match, err := o.cacheMatchesURL(ctx, outDir, cmd.URL)
+		if err != nil {
+			return o.errorPackets(cmd.Command, err)
+		}
+		if !match {
+			invalidateOpenCache(outDir, ext)
+		}
 	}
 
 	if packets, ok, err := o.openFromCache(cmd, origin, basePath, docKey, ext, outDir); ok || err != nil {
@@ -186,6 +212,21 @@ func (o *Opener) openBrowserDocument(cmd openCmd, origin, basePath, docKey, ext,
 	return []string{pkt}, nil
 }
 
+func (o *Opener) canServeCachedOpen(ctx context.Context, cmd openCmd, outDir, ext string) bool {
+	if o == nil || cmd.URL == "" {
+		return false
+	}
+	if convert.IsBrowserEditorFormat(ext) {
+		if !convert.BrowserOriginCached(outDir, ext) {
+			return false
+		}
+	} else if !convert.EditorBinCached(outDir) {
+		return false
+	}
+	match, err := o.cacheMatchesURL(ctx, outDir, cmd.URL)
+	return err == nil && match
+}
+
 func (o *Opener) flushPending(ctx context.Context, docKey, origin string) error {
 	if o == nil || o.Saver == nil || o.CacheDir == "" || docKey == "" {
 		return nil
@@ -193,7 +234,43 @@ func (o *Opener) flushPending(ctx context.Context, docKey, origin string) error 
 	if !hasPendingChanges(filepath.Join(o.CacheDir, docKey)) {
 		return nil
 	}
-	return o.Saver.FlushDocument(ctx, docKey, origin, true)
+	flushCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	return o.Saver.FlushDocument(flushCtx, docKey, origin, true)
+}
+
+func (o *Opener) flushPendingInBackground(docKey, origin string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	if err := o.flushPending(ctx, docKey, origin); err != nil && o.Logger != nil {
+		o.Logger.Error("background flush pending changes after open", "key", docKey, "err", err)
+	}
+}
+
+func invalidateOpenCache(outDir, ext string) {
+	_ = os.Remove(filepath.Join(outDir, "Editor.bin"))
+	_ = os.Remove(filepath.Join(outDir, "Editor.bin.part"))
+	_ = os.Remove(filepath.Join(outDir, "source.sha256"))
+	if convert.IsBrowserEditorFormat(ext) {
+		_ = os.Remove(filepath.Join(outDir, "origin."+strings.TrimPrefix(strings.ToLower(ext), ".")))
+	}
+}
+
+func (o *Opener) cacheMatchesURL(ctx context.Context, outDir, rawURL string) (bool, error) {
+	tmp, err := os.CreateTemp("", "go-office-hash-*")
+	if err != nil {
+		return false, err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := downloadURL(ctx, rawURL, tmp); err != nil {
+		return false, err
+	}
+	hash, err := convert.FileSHA256(tmpPath)
+	if err != nil {
+		return false, err
+	}
+	return convert.EditorBinReusable(outDir, hash) || convert.SourceHashMatches(outDir, hash), nil
 }
 
 func copyFile(src, dest string) error {

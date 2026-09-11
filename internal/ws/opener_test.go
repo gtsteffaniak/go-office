@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/quantumx-apps/go-office/internal/convert"
 )
 
 func TestOpenerOpenPDF(t *testing.T) {
@@ -60,14 +63,26 @@ func TestOpenerOpenSkipsDownloadWhenEditorBinCached(t *testing.T) {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	csvBody := []byte("a,b\n1,2\n")
+	tmp := filepath.Join(cacheDir, "src.csv")
+	if err := os.WriteFile(tmp, csvBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srcHash, err := convert.FileSHA256(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(outDir, "Editor.bin"), []byte("editor-bin"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := convert.WriteSourceHash(outDir, srcHash); err != nil {
 		t.Fatal(err)
 	}
 
 	downloads := 0
 	fileSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		downloads++
-		http.Error(w, "should not download", http.StatusInternalServerError)
+		_, _ = w.Write(csvBody)
 	}))
 	t.Cleanup(fileSrv.Close)
 
@@ -80,8 +95,8 @@ func TestOpenerOpenSkipsDownloadWhenEditorBinCached(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if downloads != 0 {
-		t.Fatalf("download calls = %d, want 0 on cache hit", downloads)
+	if downloads != 1 {
+		t.Fatalf("download calls = %d, want 1 hash check on fresh cache hit", downloads)
 	}
 	if len(packets) != 1 || !strings.Contains(packets[0], `"status":"ok"`) {
 		t.Fatalf("unexpected packet: %v", packets)
@@ -109,6 +124,85 @@ func TestCoauthoringOriginPrefersPublicOrigin(t *testing.T) {
 	if got := CoauthoringOrigin("", req); got != "http://localhost:9999" {
 		t.Fatalf("request origin = %q, want http://localhost:9999", got)
 	}
+}
+
+func TestOpenerOpenFastPathWithPendingChangesAndValidCache(t *testing.T) {
+	cacheDir := t.TempDir()
+	key := "fast-open"
+	outDir := filepath.Join(cacheDir, key)
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	csvBody := []byte("a,b\n1,2\n")
+	tmp := filepath.Join(cacheDir, "src.csv")
+	if err := os.WriteFile(tmp, csvBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srcHash, err := convert.FileSHA256(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outDir, "Editor.bin"), []byte("editor-bin"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := convert.WriteSourceHash(outDir, srcHash); err != nil {
+		t.Fatal(err)
+	}
+	changesDir := filepath.Join(outDir, "changes")
+	if err := os.MkdirAll(changesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(changesDir, "changes0.json"), []byte(`["chg"]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	block := make(chan struct{})
+	saver := &blockingFlushSaver{block: block}
+	opener := &Opener{CacheDir: cacheDir, Saver: saver, Logger: slog.Default()}
+
+	fileSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(csvBody)
+	}))
+	t.Cleanup(fileSrv.Close)
+
+	start := time.Now()
+	packets, err := opener.Open(context.Background(), "http://example.com", "/office", key, openCmd{
+		Command: "open",
+		Format:  "csv",
+		URL:     fileSrv.URL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) > 500*time.Millisecond {
+		t.Fatalf("open blocked on flush for %v", time.Since(start))
+	}
+	if len(packets) != 1 || !strings.Contains(packets[0], `"status":"ok"`) {
+		t.Fatalf("unexpected packet: %v", packets)
+	}
+
+	close(block)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if saver.calls >= 1 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("expected background flush for orphaned pending changes")
+}
+
+type blockingFlushSaver struct {
+	block chan struct{}
+	calls int
+}
+
+func (s *blockingFlushSaver) FlushDocument(context.Context, string, string, bool) error {
+	s.calls++
+	if s.block != nil {
+		<-s.block
+	}
+	return nil
 }
 
 func TestOpenerFlushPendingBeforeOpen(t *testing.T) {

@@ -225,7 +225,7 @@ func (h *Handler) serveWarm(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	if err := h.warmDocument(ctx, doc); err != nil {
-		if h.office.EditorBinCached(doc.Key) {
+		if h.office.EditorBinFresh(doc.Key, doc.LocalPath, doc.Ext) {
 			if h.opts.Logger != nil {
 				h.opts.Logger.Debug("demo warm error but cache ready",
 					"file", doc.RelPath, "key", doc.Key, "err", err)
@@ -245,7 +245,7 @@ func (h *Handler) warmDocument(ctx context.Context, doc sampleDoc) error {
 	if _, err := os.Stat(doc.LocalPath); err != nil {
 		return err
 	}
-	return h.office.EnsureEditorBin(ctx, doc.Key, doc.LocalPath, doc.Ext)
+	return h.office.EnsureEditorBinWarm(ctx, doc.Key, doc.LocalPath, doc.Ext)
 }
 
 func (h *Handler) resolveSampleDoc(ctx context.Context, file string) (sampleDoc, error) {
@@ -260,7 +260,7 @@ func (h *Handler) resolveSampleDoc(ctx context.Context, file string) (sampleDoc,
 	if err != nil {
 		return sampleDoc{}, errSampleNotFound
 	}
-	key := documentKey(file, info, h.fileFingerprint(ctx, file, info))
+	key := demoDocumentKey(file)
 	ext := strings.TrimPrefix(strings.ToLower(path.Ext(info.Name)), ".")
 	localPath := filepath.Join(h.opts.DataRoot, filepath.FromSlash(file))
 	return sampleDoc{
@@ -368,7 +368,7 @@ func (h *Handler) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 	apiBase := h.opts.APIBasePath
 	fileURL := origin + apiBase + "/demo/file/" + strings.TrimPrefix(file, "/")
 	ext := strings.TrimPrefix(strings.ToLower(path.Ext(info.Name)), ".")
-	key := documentKey(file, info, h.fileFingerprint(ctx, file, info))
+	key := demoDocumentKey(file)
 	req := office.ConverterRequest{
 		FileType:   ext,
 		Key:        key,
@@ -490,6 +490,13 @@ func isSupportedDocument(name string) bool {
 
 func documentKey(file string, info office.FileInfo, contentSum string) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%d:%s", file, info.Size, info.ModTime.UnixNano(), contentSum)))
+	return hex.EncodeToString(sum[:])
+}
+
+// demoDocumentKey is stable per sample path so refresh reuses the editor cache
+// directory; EnsureEditorBin revalidates Editor.bin when storage bytes change.
+func demoDocumentKey(file string) string {
+	sum := sha256.Sum256([]byte("demo:" + file))
 	return hex.EncodeToString(sum[:])
 }
 

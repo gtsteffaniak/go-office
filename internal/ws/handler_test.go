@@ -89,16 +89,28 @@ func TestPollingConnectAndLicense(t *testing.T) {
 }
 
 func TestPollingAuthResponse(t *testing.T) {
-	h := testHandler(t)
+	ws.ResetSessionsForTest()
+	opener := newHookOpener()
+	h := ws.NewWithOptions(ws.HandlerOptions{
+		Version:  "9.3.4",
+		CacheDir: t.TempDir(),
+		OpenHook: opener,
+	})
+	h.PollHold = 0
 
 	authBody := `42["message",{"type":"auth","docid":"key","user":{"id":"demo","username":"Demo"},"openCmd":{"c":"open","id":"key","format":"doc","url":"http://localhost/f.doc"}}]`
 	authPost := httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(authBody))
 	h.ServePath(httptest.NewRecorder(), authPost, "/doc/key/c")
 
-	get := httptest.NewRequest(http.MethodGet, "/?EIO=4&transport=polling&sid=go-office&t=2", nil)
-	rec := httptest.NewRecorder()
-	h.ServePath(rec, get, "/doc/key/c")
-	body := rec.Body.String()
+	deadline := time.Now().Add(2 * time.Second)
+	var body string
+	for time.Now().Before(deadline) {
+		body = pollingGet(t, h, "key", "go-office")
+		if strings.Contains(body, `"type":"auth"`) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if !strings.Contains(body, `"type":"authChanges"`) {
 		t.Fatalf("authChanges missing: %q", body)
 	}

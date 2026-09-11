@@ -186,11 +186,15 @@ func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey st
 						if h.Logger != nil {
 							h.Logger.Warn("coauthoring auth jwt rejected", "key", docKey, "err", err)
 						}
-						sess.onConnect(nil)
+						sess.onConnect(nil, false)
 						continue
 					}
 				}
-				sess.onConnect(authData)
+				var deferAuth bool
+				if hasAuth {
+					deferAuth = sess.needsDocumentOpen(req)
+				}
+				sess.onConnect(authData, deferAuth)
 				if hasAuth {
 					h.registerDocumentSession(docKey, req)
 					if sess.needsDocumentOpen(req) {
@@ -213,9 +217,10 @@ func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey st
 						continue
 					}
 					h.registerDocumentSession(docKey, req)
-					sess.onAuth(req)
 					if sess.needsDocumentOpen(req) {
 						sess.startOpen(h.documentOpener(), req, CoauthoringOrigin(h.PublicOrigin, r))
+					} else {
+						sess.onAuth(req)
 					}
 					continue
 				}

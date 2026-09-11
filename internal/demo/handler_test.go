@@ -90,6 +90,9 @@ func TestDemoLandingAndConfig(t *testing.T) {
 	if !strings.Contains(body, "/demo/warm?file=") {
 		t.Fatal("expected warm endpoint hook in viewer page")
 	}
+	if !strings.Contains(body, "data-warm-done") || !strings.Contains(body, "data-warm-error") {
+		t.Fatal("expected warm success/error attributes in viewer page")
+	}
 	if !strings.Contains(body, "onDocumentReady") || !strings.Contains(body, "onDocumentStateChange") {
 		t.Fatal("expected supported viewer event wiring in viewer page")
 	}

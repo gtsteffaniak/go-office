@@ -22,7 +22,8 @@ const EDITOR_SHELL = "#editor-container, #id_main, #editor_sdk, #id_view";
 
 const EDITOR_LOAD_TIMEOUT = Number(process.env.PLAYWRIGHT_EDITOR_TIMEOUT ?? 45_000);
 const DOCUMENT_READY_TIMEOUT = Number(process.env.PLAYWRIGHT_DOCUMENT_READY_TIMEOUT ?? 45_000);
-const DEMO_WARM_TIMEOUT = Number(process.env.PLAYWRIGHT_WARM_TIMEOUT ?? 90_000);
+const DEMO_WARM_TIMEOUT = Number(process.env.PLAYWRIGHT_WARM_TIMEOUT ?? 60_000);
+const WARM_REQUEST_TIMEOUT = Number(process.env.PLAYWRIGHT_WARM_REQUEST_MS ?? 30_000);
 const CONTENT_FIND_TIMEOUT = Number(process.env.PLAYWRIGHT_CONTENT_FIND_TIMEOUT ?? 15_000);
 const SAVE_DONE_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_DONE_TIMEOUT ?? 120_000);
 const INTERACTIVE_SETTLE_MS = 400;
@@ -445,10 +446,16 @@ export async function waitForEditorShell(
   });
 }
 
-/** Demo viewer finished synchronous warm (queue time not counted toward editor-ready timeout). */
+/** Demo viewer finished server warm; fails fast when data-warm-error is set. */
 export async function waitForDemoWarm(page: Page, timeoutMs = DEMO_WARM_TIMEOUT): Promise<void> {
   await page.waitForFunction(
-    () => document.body.getAttribute("data-warm-done") === "true",
+    () => {
+      const warmError = document.body.getAttribute("data-warm-error");
+      if (warmError) {
+        throw new Error(`viewer warm failed: ${warmError}`);
+      }
+      return document.body.getAttribute("data-warm-done") === "true";
+    },
     { timeout: timeoutMs },
   );
 }
@@ -458,9 +465,14 @@ export async function warmDemoFile(
   request: APIRequestContext,
   filePath: string,
 ): Promise<void> {
-  const warm = await request.get(`/demo/warm?file=${encodeURIComponent(filePath)}`);
+  const warm = await request.get(`/demo/warm?file=${encodeURIComponent(filePath)}`, {
+    timeout: WARM_REQUEST_TIMEOUT,
+  });
   if (!warm.ok()) {
-    throw new Error(`warm ${filePath}: HTTP ${warm.status()} ${await warm.text()}`);
+    const body = await warm.text();
+    throw new Error(
+      `warm ${filePath}: HTTP ${warm.status()} ${body.slice(0, 200)} (timeout=${WARM_REQUEST_TIMEOUT}ms)`,
+    );
   }
 }
 
@@ -1752,6 +1764,7 @@ export async function editorWitness(
   const status = (await page.locator("#status").textContent()) ?? "";
   const witness: Record<string, unknown> = {
     warmDone: await body.getAttribute("data-warm-done"),
+    warmError: await body.getAttribute("data-warm-error"),
     documentReady: await body.getAttribute("data-document-ready"),
     dirty: await body.getAttribute("data-dirty"),
     saveDone: await body.getAttribute("data-save-done"),

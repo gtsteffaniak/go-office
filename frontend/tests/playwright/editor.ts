@@ -4,6 +4,7 @@ import {
   type FrameLocator,
   type Page,
 } from "@playwright/test";
+import { createHash } from "node:crypto";
 import { inflateRawSync } from "node:zlib";
 import type { SampleFile } from "./samples";
 import type { SampleManifestEntry } from "./fixtures/sample-manifest";
@@ -73,19 +74,6 @@ type AscEditorWindow = {
   editor?: AscEditor;
 };
 
-function cellApiReadyInBrowser(): boolean {
-  const w = window as AscEditorWindow;
-  const api = w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor;
-  if (!api) {
-    return false;
-  }
-  return (
-    typeof api.asc_selectRange === "function" ||
-    typeof api.asc_setCellValue === "function" ||
-    typeof api.asc_insertText === "function"
-  );
-}
-
 function cellSetApiReadyInBrowser(): boolean {
   const w = window as AscEditorWindow;
   const api = w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor;
@@ -110,25 +98,6 @@ function selectCellInBrowser(cellRef: string): boolean {
   } catch {
     return false;
   }
-}
-
-function wordSlideEditableInBrowser(kind: SampleFile["editor"]): boolean {
-  const w = window as AscEditorWindow & {
-    docEditor?: { insertPlainText?: (t: string) => void };
-  };
-  if (typeof w.docEditor?.insertPlainText === "function") {
-    return true;
-  }
-  const api =
-    kind === "slide"
-      ? w.Asc?.presentation ?? w.Asc?.editor ?? w.editor
-      : kind === "word"
-        ? w.Asc?.editor ?? w.Asc?.spreadsheet ?? w.editor
-        : w.Asc?.editor ?? w.Asc?.presentation ?? w.Asc?.spreadsheet ?? w.editor;
-  if (typeof api?.asc_insertText === "function") {
-    return true;
-  }
-  return typeof api?.asc_AddText === "function" || typeof api?.asc_enterText === "function";
 }
 
 function wordSlideInteractiveInBrowser(kind: SampleFile["editor"]): boolean {
@@ -362,9 +331,6 @@ async function isEditorInteractive(
     if (!(await formulaBar.isVisible().catch(() => false))) {
       return false;
     }
-    if (await frame.locator("body").evaluate(cellApiReadyInBrowser)) {
-      return true;
-    }
     return cellName.isEnabled().catch(() => false);
   }
 
@@ -410,28 +376,28 @@ async function isEditorInteractive(
   });
 }
 
-async function editorApisReady(
-  page: Page,
-  frame: FrameLocator,
-  editor: SampleFile["editor"],
-): Promise<boolean> {
-  if (editor === "cell") {
-    return frame.locator("body").evaluate(cellSetApiReadyInBrowser).catch(() => false);
+async function isCellEditorEditable(frame: FrameLocator): Promise<boolean> {
+  if (await isLoadMaskBlocking(frame)) {
+    return false;
   }
-  if (editor === "word" || editor === "slide") {
-    const parentInsertReady = await page.evaluate(() => {
-      const ed = (window as { docEditor?: { insertPlainText?: (t: string) => void } }).docEditor;
-      return typeof ed?.insertPlainText === "function";
-    });
-    if (parentInsertReady) {
-      return true;
-    }
-    return frame.locator("body").evaluate(wordSlideEditableInBrowser, editor).catch(() => false);
+  const cellName = frame.locator(CELL_NAME_INPUT).first();
+  const formulaBar = frame.locator(CELL_VALUE_INPUT).first();
+  if ((await cellName.count()) === 0 || (await formulaBar.count()) === 0) {
+    return false;
   }
-  return isEditorInteractive(page, frame, editor);
+  if (!(await cellName.isEnabled().catch(() => false))) {
+    return false;
+  }
+  if (!(await formulaBar.isVisible().catch(() => false))) {
+    return false;
+  }
+  if (!(await isEditorShellReady(frame, "cell"))) {
+    return false;
+  }
+  return selectCellViaUi(frame, "A1");
 }
 
-async function isEditorEditable(
+async function isWordSlideEditorEditable(
   page: Page,
   frame: FrameLocator,
   editor: SampleFile["editor"],
@@ -439,16 +405,30 @@ async function isEditorEditable(
   if (await isLoadMaskBlocking(frame)) {
     return false;
   }
-  const apisReady = await editorApisReady(page, frame, editor);
-  if (!apisReady) {
+  if (!(await isEditorShellReady(frame, editor))) {
     return false;
   }
-  const body = page.locator("body");
-  const contentReady = await body.getAttribute("data-content-ready");
-  if (contentReady === "true") {
-    return true;
+  if ((await page.locator("body").getAttribute("data-document-ready")) !== "true") {
+    return false;
   }
-  return (await body.getAttribute("data-document-ready")) === "true";
+  return page.evaluate(() => {
+    const ed = (window as { docEditor?: { insertPlainText?: (t: string) => void } }).docEditor;
+    return typeof ed?.insertPlainText === "function";
+  });
+}
+
+async function isEditorEditable(
+  page: Page,
+  frame: FrameLocator,
+  editor: SampleFile["editor"],
+): Promise<boolean> {
+  if (editor === "cell") {
+    return isCellEditorEditable(frame);
+  }
+  if (editor === "word" || editor === "slide") {
+    return isWordSlideEditorEditable(page, frame, editor);
+  }
+  return isEditorInteractive(page, frame, editor);
 }
 
 /**
@@ -554,7 +534,7 @@ export async function waitForEditorInteractive(
   }
 }
 
-/** Document content is editable (onDocumentContentReady + bound editor APIs). Use for save tests. */
+/** Document is ready to accept a single save-test edit (UI controls or public insertPlainText). */
 export async function waitForEditorEditable(
   page: Page,
   editor: SampleFile["editor"],
@@ -891,7 +871,7 @@ export async function setCellContent(
   await settleFrame(frame, 500);
 }
 
-/** Set a cell value for save tests after content-ready (no readback poll loop). */
+/** Set a cell value for save tests via name box/formula bar (single write, readback poll). */
 export async function editCellForSave(
   page: Page,
   editor: SampleFile["editor"],
@@ -902,13 +882,38 @@ export async function editCellForSave(
   const frame = getEditorFrame(page, editor);
   await dismissEditorOverlays(frame);
 
-  const viaSdk = await setCellValue(frame, ref, value).catch(() => false);
-  if (!viaSdk) {
-    await selectCell(frame, ref);
-    await writeFormulaBarValue(frame, value);
-  }
+  await selectCellViaUi(frame, ref);
+  await writeFormulaBarValue(frame, value);
   await commitCellEdit(frame);
   await settleFrame(frame, 300);
+
+  try {
+    await expect
+      .poll(
+        async () => {
+          const readback = await readFormulaBarValue(frame);
+          if (readback.includes(value)) {
+            return true;
+          }
+          await selectCellViaUi(frame, ref);
+          return (await readFormulaBarValue(frame)).includes(value);
+        },
+        { timeout: EDITOR_LOAD_TIMEOUT, intervals: [200, 500, 1000] },
+      )
+      .toBe(true);
+  } catch (err) {
+    const cellName = await frame
+      .locator(CELL_NAME_INPUT)
+      .first()
+      .inputValue()
+      .catch(async () => (await frame.locator(CELL_NAME_INPUT).first().innerText()) ?? "");
+    const formula = await readFormulaBarValue(frame);
+    const loadMask = await isLoadMaskBlocking(frame);
+    const nameEnabled = await frame.locator(CELL_NAME_INPUT).first().isEnabled().catch(() => false);
+    throw new Error(
+      `${String(err)}\ncell edit acknowledgement failed ref=${ref} value=${value} nameBox=${cellName} formula=${formula} loadMask=${loadMask} nameEnabled=${nameEnabled}`,
+    );
+  }
 }
 
 async function commitCellEdit(frame: FrameLocator): Promise<void> {
@@ -1121,38 +1126,6 @@ export async function replaceDocumentText(
   await page.waitForTimeout(300);
 }
 
-async function insertTextAfterEditable(
-  page: Page,
-  editor: SampleFile["editor"],
-  text: string,
-): Promise<void> {
-  const viaDocsApi = await page.evaluate((chunk: string) => {
-    const ed = (window as { docEditor?: { grabFocus?: () => void; insertPlainText?: (t: string) => void } })
-      .docEditor;
-    if (!ed || typeof ed.insertPlainText !== "function") {
-      return false;
-    }
-    ed.grabFocus?.();
-    ed.insertPlainText(chunk);
-    return true;
-  }, text);
-  if (viaDocsApi) {
-    await page.waitForTimeout(400);
-    return;
-  }
-
-  const frame = getEditorFrame(page, editor);
-  const inserted = await frame.locator("body").evaluate(insertTextInBrowser, { chunk: text, kind: editor });
-  if (inserted) {
-    await page.waitForTimeout(200);
-    return;
-  }
-
-  const overlay = frame.locator("#id_viewer_overlay").first();
-  await overlay.click({ position: { x: 120, y: 120 }, force: true });
-  await overlay.pressSequentially(text, { delay: 20 });
-}
-
 /** Insert a unique marker into word/slide documents for save tests. */
 export async function editWordForSave(
   page: Page,
@@ -1161,7 +1134,20 @@ export async function editWordForSave(
 ): Promise<void> {
   await waitForEditorEditable(page, editor);
   const chunk = ` ${marker}`;
-  await insertTextAfterEditable(page, editor, chunk);
+  const inserted = await page.evaluate((text: string) => {
+    const ed = (window as {
+      docEditor?: { grabFocus?: () => void; insertPlainText?: (t: string) => void };
+    }).docEditor;
+    if (!ed || typeof ed.insertPlainText !== "function") {
+      return false;
+    }
+    ed.grabFocus?.();
+    ed.insertPlainText(text);
+    return true;
+  }, chunk);
+  if (!inserted) {
+    throw new Error(`insertPlainText unavailable\nwitness:\n${await editorWitness(page, editor)}`);
+  }
   await waitForMarkerInEditor(page, editor, marker);
 }
 
@@ -1202,23 +1188,22 @@ export async function typeInDocument(
 const SAVE_BUTTON =
   "#slot-btn-dt-save, #id-toolbar-btn-save, #box-document-title .btn-save, button.btn-save, a.btn-save, .icon-save";
 
-/** Trigger Save inside the editor iframe (parent-page Ctrl+S never reaches the SDK). */
-export async function triggerEditorSave(page: Page, editor: SampleFile["editor"]): Promise<void> {
+/** Click Save once inside the editor iframe (Ctrl+S only when no button exists). */
+export async function triggerManualSave(page: Page, editor: SampleFile["editor"]): Promise<void> {
   const frame = getEditorFrame(page, editor);
   await frame.locator("body").click({ position: { x: 12, y: 12 }, force: true });
 
   const saveBtn = frame.locator(SAVE_BUTTON).first();
   if ((await saveBtn.count()) > 0) {
-    await saveBtn.click({ force: true, timeout: 5_000, noWaitAfter: true }).catch(() => {});
+    await saveBtn.click({ force: true, timeout: 5_000, noWaitAfter: true });
+    return;
   }
   await frame.locator("body").press("Control+s");
+}
 
-  await expect
-    .poll(async () => (await page.locator("body").getAttribute("data-saving")) !== "true", {
-      timeout: 30_000,
-      intervals: [200, 500, 1000],
-    })
-    .toBe(true);
+/** @deprecated Use triggerManualSave for the one Save-button smoke; autosave tests poll disk instead. */
+export async function triggerEditorSave(page: Page, editor: SampleFile["editor"]): Promise<void> {
+  await triggerManualSave(page, editor);
 }
 
 function zipEntryText(buf: Buffer, entryName: string): string {
@@ -1563,6 +1548,26 @@ export type RtfFormattingAssert = {
   highlight?: boolean;
 };
 
+function rtfFormattingMatches(rtf: string, opts: RtfFormattingAssert): boolean {
+  if (!rtfPlainText(rtf).includes(opts.marker)) {
+    return false;
+  }
+  const window = rtfWindowAroundMarker(rtf, opts.marker);
+  if (window.length === 0) {
+    return false;
+  }
+  if (opts.bold && !/\\b(?!ullet)/.test(window)) {
+    return false;
+  }
+  if (opts.italic && !/\\i(?!nfo|lvl|tap)[^a-zA-Z]/.test(rtf)) {
+    return false;
+  }
+  if (opts.highlight && !rtf.match(/\\highlight\d*|\\cb\d+|\\chcbpat\d+/)) {
+    return false;
+  }
+  return true;
+}
+
 export async function assertDemoRtfFormatting(
   request: APIRequestContext,
   filePath: string,
@@ -1584,25 +1589,42 @@ export async function assertDemoRtfFormatting(
   }
 }
 
-/** Poll viewer status for stableMs after save; fail on Error: prefix. */
+/** Poll the RTF file until formatting around the marker is persisted. */
+export async function waitForDemoRtfFormatting(
+  request: APIRequestContext,
+  filePath: string,
+  opts: RtfFormattingAssert,
+  timeoutMs = SAVE_DONE_TIMEOUT,
+): Promise<void> {
+  await waitForPersistedContent(
+    request,
+    filePath,
+    (buf) => rtfFormattingMatches(decodeOfficeText(buf), opts),
+    { timeoutMs, label: `RTF formatting for "${opts.marker}"` },
+  );
+}
+
+/** Observe the full stability window; fail immediately on viewer or save errors. */
 export async function assertEditorStable(page: Page, stableMs = 15_000): Promise<void> {
-  await expect
-    .poll(
-      async () => {
-        const saveError = await page.locator("body").getAttribute("data-save-error");
-        if (saveError) {
-          return false;
-        }
-        const status = (await page.locator("#status").textContent()) ?? "";
-        if (status.startsWith("Error:")) {
-          return false;
-        }
-        const className = (await page.locator("#status").getAttribute("class")) ?? "";
-        return !className.includes("status-error");
-      },
-      { timeout: stableMs, intervals: [500] },
-    )
-    .toBe(true);
+  const interval = 500;
+  const checks = Math.max(1, Math.ceil(stableMs / interval));
+  for (let i = 0; i < checks; i++) {
+    const saveError = await page.locator("body").getAttribute("data-save-error");
+    if (saveError) {
+      throw new Error(`save error during stability window: ${saveError}`);
+    }
+    const status = (await page.locator("#status").textContent()) ?? "";
+    if (status.startsWith("Error:")) {
+      throw new Error(`viewer error during stability window: ${status}`);
+    }
+    const className = (await page.locator("#status").getAttribute("class")) ?? "";
+    if (className.includes("status-error")) {
+      throw new Error("status-error during stability window");
+    }
+    if (i < checks - 1) {
+      await page.waitForTimeout(interval);
+    }
+  }
 }
 
 /** Minimal dirty edit before save (word/slide append, cell A1). */
@@ -1622,6 +1644,10 @@ export async function applyMinimalSaveEdit(
   throw new Error(`unsupported editor for save edit: ${editor}`);
 }
 
+export function fileFingerprint(buf: Buffer): string {
+  return createHash("sha256").update(buf).digest("hex");
+}
+
 export async function fetchDemoFileBody(
   request: APIRequestContext,
   filePath: string,
@@ -1631,6 +1657,65 @@ export async function fetchDemoFileBody(
   });
   expect(res.ok()).toBeTruthy();
   return Buffer.from(await res.body());
+}
+
+export type PersistOptions = {
+  timeoutMs?: number;
+  page?: Page;
+  label?: string;
+};
+
+/** Poll demo file bytes until a caller-supplied postcondition is true. */
+export async function waitForPersistedContent(
+  request: APIRequestContext,
+  filePath: string,
+  postcondition: (buf: Buffer) => boolean,
+  opts?: PersistOptions,
+): Promise<void> {
+  const timeoutMs = opts?.timeoutMs ?? SAVE_DONE_TIMEOUT;
+  const beforeFp = fileFingerprint(await fetchDemoFileBody(request, filePath));
+  const label = opts?.label ?? "persisted content postcondition";
+  try {
+    await expect
+      .poll(
+        async () => {
+          if (opts?.page) {
+            const saveError = await opts.page.locator("body").getAttribute("data-save-error");
+            if (saveError) {
+              throw new Error(`save error: ${saveError}`);
+            }
+            const status = (await opts.page.locator("#status").textContent()) ?? "";
+            if (status.startsWith("Error:")) {
+              throw new Error(`viewer status: ${status}`);
+            }
+          }
+          const buf = await fetchDemoFileBody(request, filePath);
+          return postcondition(buf);
+        },
+        { timeout: timeoutMs, intervals: [500, 1000, 2000] },
+      )
+      .toBe(true);
+  } catch (err) {
+    const afterFp = fileFingerprint(await fetchDemoFileBody(request, filePath));
+    throw new Error(
+      `${String(err)}\n${label} not met within ${timeoutMs}ms\nfingerprint before=${beforeFp}\nfingerprint after=${afterFp}`,
+    );
+  }
+}
+
+/** Poll until marker text is present in the persisted demo file. */
+export async function waitForPersistedMarker(
+  request: APIRequestContext,
+  filePath: string,
+  marker: string,
+  opts?: PersistOptions,
+): Promise<void> {
+  await waitForPersistedContent(
+    request,
+    filePath,
+    (buf) => officeFileContains(buf, marker),
+    { ...opts, label: `marker "${marker}"` },
+  );
 }
 
 export async function assertDemoFileContains(
@@ -1664,10 +1749,8 @@ export async function editorWitness(
   const witness: Record<string, unknown> = {
     warmDone: await body.getAttribute("data-warm-done"),
     documentReady: await body.getAttribute("data-document-ready"),
-    contentReady: await body.getAttribute("data-content-ready"),
     dirty: await body.getAttribute("data-dirty"),
     saveDone: await body.getAttribute("data-save-done"),
-    saveResult: await body.getAttribute("data-save-result"),
     saveError: await body.getAttribute("data-save-error"),
     saving: await body.getAttribute("data-saving"),
     status,
@@ -1697,41 +1780,14 @@ export async function waitForSaveDone(
 ): Promise<void> {
   const options: SaveDoneOptions =
     typeof opts === "number" ? { timeoutMs: opts } : (opts ?? {});
-  const timeoutMs = options.timeoutMs ?? SAVE_DONE_TIMEOUT;
-  const requireMarker = Boolean(options.marker && options.filePath && options.request);
-
+  if (!options.marker || !options.filePath || !options.request) {
+    throw new Error("waitForSaveDone requires request, filePath, and marker");
+  }
   try {
-    await expect
-      .poll(
-        async () => {
-          const saveError = await page.locator("body").getAttribute("data-save-error");
-          const saveResult = await page.locator("body").getAttribute("data-save-result");
-          if (saveError) {
-            throw new Error(`save error: ${saveError}`);
-          }
-          if (saveResult === "error") {
-            throw new Error("save result: error");
-          }
-          if (requireMarker) {
-            const res = await options.request!.get(
-              `/api/office/demo/file/${encodeURIComponent(options.filePath!)}`,
-              { headers: { "Cache-Control": "no-cache" } },
-            );
-            if (res.ok() && officeFileContains(Buffer.from(await res.body()), options.marker!)) {
-              return true;
-            }
-            return false;
-          }
-          const status = (await page.locator("#status").textContent()) ?? "";
-          if (status.startsWith("Error:")) {
-            throw new Error(`viewer status: ${status}`);
-          }
-          const saveDone = await page.locator("body").getAttribute("data-save-done");
-          return Boolean(saveDone) || status.includes("Saved");
-        },
-        { timeout: timeoutMs },
-      )
-      .toBe(true);
+    await waitForPersistedMarker(options.request, options.filePath, options.marker, {
+      timeoutMs: options.timeoutMs,
+      page,
+    });
   } catch (err) {
     throw new Error(`${String(err)}\nwitness:\n${await editorWitness(page)}`);
   }

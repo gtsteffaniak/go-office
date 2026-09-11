@@ -30,12 +30,12 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: /(save|rtf-formatting|post-save-stability|content-ready)\.spec\.ts$/,
+      testIgnore: /(save|rtf-formatting|post-save-stability)\.spec\.ts$/,
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "chromium-save",
-      testMatch: /(save|rtf-formatting|content-ready)\.spec\.ts$/,
+      testMatch: /(save|rtf-formatting)\.spec\.ts$/,
       dependencies: ["chromium"],
       timeout: saveTestTimeout,
       workers: saveWorkers,

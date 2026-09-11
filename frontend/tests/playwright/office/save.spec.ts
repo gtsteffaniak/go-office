@@ -3,8 +3,8 @@ import {
   warmDemoFile,
   editCellForSave,
   editWordForSave,
-  waitForSaveDone,
-  triggerEditorSave,
+  waitForPersistedMarker,
+  triggerManualSave,
   assertDemoFileContains,
 } from "../editor";
 import { forkSample } from "../fork-sample";
@@ -47,7 +47,7 @@ async function openForkedDemo(
   await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
 }
 
-test("docx save round-trip via demo file API", async ({ page, request }, testInfo) => {
+test("docx save round-trip via Save button", async ({ page, request }, testInfo) => {
   const file = forkSample(DOCX_SOURCE, testInfo);
   await assertDemoFileContains(request, file, DOCX_ORIGINAL);
 
@@ -57,12 +57,8 @@ test("docx save round-trip via demo file API", async ({ page, request }, testInf
   });
 
   await editWordForSave(page, "word", DOCX_MARKER);
-  await triggerEditorSave(page, "word");
-  await waitForSaveDone(page, {
-    request,
-    filePath: file,
-    marker: DOCX_MARKER,
-  });
+  await triggerManualSave(page, "word");
+  await waitForPersistedMarker(request, file, DOCX_MARKER, { page });
 
   await assertDemoFileContains(request, file, DOCX_MARKER);
 });
@@ -77,12 +73,7 @@ test("csv save round-trip via demo file API", async ({ page, request }, testInfo
   });
 
   await editCellForSave(page, "cell", CSV_CELL, CSV_REPLACEMENT);
-  await triggerEditorSave(page, "cell");
-  await waitForSaveDone(page, {
-    request,
-    filePath: file,
-    marker: CSV_REPLACEMENT,
-  });
+  await waitForPersistedMarker(request, file, CSV_REPLACEMENT, { page });
 
   await assertDemoFileContains(request, file, CSV_REPLACEMENT);
   await assertDemoFileContains(request, file, CSV_ORIGINAL, { present: false });
@@ -98,12 +89,7 @@ test("txt save round-trip via demo file API", async ({ page, request }, testInfo
   });
 
   await editWordForSave(page, "word", TXT_MARKER);
-  await triggerEditorSave(page, "word");
-  await waitForSaveDone(page, {
-    request,
-    filePath: file,
-    marker: TXT_MARKER,
-  });
+  await waitForPersistedMarker(request, file, TXT_MARKER, { page });
 
   await assertDemoFileContains(request, file, TXT_MARKER);
 });
@@ -120,12 +106,7 @@ test("rtf save round-trip via demo file API", async ({ page, request }, testInfo
   });
 
   await editWordForSave(page, "word", "PW_RTF_SAVE_ROUNDTRIP");
-  await triggerEditorSave(page, "word");
-  await waitForSaveDone(page, {
-    request,
-    filePath: file,
-    marker: "PW_RTF_SAVE_ROUNDTRIP",
-  });
+  await waitForPersistedMarker(request, file, "PW_RTF_SAVE_ROUNDTRIP", { page });
 
   await assertDemoFileContains(request, file, "PW_RTF_SAVE_ROUNDTRIP");
   await assertDemoFileContains(request, file, RTF_ORIGINAL);
@@ -144,12 +125,7 @@ test("ods save round-trip via demo file API", async ({ page, request }, testInfo
   });
 
   await editCellForSave(page, "cell", ODS_CELL, ODS_REPLACEMENT);
-  await triggerEditorSave(page, "cell");
-  await waitForSaveDone(page, {
-    request,
-    filePath: file,
-    marker: ODS_REPLACEMENT,
-  });
+  await waitForPersistedMarker(request, file, ODS_REPLACEMENT, { page });
 
   await assertDemoFileContains(request, file, ODS_REPLACEMENT);
   await assertDemoFileContains(request, file, ODS_ORIGINAL, { present: false });
@@ -165,12 +141,7 @@ test("ppt save round-trip via demo file API", async ({ page, request }, testInfo
   });
 
   await editWordForSave(page, "slide", PPT_MARKER);
-  await triggerEditorSave(page, "slide");
-  await waitForSaveDone(page, {
-    request,
-    filePath: file,
-    marker: PPT_MARKER,
-  });
+  await waitForPersistedMarker(request, file, PPT_MARKER, { page });
 
   await assertDemoFileContains(request, file, PPT_MARKER);
 });

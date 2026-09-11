@@ -3,8 +3,8 @@ import {
   warmDemoFile,
   editWordForSave,
   formatWordSelection,
-  triggerEditorSave,
-  waitForSaveDone,
+  waitForPersistedMarker,
+  waitForDemoRtfFormatting,
   assertDemoRtfFormatting,
 } from "../editor";
 import { forkSample } from "../fork-sample";
@@ -23,11 +23,9 @@ test("rtf bold persists", async ({ page, request }, testInfo) => {
   await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
 
   await editWordForSave(page, "word", marker);
-  await triggerEditorSave(page, "word");
-  await waitForSaveDone(page, { request, filePath: file, marker });
+  await waitForPersistedMarker(request, file, marker, { page });
   await formatWordSelection(page, marker, { bold: true });
-  await triggerEditorSave(page, "word");
-  await waitForSaveDone(page, { request, filePath: file, marker });
+  await waitForDemoRtfFormatting(request, file, { marker, bold: true });
 
   await assertDemoRtfFormatting(request, file, { marker, bold: true });
 });
@@ -41,11 +39,9 @@ test("rtf italic persists", async ({ page, request }, testInfo) => {
   await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
 
   await editWordForSave(page, "word", marker);
-  await triggerEditorSave(page, "word");
-  await waitForSaveDone(page, { request, filePath: file, marker });
+  await waitForPersistedMarker(request, file, marker, { page });
   await formatWordSelection(page, marker, { italic: true });
-  await triggerEditorSave(page, "word");
-  await waitForSaveDone(page, { request, filePath: file, marker });
+  await waitForDemoRtfFormatting(request, file, { marker, italic: true });
 
   await assertDemoRtfFormatting(request, file, { marker, italic: true });
 });
@@ -59,11 +55,9 @@ test("rtf highlight persists", async ({ page, request }, testInfo) => {
   await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
 
   await editWordForSave(page, "word", marker);
-  await triggerEditorSave(page, "word");
-  await waitForSaveDone(page, { request, filePath: file, marker });
+  await waitForPersistedMarker(request, file, marker, { page });
   await formatWordSelection(page, marker, { highlight: true });
-  await triggerEditorSave(page, "word");
-  await waitForSaveDone(page, { request, filePath: file, marker });
+  await waitForDemoRtfFormatting(request, file, { marker, highlight: true });
 
   await assertDemoRtfFormatting(request, file, { marker, highlight: true });
 });

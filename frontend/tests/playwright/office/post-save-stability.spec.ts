@@ -2,8 +2,7 @@ import { test, expect } from "../test-setup";
 import {
   warmDemoFile,
   applyMinimalSaveEdit,
-  triggerEditorSave,
-  waitForSaveDone,
+  waitForPersistedMarker,
   assertEditorStable,
 } from "../editor";
 import { forkSample } from "../fork-sample";
@@ -25,8 +24,7 @@ for (const sample of STABLE_SAMPLES) {
     await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
 
     await applyMinimalSaveEdit(page, sample.editor, marker);
-    await triggerEditorSave(page, sample.editor);
-    await waitForSaveDone(page, { request: page.request, filePath: file, marker });
+    await waitForPersistedMarker(request, file, marker, { page });
 
     await assertEditorStable(page, STABLE_MS);
   });
@@ -42,12 +40,10 @@ test("post-save rapid double save: sample.docx", async ({ page, request }, testI
   await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
 
   await applyMinimalSaveEdit(page, "word", markerA);
-  await triggerEditorSave(page, "word");
-  await waitForSaveDone(page, { request, filePath: file, marker: markerA });
+  await waitForPersistedMarker(request, file, markerA, { page });
 
   await applyMinimalSaveEdit(page, "word", markerB);
-  await triggerEditorSave(page, "word");
-  await waitForSaveDone(page, { request, filePath: file, marker: markerB });
+  await waitForPersistedMarker(request, file, markerB, { page });
 
   await assertEditorStable(page, STABLE_MS);
 });

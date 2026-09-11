@@ -871,7 +871,7 @@ export async function setCellContent(
   await settleFrame(frame, 500);
 }
 
-/** Set a cell value for save tests via name box/formula bar (single write, readback poll). */
+/** Set a cell value for save tests (one SDK or UI write, then readback poll). */
 export async function editCellForSave(
   page: Page,
   editor: SampleFile["editor"],
@@ -882,22 +882,27 @@ export async function editCellForSave(
   const frame = getEditorFrame(page, editor);
   await dismissEditorOverlays(frame);
 
-  await selectCellViaUi(frame, ref);
-  await writeFormulaBarValue(frame, value);
-  await commitCellEdit(frame);
+  const apiReady = await frame
+    .locator("body")
+    .evaluate(cellSetApiReadyInBrowser)
+    .catch(() => false);
+
+  if (apiReady) {
+    const wrote = await setCellValue(frame, ref, value);
+    if (!wrote) {
+      throw new Error(`SDK cell write failed for ${ref}`);
+    }
+  } else {
+    await selectCell(frame, ref);
+    await writeFormulaBarValue(frame, value);
+    await commitCellEdit(frame);
+  }
   await settleFrame(frame, 300);
 
   try {
     await expect
       .poll(
-        async () => {
-          const readback = await readFormulaBarValue(frame);
-          if (readback.includes(value)) {
-            return true;
-          }
-          await selectCellViaUi(frame, ref);
-          return (await readFormulaBarValue(frame)).includes(value);
-        },
+        async () => cellShowsValue(page, frame, editor, ref, value),
         { timeout: EDITOR_LOAD_TIMEOUT, intervals: [200, 500, 1000] },
       )
       .toBe(true);
@@ -911,7 +916,7 @@ export async function editCellForSave(
     const loadMask = await isLoadMaskBlocking(frame);
     const nameEnabled = await frame.locator(CELL_NAME_INPUT).first().isEnabled().catch(() => false);
     throw new Error(
-      `${String(err)}\ncell edit acknowledgement failed ref=${ref} value=${value} nameBox=${cellName} formula=${formula} loadMask=${loadMask} nameEnabled=${nameEnabled}`,
+      `${String(err)}\ncell edit acknowledgement failed ref=${ref} value=${value} apiReady=${apiReady} nameBox=${cellName} formula=${formula} loadMask=${loadMask} nameEnabled=${nameEnabled}`,
     );
   }
 }
@@ -1469,7 +1474,10 @@ async function formatWordSelectionViaSearchUI(
   await searchInput.press("Enter");
   await settleFrame(frame, 400);
   await expect
-    .poll(async () => searchBarHasMatches(frame), { timeout: 8_000, intervals: [200, 500] })
+    .poll(async () => searchBarHasMatches(frame), {
+      timeout: CONTENT_FIND_TIMEOUT,
+      intervals: [200, 500, 1000],
+    })
     .toBe(true);
   // Apply via toolbar while the search selection is still active (Escape clears it).
   if (format.bold) {
@@ -1519,16 +1527,12 @@ export async function formatWordSelection(
 ): Promise<void> {
   await waitForEditorEditable(page, "word");
   const frame = getEditorFrame(page, "word");
-  const file = new URL(page.url()).searchParams.get("file") ?? "";
-  const preferSearchUi = file.endsWith(".rtf");
+  await waitForMarkerInEditor(page, "word", marker);
 
-  let sdkApplied = false;
-  if (!preferSearchUi) {
-    sdkApplied = await frame
-      .locator("body")
-      .evaluate(applyWordFormatInBrowser, { marker, format });
-  }
-  if (!sdkApplied || !(await documentContainsText(frame, marker, "word"))) {
+  const sdkApplied = await frame
+    .locator("body")
+    .evaluate(applyWordFormatInBrowser, { marker, format });
+  if (!sdkApplied) {
     await formatWordSelectionViaSearchUI(frame, marker, format);
   }
 

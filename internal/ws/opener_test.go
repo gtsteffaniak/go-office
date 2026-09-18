@@ -249,3 +249,36 @@ func TestOpenerFlushPendingBeforeOpen(t *testing.T) {
 		t.Fatalf("no pending changes should not flush again, calls=%d", saver.calls)
 	}
 }
+
+// TestFileURLNeverDoublesSlash guards the cache URL shape. With no base path the previous
+// construction produced "//cache/files/...", which cost an extra 307 redirect per cached
+// resource (Editor.bin, media/*) on every editor open.
+func TestFileURLNeverDoublesSlash(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		origin   string
+		basePath string
+		want     string
+	}{
+		{"root, no base path", "http://host", "", "http://host/cache/files/k/Editor.bin"},
+		{"root, trailing slash origin", "http://host/", "", "http://host/cache/files/k/Editor.bin"},
+		{"empty base path as slash", "http://host", "/", "http://host/cache/files/k/Editor.bin"},
+		{"subpath", "http://host", "/office", "http://host/office/cache/files/k/Editor.bin"},
+		{"subpath with slashes", "http://host/", "/office/", "http://host/office/cache/files/k/Editor.bin"},
+		{"nested file name", "http://host", "", "http://host/cache/files/k/media/image1.png"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			name := "Editor.bin"
+			if strings.Contains(tc.want, "media/") {
+				name = "media/image1.png"
+			}
+			got := fileURL(tc.origin, tc.basePath, "k", name)
+			if got != tc.want {
+				t.Fatalf("fileURL = %q, want %q", got, tc.want)
+			}
+			if strings.Contains(got, "//cache") {
+				t.Fatalf("fileURL produced a doubled slash: %q", got)
+			}
+		})
+	}
+}

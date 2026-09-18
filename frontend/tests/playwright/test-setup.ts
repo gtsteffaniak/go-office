@@ -24,6 +24,14 @@ function isHarmlessConsoleError(errorText: string): boolean {
 }
 
 function isHarmlessFailedResponse(url: string, status: number): boolean {
+  // Redirects. These are not failures and carry no diagnostic value:
+  //   301  editor shell directory requested without a trailing slash (".../main" -> ".../main/")
+  //   307/308  cache paths that historically carried a doubled slash ("//cache/files/...")
+  // The double-slash case is fixed server-side (see fileURL in internal/ws/opener.go); the
+  // filter stays so a stale deployment does not flood the report with redirect noise.
+  if (status === 301 || status === 302 || status === 307 || status === 308) {
+    return true;
+  }
   if (status === 404) {
     return (
       /\/themes\.json(?:\?|$)/.test(url) ||

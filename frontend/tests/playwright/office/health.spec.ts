@@ -26,10 +26,11 @@ test.describe("demo infrastructure", () => {
   test("demo landing page loads", async ({ page }) => {
     await page.goto("/demo/", { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: /go-office demo/i })).toBeVisible();
-    await expect(page.locator('a[href="/demo/view?file=sample-files%2Fsample.csv"]')).toBeVisible();
-    await expect(
-      page.locator('a[href="/demo/view?file=sample-files%2Fsample.csv"] img.thumb[data-sample-thumb]'),
-    ).toBeVisible();
+    const csvLink = page.locator('a[href="/demo/view?file=sample-files%2Fsample.csv"]');
+    await expect(csvLink).toBeVisible();
+    const thumb = csvLink.locator("img.thumb[data-sample-thumb]");
+    await expect(thumb).toBeAttached();
+    await expect(thumb).toHaveAttribute("src", /\/api\/office\/demo\/thumbnail\?file=/);
   });
 
   test("site home loads", async ({ page }) => {

@@ -1,5 +1,5 @@
 import { test, expect } from "../test-setup";
-import { waitForEditorReady } from "../editor";
+import { warmDemoFile, waitForEditorReady } from "../editor";
 import {
   REPO_ROOT,
   sampleExists,
@@ -9,7 +9,6 @@ import {
 
 const maxTier = Number(process.env.PLAYWRIGHT_SAMPLE_TIER ?? "3") as 1 | 2 | 3;
 
-const bundledTest = process.env.OFFICE_PLAYWRIGHT_TEST === "true";
 const STATUS_OK_TIMEOUT = 8_000;
 
 test.describe.configure({ mode: "parallel" });
@@ -22,6 +21,9 @@ async function assertEditorOpens(page: import("@playwright/test").Page, sample: 
       font404s.push(url);
     }
   });
+
+  // Warm server-side before navigation so in-page warm returns quickly under parallel load.
+  await warmDemoFile(page.request, sample.path);
 
   await page.goto(`/demo/view?file=${encodeURIComponent(sample.path)}`);
 
@@ -43,6 +45,7 @@ for (const sample of samplesForTier(maxTier)) {
         `missing sample ${sample.path} — commit it under ${REPO_ROOT}/sample-files/ (see make check-sample-matrix)`,
       );
     }
+    // Read-only opens use canonical sample paths so warm/cache keys are shared across workers.
     await assertEditorOpens(page, sample);
   });
 }

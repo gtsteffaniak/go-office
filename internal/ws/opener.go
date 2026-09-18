@@ -59,13 +59,32 @@ func (o *Opener) Open(ctx context.Context, origin, basePath, docKey string, cmd 
 		ext = "doc"
 	}
 
-	if err := o.flushPending(ctx, docKey, origin); err != nil && o.Logger != nil {
-		o.Logger.Error("flush pending changes before open", "key", docKey, "err", err)
+	outDir := filepath.Join(o.CacheDir, docKey)
+	pending := hasPendingChanges(outDir)
+
+	// Orphaned change blobs from a prior session must be applied before serving
+	// Editor.bin; never flush in the background while opening or the client can load
+	// a stale bin and race the in-flight x2t conversion.
+	if pending {
+		if err := o.flushPending(ctx, docKey, origin); err != nil && o.Logger != nil {
+			o.Logger.Error("flush pending changes before open", "key", docKey, "err", err)
+		}
 	}
 
-	outDir := filepath.Join(o.CacheDir, docKey)
-	// Drop stale coauthoring blobs from a prior session; authChanges is always empty on connect.
-	clearChanges(outDir)
+	// Drop stale coauthoring blobs from a prior session unless edits are still pending.
+	if !hasPendingChanges(outDir) {
+		clearChanges(outDir)
+	}
+
+	if cmd.URL != "" && (convert.EditorBinCached(outDir) || convert.BrowserOriginCached(outDir, ext)) {
+		match, err := o.cacheMatchesURL(ctx, outDir, cmd.URL)
+		if err != nil {
+			return o.errorPackets(cmd.Command, err)
+		}
+		if !match {
+			invalidateOpenCache(outDir, ext)
+		}
+	}
 
 	if packets, ok, err := o.openFromCache(cmd, origin, basePath, docKey, ext, outDir); ok || err != nil {
 		if err != nil {
@@ -96,12 +115,9 @@ func (o *Opener) Open(ctx context.Context, origin, basePath, docKey string, cmd 
 		return []string{pkt}, nil
 	}
 	if err = o.Converter.ToEditorBin(ctx, tmpPath, outDir); err != nil {
-		if o.Logger != nil {
-			o.Logger.Error("document open failed", "key", docKey, "url", cmd.URL, "err", err)
-		}
 		return o.errorPackets(cmd.Command, err)
 	}
-	return o.editorBinOpenPackets(cmd.Command, origin, basePath, docKey, outDir)
+	return o.editorBinOpenPackets(cmd.Command, origin, basePath, docKey, outDir, "")
 }
 
 func (o *Opener) openFromCache(cmd openCmd, origin, basePath, docKey, ext, outDir string) ([]string, bool, error) {
@@ -125,17 +141,14 @@ func (o *Opener) openFromCache(cmd openCmd, origin, basePath, docKey, ext, outDi
 	if !convert.EditorBinCached(outDir) {
 		return nil, false, nil
 	}
-	packets, err := o.editorBinOpenPackets(cmd.Command, origin, basePath, docKey, outDir)
+	packets, err := o.editorBinOpenPackets(cmd.Command, origin, basePath, docKey, outDir, "cached editor bin")
 	if err != nil {
 		return nil, true, err
-	}
-	if o.Logger != nil {
-		o.Logger.Info("document open ok (cached editor bin)", "key", docKey)
 	}
 	return packets, true, nil
 }
 
-func (o *Opener) editorBinOpenPackets(cmdType, origin, basePath, docKey, outDir string) ([]string, error) {
+func (o *Opener) editorBinOpenPackets(cmdType, origin, basePath, docKey, outDir, logSuffix string) ([]string, error) {
 	files := map[string]string{
 		"Editor.bin": fileURL(origin, basePath, docKey, "Editor.bin"),
 	}
@@ -153,8 +166,14 @@ func (o *Opener) editorBinOpenPackets(cmdType, origin, basePath, docKey, outDir 
 		return nil, err
 	}
 	if o.Logger != nil {
+		msg := "document open ok"
+		if logSuffix != "" {
+			msg += " (" + logSuffix + ")"
+		}
 		if st, err := os.Stat(filepath.Join(outDir, "Editor.bin")); err == nil {
-			o.Logger.Info("document open ok", "key", docKey, "editorBinBytes", st.Size())
+			o.Logger.Info(msg, "key", docKey, "editorBinBytes", st.Size())
+		} else if logSuffix == "cached editor bin" {
+			o.Logger.Info(msg, "key", docKey)
 		}
 	}
 	return []string{pkt}, nil
@@ -191,7 +210,35 @@ func (o *Opener) flushPending(ctx context.Context, docKey, origin string) error 
 	if !hasPendingChanges(filepath.Join(o.CacheDir, docKey)) {
 		return nil
 	}
-	return o.Saver.FlushDocument(ctx, docKey, origin, true)
+	flushCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	return o.Saver.FlushDocument(flushCtx, docKey, origin, false)
+}
+
+func invalidateOpenCache(outDir, ext string) {
+	_ = os.Remove(filepath.Join(outDir, "Editor.bin"))
+	_ = os.Remove(filepath.Join(outDir, "Editor.bin.part"))
+	_ = os.Remove(filepath.Join(outDir, "source.sha256"))
+	if convert.IsBrowserEditorFormat(ext) {
+		_ = os.Remove(filepath.Join(outDir, "origin."+strings.TrimPrefix(strings.ToLower(ext), ".")))
+	}
+}
+
+func (o *Opener) cacheMatchesURL(ctx context.Context, outDir, rawURL string) (bool, error) {
+	tmp, err := os.CreateTemp("", "go-office-hash-*")
+	if err != nil {
+		return false, err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err = downloadURL(ctx, rawURL, tmp); err != nil {
+		return false, err
+	}
+	hash, err := convert.FileSHA256(tmpPath)
+	if err != nil {
+		return false, err
+	}
+	return convert.EditorBinReusable(outDir, hash) || convert.SourceHashMatches(outDir, hash), nil
 }
 
 func copyFile(src, dest string) error {
@@ -213,7 +260,7 @@ func copyFile(src, dest string) error {
 
 func (o *Opener) errorPackets(cmdType string, err error) ([]string, error) {
 	if o.Logger != nil {
-		o.Logger.Warn("document open failed", "err", err)
+		o.Logger.Error("document open failed", "err", err)
 	}
 	pkt, perr := documentOpenPacket(cmdType, "error", err.Error())
 	if perr != nil {
@@ -276,10 +323,13 @@ func requestOrigin(r *http.Request) string {
 
 // CoauthoringOrigin returns the public document-server origin for cache URLs.
 func CoauthoringOrigin(publicOrigin string, r *http.Request) string {
+	if o := strings.TrimSuffix(strings.TrimSpace(publicOrigin), "/"); o != "" {
+		return o
+	}
 	if r != nil {
 		if o := strings.TrimSuffix(requestOrigin(r), "/"); o != "" {
 			return o
 		}
 	}
-	return strings.TrimSuffix(strings.TrimSpace(publicOrigin), "/")
+	return ""
 }

@@ -9,16 +9,20 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/quantumx-apps/go-office/internal/changes"
 	"github.com/quantumx-apps/go-office/internal/fsutil"
+	"golang.org/x/sync/singleflight"
 )
 
 // Options configures the x2t subprocess converter.
 type Options struct {
 	AssetDir string
 	Limit    int
+	// QueueWaitTimeout caps how long acquire waits when the caller context has no
+	// deadline. Zero uses DefaultQueueWaitTimeout.
+	QueueWaitTimeout time.Duration
 	// Runner overrides the x2t subprocess (tests only).
 	Runner X2TRunner
 }
@@ -32,9 +36,9 @@ type Converter struct {
 	webAllFonts   string // sdkjs bundle for browser only
 	seedAllFonts  []byte // converter/bin/AllFonts.js frozen at startup
 	fontSelection []byte // converter/bin/font_selection.bin frozen at startup
-	limit         chan struct{}
-	inflight      sync.WaitGroup
+	admission     *convertAdmission
 	runner        X2TRunner
+	editorBinSF   singleflight.Group
 }
 
 // New creates a converter. Returns an error when x2t is missing.
@@ -80,22 +84,49 @@ func New(opts Options) (*Converter, error) {
 		webAllFonts:   filepath.Join(opts.AssetDir, "sdkjs", "common", "AllFonts.js"),
 		seedAllFonts:  seedAllFonts,
 		fontSelection: fontSel,
-		limit:         make(chan struct{}, limit),
+		admission:     newConvertAdmissionWithQueue(limit, convertQueueMaxWaiters, opts.QueueWaitTimeout),
 		runner:        runner,
 	}, nil
 }
 
+func (c *Converter) acquireConvertSlot(ctx context.Context) (func(), error) {
+	if c == nil || c.admission == nil {
+		return func() {}, nil
+	}
+	return c.admission.acquire(ctx)
+}
+
+func (c *Converter) acquireConvertSlotLow(ctx context.Context) (func(), error) {
+	if c == nil || c.admission == nil {
+		return func() {}, nil
+	}
+	return c.admission.acquireLow(ctx)
+}
+
 // ToEditorBin converts sourcePath into outDir/Editor.bin.
 func (c *Converter) ToEditorBin(ctx context.Context, sourcePath, outDir string) error {
+	return c.editorBinConvert(ctx, sourcePath, outDir, false)
+}
+
+// ToEditorBinLow is like ToEditorBin but uses low-priority admission (demo warm).
+func (c *Converter) ToEditorBinLow(ctx context.Context, sourcePath, outDir string) error {
+	return c.editorBinConvert(ctx, sourcePath, outDir, true)
+}
+
+func (c *Converter) editorBinConvert(ctx context.Context, sourcePath, outDir string, lowPriority bool) error {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
-	return withCacheDirLock(outDir, func() error {
-		return c.toEditorBin(ctx, sourcePath, outDir)
+	_, err, _ := c.editorBinSF.Do(outDir, func() (interface{}, error) {
+		err := withCacheDirLock(outDir, func() error {
+			return c.toEditorBin(ctx, sourcePath, outDir, lowPriority)
+		})
+		return nil, err
 	})
+	return err
 }
 
-func (c *Converter) toEditorBin(ctx context.Context, sourcePath, outDir string) error {
+func (c *Converter) toEditorBin(ctx context.Context, sourcePath, outDir string, lowPriority bool) error {
 	outFile := filepath.Join(outDir, "Editor.bin")
 	partFile := filepath.Join(outDir, "Editor.bin.part")
 	convertPath := sourcePath
@@ -160,6 +191,9 @@ func (c *Converter) toEditorBin(ctx context.Context, sourcePath, outDir string) 
 		}
 	}
 	srcHash = editorImportSourceHash(srcHash, ext)
+	if editorBinReusable(outDir, srcHash) {
+		return ensureDocumentFonts(c, outDir)
+	}
 	if openNeedsDocxPrelude(ext) {
 		var docxFile *os.File
 		docxFile, err = os.CreateTemp("", "go-office-open-*.docx")
@@ -176,19 +210,20 @@ func (c *Converter) toEditorBin(ctx context.Context, sourcePath, outDir string) 
 		convertPath = docxPath
 		sourceExt = ".docx"
 	}
-	if editorBinReusable(outDir, srcHash) {
-		return ensureDocumentFonts(c, outDir)
-	}
 	_ = os.Remove(outFile)
 	_ = os.Remove(partFile)
 	_ = os.Remove(sourceHashPath(outDir))
 
-	select {
-	case c.limit <- struct{}{}:
-		defer func() { <-c.limit }()
-	case <-ctx.Done():
-		return ctx.Err()
+	var release func()
+	if lowPriority {
+		release, err = c.acquireConvertSlotLow(ctx)
+	} else {
+		release, err = c.acquireConvertSlot(ctx)
 	}
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	taskFile, err := os.CreateTemp("", "go-office-x2t-*.xml")
 	if err != nil {
@@ -253,46 +288,48 @@ func (c *Converter) FromEditorBin(ctx context.Context, cacheDir, destPath, targe
 }
 
 // SaveChanges applies cacheDir/changes/*.json on top of Editor.bin and writes destPath.
-func (c *Converter) SaveChanges(ctx context.Context, cacheDir, destPath, targetExt string) error {
-	return withCacheDirLock(cacheDir, func() error {
-		return c.saveChanges(ctx, cacheDir, destPath, targetExt)
-	})
-}
-
-func (c *Converter) saveChanges(ctx context.Context, cacheDir, destPath, targetExt string) error {
+// On success it returns how many journal blobs were converted (for later Acknowledge).
+func (c *Converter) SaveChanges(ctx context.Context, cacheDir, destPath, targetExt string) (int, error) {
 	release, err := c.acquireConvertSlot(ctx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer release()
 	return c.saveChangesInner(ctx, cacheDir, destPath, targetExt)
 }
 
-func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, targetExt string) error {
+func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, targetExt string) (int, error) {
 	editorBin := filepath.Join(cacheDir, "Editor.bin")
 	if st, err := os.Stat(editorBin); err != nil || st.Size() == 0 {
-		return fmt.Errorf("convert: Editor.bin missing in %s", cacheDir)
+		return 0, fmt.Errorf("convert: Editor.bin missing in %s", cacheDir)
 	}
-	changesDir := filepath.Join(cacheDir, "changes")
-	entries, err := os.ReadDir(changesDir)
-	if err != nil || len(entries) == 0 {
-		return c.fromEditorInner(ctx, editorBin, destPath, targetExt, false)
+	if !changes.HasPending(cacheDir) {
+		if err := c.fromEditorInner(ctx, editorBin, destPath, targetExt, false); err != nil {
+			return 0, err
+		}
+		return 0, nil
 	}
+	snap, err := changes.BeginSnapshot(cacheDir)
+	if err != nil {
+		return 0, err
+	}
+	defer changes.RemoveSnapshot(cacheDir)
+	changesDir := snap.ChangesDir
 	ext := normExt(targetExt)
 	slog.Debug("save changes",
 		"cache", cacheDir,
 		"dest", destPath,
 		"ext", ext,
-		"changeFiles", len(entries),
+		"changeBlobs", snap.BlobCount,
 		"bridge", saveBridgeExt(ext),
 	)
 	if err := prepareChangesForSave(changesDir, ""); err != nil {
-		return err
+		return 0, err
 	}
 
 	if legacyWordSaveDirectReverse(ext) {
 		// RTF/ODT: x2t apply_changes can write the target format directly; skip docx bridge step 2.
-		return c.fromEditorInner(ctx, editorBin, destPath, targetExt, true)
+		return snap.BlobCount, c.fromEditorInner(ctx, editorBin, destPath, targetExt, true)
 	}
 
 	bridge := saveBridgeExt(ext)
@@ -300,7 +337,7 @@ func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, ta
 		if bridge == bridgeXLSX && csvNeedsXlsxBridge(ext) {
 			n, err := canonicalizeCSVChangeFiles(changesDir)
 			if err != nil {
-				return err
+				return 0, err
 			}
 			if n > 0 {
 				slog.Debug("csv change sheet id remapped", "blobs", n, "to", csvNativeSheetID)
@@ -308,10 +345,18 @@ func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, ta
 		}
 		intermediate := filepath.Join(cacheDir, "changes-applied."+string(bridge))
 		if err := c.fromEditorInner(ctx, editorBin, intermediate, string(bridge), true); err != nil {
-			return err
+			return 0, err
 		}
 		if st, err := os.Stat(intermediate); err == nil {
 			slog.Debug("bridge after apply_changes", "path", intermediate, "bytes", st.Size(), "bridge", bridge)
+		}
+		if legacyBinarySaveUsesOOXMLFallback(bridge, ext) {
+			slog.Debug("legacy binary save uses OOXML fallback",
+				"ext", ext, "intermediate", intermediate, "dest", destPath)
+			if copyErr := fsutil.CopyFile(intermediate, destPath); copyErr != nil {
+				return 0, fmt.Errorf("convert: OOXML fallback copy failed: %w", copyErr)
+			}
+			return snap.BlobCount, nil
 		}
 		if err := c.convertOfficeInner(ctx, intermediate, destPath, string(bridge), ext, cacheDir); err != nil {
 			// DOC/DOT: x2t cannot write binary Word (exit 80). Persist changes-applied.docx bytes
@@ -320,9 +365,9 @@ func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, ta
 				slog.Warn("x2t cannot write binary Word; persisting OOXML fallback",
 					"ext", ext, "intermediate", intermediate, "dest", destPath, "err", err)
 				if copyErr := fsutil.CopyFile(intermediate, destPath); copyErr != nil {
-					return fmt.Errorf("convert: %s→%s failed and OOXML fallback copy failed: %w", bridge, ext, copyErr)
+					return 0, fmt.Errorf("convert: %s→%s failed and OOXML fallback copy failed: %w", bridge, ext, copyErr)
 				}
-				return nil
+				return snap.BlobCount, nil
 			}
 			// PPT: x2t cannot write binary PowerPoint (exit 88). Persist changes-applied.pptx bytes
 			// at the .ppt path — same assemblyFormatAsOrigin rollback behavior.
@@ -330,9 +375,9 @@ func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, ta
 				slog.Warn("x2t cannot write binary PowerPoint; persisting OOXML fallback",
 					"ext", ext, "intermediate", intermediate, "dest", destPath, "err", err)
 				if copyErr := fsutil.CopyFile(intermediate, destPath); copyErr != nil {
-					return fmt.Errorf("convert: %s→%s failed and OOXML fallback copy failed: %w", bridge, ext, copyErr)
+					return 0, fmt.Errorf("convert: %s→%s failed and OOXML fallback copy failed: %w", bridge, ext, copyErr)
 				}
-				return nil
+				return snap.BlobCount, nil
 			}
 			// XLS: x2t cannot write binary Excel (exit 88). Persist changes-applied.xlsx bytes
 			// at the .xls path — same assemblyFormatAsOrigin rollback behavior.
@@ -340,33 +385,33 @@ func (c *Converter) saveChangesInner(ctx context.Context, cacheDir, destPath, ta
 				slog.Warn("x2t cannot write binary Excel; persisting OOXML fallback",
 					"ext", ext, "intermediate", intermediate, "dest", destPath, "err", err)
 				if copyErr := fsutil.CopyFile(intermediate, destPath); copyErr != nil {
-					return fmt.Errorf("convert: %s→%s failed and OOXML fallback copy failed: %w", bridge, ext, copyErr)
+					return 0, fmt.Errorf("convert: %s→%s failed and OOXML fallback copy failed: %w", bridge, ext, copyErr)
 				}
-				return nil
+				return snap.BlobCount, nil
 			}
-			return err
+			return 0, err
 		}
 		if bridge == bridgeXLSX && (ext == "csv" || ext == "tsv" || ext == "scsv") {
 			stripped, err := rewriteNormalizedCSV(destPath)
 			if err != nil {
-				return err
+				return 0, err
 			}
 			slog.Debug("csv persist normalized", "path", destPath, "stripped", stripped)
 		}
-		return nil
+		return snap.BlobCount, nil
 	}
 
 	if err := c.fromEditorInner(ctx, editorBin, destPath, targetExt, true); err != nil {
-		return err
+		return 0, err
 	}
 	if ext == "txt" {
 		if stripped, err := rewriteNormalizedTxt(destPath); err != nil {
-			return err
+			return 0, err
 		} else if stripped {
 			slog.Debug("txt persist normalized", "path", destPath)
 		}
 	}
-	return nil
+	return snap.BlobCount, nil
 }
 
 func (c *Converter) fromEditor(ctx context.Context, editorBin, destPath, targetExt string, fromChanges bool) error {
@@ -587,18 +632,16 @@ func (c *Converter) convertOfficeInner(ctx context.Context, srcPath, destPath, f
 	taskPath := taskFile.Name()
 	defer os.Remove(taskPath)
 
-	workDir, err := os.MkdirTemp("", "go-office-x2t-fmt-*")
+	runDir, err := c.prepareX2TRunDir(cacheDir)
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(workDir)
+	defer os.RemoveAll(runDir)
 
-	allFontsPath := filepath.Join(c.binDir, "AllFonts.js")
-	if cacheDir != "" {
-		cacheFonts := filepath.Join(cacheDir, "AllFonts.js")
-		if st, statErr := os.Stat(cacheFonts); statErr == nil && st.Size() > 0 {
-			allFontsPath = cacheFonts
-		}
+	allFontsPath := filepath.Join(runDir, "AllFonts.js")
+	workDir := filepath.Join(runDir, "work")
+	if err = os.MkdirAll(workDir, 0o755); err != nil {
+		return err
 	}
 	c.logFontSources("office", cacheDir, allFontsPath)
 	xml := buildOfficeToOfficeXML(srcPath, destPath, c.fontDir, c.themeDir, allFontsPath, fromExt, toExt, workDir)
@@ -609,8 +652,7 @@ func (c *Converter) convertOfficeInner(ctx context.Context, srcPath, destPath, f
 	if err = taskFile.Close(); err != nil {
 		return err
 	}
-	// Office-to-office runs from converter/bin; only apply_changes needs an isolated cwd.
-	out, err := c.runX2t(ctx, taskPath, "")
+	out, err := c.runX2t(ctx, taskPath, runDir)
 	if err != nil {
 		return fmt.Errorf("convert: x2t %s→%s: %w: %s", fromExt, toExt, err, strings.TrimSpace(string(out)))
 	}

@@ -26,7 +26,7 @@ type DocumentSaver interface {
 
 // DocumentSessionRegistrar records integrator session metadata from coauthoring auth.
 type DocumentSessionRegistrar interface {
-	RegisterDocumentSession(docKey, callbackURL, fileType, documentURL string)
+	RegisterDocumentSession(docKey, callbackURL, fileType, documentURL, userID string)
 }
 
 type flushJob struct {
@@ -36,27 +36,28 @@ type flushJob struct {
 }
 
 type keyFlushCoordinator struct {
-	mu      sync.Mutex
-	running bool
-	queued  *flushJob
+	mu       sync.Mutex
+	running  bool
+	queued   *flushJob
+	afterRun []func(error)
 }
 
 type saveScheduler struct {
-	mu              sync.Mutex
-	timers          map[string]*time.Timer
-	gen             map[string]uint64
-	delay           time.Duration
-	forceFallback   time.Duration
-	saver           DocumentSaver
-	cacheDir        string
-	logger          *slog.Logger
-	inflight        sync.WaitGroup
-	forceTimers     map[string]*time.Timer
-	forceOnDone     map[string]func(error)
-	forceOrigin     map[string]string
-	saveIntent      map[string]bool
-	pendingEndSave  map[string]bool
-	flushCoords     map[string]*keyFlushCoordinator
+	mu             sync.Mutex
+	timers         map[string]*time.Timer
+	gen            map[string]uint64
+	delay          time.Duration
+	forceFallback  time.Duration
+	saver          DocumentSaver
+	cacheDir       string
+	logger         *slog.Logger
+	inflight       sync.WaitGroup
+	forceTimers    map[string]*time.Timer
+	forceOnDone    map[string]func(error)
+	forceOrigin    map[string]string
+	saveIntent     map[string]bool
+	pendingEndSave map[string]bool
+	flushCoords    map[string]*keyFlushCoordinator
 }
 
 func newSaveScheduler(cacheDir string, saver DocumentSaver, logger *slog.Logger, delayOverride, forceFallbackOverride *time.Duration) *saveScheduler {
@@ -72,19 +73,19 @@ func newSaveScheduler(cacheDir string, saver DocumentSaver, logger *slog.Logger,
 		forceFallback = *forceFallbackOverride
 	}
 	return &saveScheduler{
-		timers:          make(map[string]*time.Timer),
-		gen:             make(map[string]uint64),
-		delay:           delay,
-		forceFallback:   forceFallback,
-		saver:           saver,
-		cacheDir:        cacheDir,
-		logger:          logger,
-		forceTimers:     make(map[string]*time.Timer),
-		forceOnDone:     make(map[string]func(error)),
-		forceOrigin:     make(map[string]string),
-		saveIntent:      make(map[string]bool),
-		pendingEndSave:  make(map[string]bool),
-		flushCoords:     make(map[string]*keyFlushCoordinator),
+		timers:         make(map[string]*time.Timer),
+		gen:            make(map[string]uint64),
+		delay:          delay,
+		forceFallback:  forceFallback,
+		saver:          saver,
+		cacheDir:       cacheDir,
+		logger:         logger,
+		forceTimers:    make(map[string]*time.Timer),
+		forceOnDone:    make(map[string]func(error)),
+		forceOrigin:    make(map[string]string),
+		saveIntent:     make(map[string]bool),
+		pendingEndSave: make(map[string]bool),
+		flushCoords:    make(map[string]*keyFlushCoordinator),
 	}
 }
 
@@ -161,6 +162,17 @@ func (h *Handler) Stop() {
 	ClearAllSessions()
 }
 
+func (s *saveScheduler) isFlushRunning(docKey string) bool {
+	if s == nil {
+		return false
+	}
+	coord := s.coord(docKey)
+	coord.mu.Lock()
+	running := coord.running
+	coord.mu.Unlock()
+	return running
+}
+
 func (s *saveScheduler) coord(docKey string) *keyFlushCoordinator {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -186,12 +198,6 @@ func (s *saveScheduler) takeSaveIntent(docKey string) bool {
 	}
 	delete(s.saveIntent, docKey)
 	return true
-}
-
-func (s *saveScheduler) setPendingEndSave(docKey string) {
-	s.mu.Lock()
-	s.pendingEndSave[docKey] = true
-	s.mu.Unlock()
 }
 
 func (s *saveScheduler) takePendingEndSave(docKey string) bool {
@@ -305,16 +311,41 @@ func (s *saveScheduler) submitFlush(docKey string, job flushJob) {
 			}
 
 			coord.mu.Lock()
+			after := coord.afterRun
+			coord.afterRun = nil
 			if coord.queued == nil {
 				coord.running = false
 				coord.mu.Unlock()
+				for _, fn := range after {
+					fn(err)
+				}
 				return
 			}
 			current = *coord.queued
 			coord.queued = nil
 			coord.mu.Unlock()
+			for _, fn := range after {
+				fn(err)
+			}
 		}
 	}()
+}
+
+// attachFlushOnDone chains a force-save completion callback onto the in-flight flush.
+// It does not queue another x2t pass; the waiter runs when the current flush finishes.
+func (s *saveScheduler) attachFlushOnDone(docKey string, onDone func(error)) bool {
+	if s == nil || onDone == nil {
+		return false
+	}
+	coord := s.coord(docKey)
+	coord.mu.Lock()
+	if !coord.running {
+		coord.mu.Unlock()
+		return false
+	}
+	coord.afterRun = append(coord.afterRun, onDone)
+	coord.mu.Unlock()
+	return true
 }
 
 func (s *saveScheduler) mergeFlushJob(existing *flushJob, job flushJob) *flushJob {
@@ -329,14 +360,21 @@ func (s *saveScheduler) mergeFlushJob(existing *flushJob, job flushJob) *flushJo
 		existing.origin = job.origin
 	}
 	if job.onDone != nil {
-		existing.onDone = job.onDone
+		if existing.onDone != nil {
+			prev := existing.onDone
+			existing.onDone = func(err error) {
+				prev(err)
+				job.onDone(err)
+			}
+		} else {
+			existing.onDone = job.onDone
+		}
 	}
 	return existing
 }
 
 func (s *saveScheduler) runOneFlush(docKey, origin string, force bool) error {
 	docCache := filepath.Join(s.cacheDir, docKey)
-	changeIdxBefore, _ := maxChangeIndex(docCache)
 
 	s.logger.Debug("document flush start", "key", docKey, "force", force)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -353,8 +391,10 @@ func (s *saveScheduler) runOneFlush(docKey, origin string, force bool) error {
 	}
 
 	s.logger.Debug("document flush ok", "key", docKey, "force", force)
-	changeIdxAfter, idxErr := maxChangeIndex(docCache)
-	if idxErr == nil && changeIdxAfter <= changeIdxBefore {
+	// finalizePersist already acknowledges converted blobs. Only clear an empty
+	// journal; do not compare counts before/after flush — acknowledging shrinks the
+	// journal and can look like "no progress" even when new blobs arrived mid-flush.
+	if !hasPendingChanges(docCache) {
 		clearChanges(docCache)
 	}
 	return nil
@@ -403,15 +443,19 @@ func (s *saveScheduler) scheduleDone(docKey, origin string, force bool, onDone f
 func (h *Handler) handleSaveMessage(sess *session, msg map[string]any, docKey string, r *http.Request) bool {
 	switch messageType(msg) {
 	case "isSaveLock":
-		if h.Logger != nil {
-			h.Logger.Debug("isSaveLock", "key", docKey)
-		}
+		saveLocked := false
 		if h.Scheduler != nil {
-			h.Scheduler.markSaveIntent(docKey)
+			saveLocked = h.Scheduler.isFlushRunning(docKey)
+			if !saveLocked {
+				h.Scheduler.markSaveIntent(docKey)
+			}
+		}
+		if h.Logger != nil {
+			h.Logger.Debug("isSaveLock", "key", docKey, "saveLock", saveLocked)
 		}
 		pkt, err := socketMessage(map[string]any{
 			"type":     "saveLock",
-			"saveLock": false,
+			"saveLock": saveLocked,
 		})
 		if err == nil {
 			sess.enqueue(pkt)
@@ -478,12 +522,14 @@ func (h *Handler) handleGetLock(sess *session, msg map[string]any, docKey string
 func (h *Handler) handleForceSaveStart(sess *session, docKey string, r *http.Request) {
 	now := time.Now().UnixMilli()
 	pending := false
+	flushRunning := false
 	if h.Scheduler != nil && h.Scheduler.cacheDir != "" {
 		pending = hasPendingChanges(filepath.Join(h.Scheduler.cacheDir, docKey))
+		flushRunning = h.Scheduler.isFlushRunning(docKey)
 	}
 
 	if h.Logger != nil {
-		h.Logger.Debug("forceSaveStart", "key", docKey, "pending", pending)
+		h.Logger.Debug("forceSaveStart", "key", docKey, "pending", pending, "flushRunning", flushRunning)
 	}
 
 	start, err := socketMessage(map[string]any{
@@ -491,7 +537,7 @@ func (h *Handler) handleForceSaveStart(sess *session, docKey string, r *http.Req
 		"messages": map[string]any{
 			"code":       cmdNoError,
 			"time":       now,
-			"inProgress": true,
+			"inProgress": flushRunning,
 		},
 	})
 	if err == nil {
@@ -502,7 +548,7 @@ func (h *Handler) handleForceSaveStart(sess *session, docKey string, r *http.Req
 		return
 	}
 
-	origin := requestOrigin(r)
+	origin := CoauthoringOrigin(h.PublicOrigin, r)
 	onDone := func(flushErr error) {
 		success := flushErr == nil
 		if h.Logger != nil {
@@ -530,7 +576,34 @@ func (h *Handler) handleForceSaveStart(sess *session, docKey string, r *http.Req
 		return
 	}
 
+	if flushRunning {
+		h.Scheduler.attachFlushOnDone(docKey, onDone)
+		h.Scheduler.armForceSave(docKey, origin, nil)
+		return
+	}
+
 	h.Scheduler.armForceSave(docKey, origin, onDone)
+}
+
+func clientLogSeverity(text, level string) string {
+	if strings.Contains(text, "Write_ToBinary2") ||
+		strings.Contains(text, "Uncaught TypeError") ||
+		strings.Contains(text, "Uncaught Error") {
+		return "error"
+	}
+	if level == "error" || level == "warn" {
+		return "warn"
+	}
+	if strings.Contains(text, "changesError") &&
+		strings.Contains(text, "_CheckCanNotAddChanges") &&
+		!strings.Contains(text, "Uncaught") {
+		// sdkjs load-path diagnostic only; open continues unless paired with Uncaught*.
+		return "debug"
+	}
+	if strings.Contains(text, "Error") {
+		return "warn"
+	}
+	return "debug"
 }
 
 func (h *Handler) logClientMessage(docKey string, msg map[string]any) {
@@ -542,17 +615,13 @@ func (h *Handler) logClientMessage(docKey string, msg map[string]any) {
 		return
 	}
 	level, _ := msg["level"].(string)
-	switch level {
+	switch clientLogSeverity(text, level) {
 	case "error":
-		h.Logger.Warn("editor clientLog", "key", docKey, "level", level, "msg", text)
+		h.Logger.Warn("editor clientLog", "key", docKey, "level", level, "severity", "error", "msg", text)
 	case "warn":
-		h.Logger.Warn("editor clientLog", "key", docKey, "level", level, "msg", text)
+		h.Logger.Warn("editor clientLog", "key", docKey, "level", level, "severity", "warn", "msg", text)
 	default:
-		if strings.Contains(text, "changesError") || strings.Contains(text, "Error") {
-			h.Logger.Warn("editor clientLog", "key", docKey, "level", level, "msg", text)
-		} else {
-			h.Logger.Debug("editor clientLog", "key", docKey, "level", level, "msg", text)
-		}
+		h.Logger.Debug("editor clientLog", "key", docKey, "level", level, "severity", "debug", "msg", text)
 	}
 }
 
@@ -609,19 +678,19 @@ func (h *Handler) handleSaveChanges(sess *session, msg map[string]any, docKey st
 	}
 
 	force := messageBool(msg, "reSave")
-	origin := requestOrigin(r)
+	origin := CoauthoringOrigin(h.PublicOrigin, r)
 	endSave := messageBool(msg, "endSaveChanges")
 
 	if endSave && h.Scheduler != nil {
 		if h.Scheduler.completeForceSaveIfArmed(docKey, origin) {
 			return
 		}
-		if h.Scheduler.takeSaveIntent(docKey) {
-			h.Scheduler.setPendingEndSave(docKey)
-			return
-		}
-		// Autosave batch complete — flush immediately (callback status 2).
-		h.Scheduler.scheduleImmediate(docKey, origin, false)
+		// isSaveLock marks intent for the editor save dance; do not defer autosave
+		// endSaveChanges until forceSaveStart or saves never persist (only forceSaveStart
+		// arms the waiter via completeForceSaveIfArmed above).
+		h.Scheduler.takeSaveIntent(docKey)
+		forceFlush := messageBool(msg, "reSave")
+		h.Scheduler.scheduleImmediate(docKey, origin, forceFlush)
 		return
 	}
 
@@ -636,11 +705,7 @@ func (h *Handler) handleSaveChanges(sess *session, msg map[string]any, docKey st
 
 func notifyForceSaveResult(docKey string, success bool) {
 	now := time.Now().UnixMilli()
-	sessions.Range(func(key, value any) bool {
-		s, ok := value.(*session)
-		if !ok || s.docKey != docKey {
-			return true
-		}
+	forEachSession(docKey, func(s *session) {
 		pkt, err := socketMessage(map[string]any{
 			"type": "forceSave",
 			"messages": map[string]any{
@@ -652,6 +717,5 @@ func notifyForceSaveResult(docKey string, success bool) {
 		if err == nil {
 			s.enqueue(pkt)
 		}
-		return true
 	})
 }

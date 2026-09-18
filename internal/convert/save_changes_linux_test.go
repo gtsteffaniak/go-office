@@ -75,7 +75,7 @@ func TestSaveChangesCSVRoundTrip(t *testing.T) {
 	}
 
 	outWithChanges := filepath.Join(cacheDir, "saved-with-changes.csv")
-	err = conv.SaveChanges(ctx, cacheDir, outWithChanges, "csv")
+	_, err = conv.SaveChanges(ctx, cacheDir, outWithChanges, "csv")
 	if err != nil {
 		t.Fatalf("save changes: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestSaveChangesRTFRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	outPath := filepath.Join(cacheDir, "saved.rtf")
-	err = conv.SaveChanges(ctx, cacheDir, outPath, "rtf")
+	_, err = conv.SaveChanges(ctx, cacheDir, outPath, "rtf")
 	if err != nil {
 		t.Fatalf("SaveChanges: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestSaveChangesRTFFromCorruptedSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	outPath := filepath.Join(cacheDir, "saved.rtf")
-	err = conv.SaveChanges(ctx, cacheDir, outPath, "rtf")
+	_, err = conv.SaveChanges(ctx, cacheDir, outPath, "rtf")
 	if err != nil {
 		t.Fatalf("SaveChanges: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestSaveChangesODSRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	outPath := filepath.Join(cacheDir, "saved.ods")
-	err = conv.SaveChanges(ctx, cacheDir, outPath, "ods")
+	_, err = conv.SaveChanges(ctx, cacheDir, outPath, "ods")
 	if err != nil {
 		t.Fatalf("SaveChanges: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestSaveChangesODTRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	outPath := filepath.Join(cacheDir, "saved.odt")
-	err = conv.SaveChanges(ctx, cacheDir, outPath, "odt")
+	_, err = conv.SaveChanges(ctx, cacheDir, outPath, "odt")
 	if err != nil {
 		t.Fatalf("SaveChanges: %v", err)
 	}
@@ -376,7 +376,7 @@ func TestSaveChangesPPTRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	outPath := filepath.Join(cacheDir, "saved.ppt")
-	err = conv.SaveChanges(ctx, cacheDir, outPath, "ppt")
+	_, err = conv.SaveChanges(ctx, cacheDir, outPath, "ppt")
 	if err != nil {
 		t.Fatalf("SaveChanges: %v", err)
 	}
@@ -461,7 +461,7 @@ func TestSaveReopenRTFAfterSave(t *testing.T) {
 		t.Fatal(err)
 	}
 	savedPath := filepath.Join(cacheDir, "saved.rtf")
-	if err = conv.SaveChanges(ctx, cacheDir, savedPath, "rtf"); err != nil {
+	if _, err = conv.SaveChanges(ctx, cacheDir, savedPath, "rtf"); err != nil {
 		t.Fatalf("SaveChanges: %v", err)
 	}
 	savedBody, err := os.ReadFile(savedPath)
@@ -507,7 +507,7 @@ func TestSaveReopenPPTAfterSave(t *testing.T) {
 		t.Fatal(err)
 	}
 	savedPath := filepath.Join(cacheDir, "saved.ppt")
-	if err = conv.SaveChanges(ctx, cacheDir, savedPath, "ppt"); err != nil {
+	if _, err = conv.SaveChanges(ctx, cacheDir, savedPath, "ppt"); err != nil {
 		t.Fatalf("SaveChanges: %v", err)
 	}
 	if !zipEntryContains(savedPath, "ppt/slides/slide1.xml", "My Presentation") {
@@ -568,7 +568,7 @@ func TestSaveChangesDocOOXMLFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	outPath := filepath.Join(cacheDir, "saved.doc")
-	err = conv.SaveChanges(ctx, cacheDir, outPath, "doc")
+	_, err = conv.SaveChanges(ctx, cacheDir, outPath, "doc")
 	if err != nil {
 		t.Fatalf("SaveChanges: %v", err)
 	}
@@ -618,7 +618,7 @@ func TestSaveChangesXlsOOXMLFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	outPath := filepath.Join(cacheDir, "saved.xls")
-	err = conv.SaveChanges(ctx, cacheDir, outPath, "xls")
+	_, err = conv.SaveChanges(ctx, cacheDir, outPath, "xls")
 	if err != nil {
 		t.Fatalf("SaveChanges: %v", err)
 	}
@@ -636,6 +636,69 @@ func TestSaveChangesXlsOOXMLFallback(t *testing.T) {
 	}
 	if string(outBody) != string(intermediateBody) {
 		t.Fatal("xls save should fall back to OOXML bytes when x2t cannot write binary Excel")
+	}
+}
+
+func TestSaveChangesXlsConcurrentPlaywrightLoad(t *testing.T) {
+	// Regression for Playwright post-save-stability sample.xls under parallel workers.
+	// Office-to-office x2t must use isolated run dirs (same as reverse apply_changes).
+	repo := testutil.RepoRoot(t)
+	assets := testutil.AssetsDirOrSkip(t, repo)
+	if !testutil.SampleExists(repo, "sample-files/sample.xls") {
+		t.Skip("sample xls missing")
+	}
+
+	const (
+		workers      = 10
+		convertLimit = 6
+	)
+
+	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: convertLimit})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < workers; i++ {
+		t.Run(fmt.Sprintf("worker-%02d", i), func(t *testing.T) {
+			t.Parallel()
+
+			work := testutil.NewWorkspace(t)
+			xlsPath := filepath.Join(work.Root, filepath.FromSlash(work.CopySample("sample-files/sample.xls")))
+			cacheDir := t.TempDir()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+			defer cancel()
+
+			if err := conv.ToEditorBin(ctx, xlsPath, cacheDir); err != nil {
+				t.Fatalf("ToEditorBin: %v", err)
+			}
+			changesDir := filepath.Join(cacheDir, "changes")
+			if err := os.MkdirAll(changesDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(changesDir, "changes0.json"), []byte(`["xls-change"]`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			outPath := filepath.Join(cacheDir, "saved.xls")
+			if _, err := conv.SaveChanges(ctx, cacheDir, outPath, "xls"); err != nil {
+				t.Fatalf("SaveChanges: %v", err)
+			}
+			intermediate, err := os.ReadFile(filepath.Join(cacheDir, "changes-applied.xlsx"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			outBody, err := os.ReadFile(outPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(outBody) == 0 {
+				t.Fatal("saved.xls is empty")
+			}
+			if string(outBody) != string(intermediate) {
+				t.Fatal("xls save should persist OOXML fallback bytes under concurrent load")
+			}
+		})
 	}
 }
 
@@ -729,7 +792,7 @@ func TestSaveChangesTxtUsesDirectPath(t *testing.T) {
 	}
 
 	outPath := filepath.Join(cacheDir, "saved.txt")
-	err = conv.SaveChanges(ctx, cacheDir, outPath, "txt")
+	_, err = conv.SaveChanges(ctx, cacheDir, outPath, "txt")
 	if err != nil {
 		t.Fatalf("SaveChanges: %v", err)
 	}
@@ -979,8 +1042,8 @@ func TestSaveChangesCSVConcurrentPlaywrightLoad(t *testing.T) {
 	}
 
 	const (
-		workers      = 10 // PLAYWRIGHT_WORKERS in Dockerfile.playwright-office
-		convertLimit = 6  // OFFICE_CONVERT_LIMIT in Dockerfile.playwright-office
+		workers      = 10 // PLAYWRIGHT_WORKERS default in playwright.config.ts
+		convertLimit = 6 // Playwright load regression (OFFICE_CONVERT_LIMIT=4 in Docker)
 	)
 
 	conv, err := convert.New(convert.Options{AssetDir: assets, Limit: convertLimit})
@@ -1011,7 +1074,7 @@ func TestSaveChangesCSVConcurrentPlaywrightLoad(t *testing.T) {
 			}
 
 			outPath := filepath.Join(cacheDir, "saved.csv")
-			if err := conv.SaveChanges(ctx, cacheDir, outPath, "csv"); err != nil {
+			if _, err := conv.SaveChanges(ctx, cacheDir, outPath, "csv"); err != nil {
 				t.Fatalf("SaveChanges: %v", err)
 			}
 			body, err := os.ReadFile(outPath)
@@ -1129,7 +1192,7 @@ func TestSaveChangesCSVConcurrentWithDocumentOpens(t *testing.T) {
 				return
 			}
 			outPath := filepath.Join(cacheDir, "saved.csv")
-			if saveErr := conv.SaveChanges(ctx, cacheDir, outPath, "csv"); saveErr != nil {
+			if _, saveErr := conv.SaveChanges(ctx, cacheDir, outPath, "csv"); saveErr != nil {
 				errCh <- fmt.Errorf("save worker %d: %w", n, saveErr)
 				return
 			}

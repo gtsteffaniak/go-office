@@ -60,6 +60,12 @@ func fetchLocked(ctx context.Context, opts Options, version string) error {
 		if err := ensureConverterExecutables(filepath.Join(opts.OutDir, "converter", "bin")); err != nil {
 			return err
 		}
+		if err := patchSDKJS(opts.OutDir); err != nil {
+			return err
+		}
+		if err := ensureSlideThemesJS(opts.OutDir); err != nil {
+			return err
+		}
 		return fixDoctRendererConfig(filepath.Join(opts.OutDir, "converter", "bin"))
 	}
 	if needsConverterBin(opts.OutDir) {
@@ -97,7 +103,7 @@ func fetchLocked(ctx context.Context, opts Options, version string) error {
 	}
 	fmt.Printf("Extracting from package (%s)\n", dsRoot)
 
-	if err := os.RemoveAll(opts.OutDir); err != nil && !os.IsNotExist(err) {
+	if err := clearDirContents(opts.OutDir); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(opts.OutDir, 0o755); err != nil {
@@ -141,6 +147,12 @@ func fetchLocked(ctx context.Context, opts Options, version string) error {
 	}
 
 	if err := GenerateAllFonts(opts.OutDir); err != nil {
+		return err
+	}
+	if err := patchSDKJS(opts.OutDir); err != nil {
+		return err
+	}
+	if err := ensureSlideThemesJS(opts.OutDir); err != nil {
 		return err
 	}
 

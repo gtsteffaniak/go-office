@@ -18,19 +18,19 @@ services:
       - "9052:80"
 ```
 
-**After** (go-office):
+**After** (go-office — `OFFICE_JWT_SECRET` preferred; ONLYOFFICE `JWT_SECRET` still works):
 
 ```yaml
 services:
   onlyoffice:
     image: ghcr.io/quantumx-apps/office-server:latest
     environment:
-      OFFICE_JWT_SECRET: your-shared-secret
+      JWT_SECRET: your-shared-secret   # ONLYOFFICE name; OFFICE_JWT_SECRET also accepted
     ports:
       - "9052:80"
 ```
 
-Your integrator (FileBrowser, Nextcloud ONLYOFFICE app, custom app) should keep the same `documentServerUrl` — only the image and JWT environment variable name change. The editor loads `api.js` from the site root:
+Your integrator (FileBrowser, Nextcloud ONLYOFFICE app, custom app) should keep the same `documentServerUrl` — only the container image changes. JWT can keep the ONLYOFFICE variable name (`JWT_SECRET`) or use the go-office name (`OFFICE_JWT_SECRET`). The editor loads `api.js` from the site root:
 
 ```text
 http://your-host:9052/web-apps/apps/api/documents/api.js
@@ -38,45 +38,63 @@ http://your-host:9052/web-apps/apps/api/documents/api.js
 
 ## Environment variables
 
-All go-office configuration uses the **`OFFICE_` prefix**. This is intentional: one namespace for the service, distinct from integrator-specific settings.
+go-office uses the **`OFFICE_` prefix** for its own settings. Where ONLYOFFICE Document Server already defines a variable for the same purpose, go-office accepts the **ONLYOFFICE name as a fallback** when the `OFFICE_` name is unset.
 
-| go-office variable | Purpose | Default (Docker image) |
-| ------------------ | ------- | ---------------------- |
-| `OFFICE_ASSETS` | Path to Euro-Office assets (`web-apps/`, `sdkjs/`, `converter/`) | `/app/assets` |
-| `OFFICE_ADDR` | Listen address | `:80` |
-| `OFFICE_DATA_DIR` | Data root (demo samples, cache parent) | `/app` |
-| `OFFICE_SAMPLES_DIR` | Sample files directory relative to data dir | `sample-files` |
-| `OFFICE_DISABLE_SAMPLES` | Set to `1` / `true` to hide demo UI and skip sample dir check | unset (samples **on**) |
-| `OFFICE_JWT_SECRET` | HMAC secret for signing/verifying editor JWT tokens | unset (no JWT) |
-| `OFFICE_PUBLIC_ORIGIN` | Public URL used in generated document links | inferred from `OFFICE_ADDR` |
-| `OFFICE_BASE_PATH` | Mount prefix for editor routes | `/` (site root) |
-| `OFFICE_API_BASE` | Demo API prefix (`/demo/config`, etc.) | `/api/office` |
-| `OFFICE_VERSION` | Protocol version string (coauthoring) | read from `assets/VERSION` |
-| `OFFICE_DEBUG_LOGGING` | Verbose logging (`1` / `true`) | unset |
+**Resolution order:** `OFFICE_*` → ONLYOFFICE fallback (if any) → default.
 
 CLI flags (`-assets`, `-addr`, `-jwt`, `-disable-samples`, …) override environment when passed explicitly.
 
-### Mapping from ONLYOFFICE Document Server
+### go-office variables
 
-Official Document Server uses many variables for PostgreSQL, Redis, RabbitMQ, and internal services. go-office is a **single process** and ignores infrastructure the full stack requires.
+| Variable | Purpose | Default (`office-server` image) |
+| -------- | ------- | ------------------------------- |
+| `OFFICE_ASSETS` | Path to Euro-Office assets (`web-apps/`, `sdkjs/`, `converter/`) | `/app/assets` |
+| `OFFICE_ADDR` | Listen address | `:80` (image); `:8080` (`make serve`) |
+| `OFFICE_DATA_DIR` | Data root (demo samples, cache parent) | `/app` |
+| `OFFICE_SAMPLES_DIR` | Sample files directory relative to data dir | `sample-files` |
+| `OFFICE_DISABLE_SAMPLES` | `1` / `true` — hide demo UI and skip sample dir check | unset (samples **on**) |
+| `OFFICE_SKIP_ASSET_FETCH` | `1` / `true` — do not download assets at startup when missing | unset |
+| `OFFICE_JWT_SECRET` | HMAC secret for editor config, converter, and callback JWT | unset (no JWT) |
+| `OFFICE_JWT_ENABLED` | `false` / `0` — disable JWT even if a secret is set | unset (enabled when secret set) |
+| `OFFICE_PUBLIC_ORIGIN` | Public URL used in generated document/cache links | inferred from `OFFICE_ADDR` / request |
+| `OFFICE_BASE_PATH` | Mount prefix for editor routes | `/` (site root) |
+| `OFFICE_API_BASE` | Demo API prefix (`/demo/config`, etc.) | `/api/office` |
+| `OFFICE_VERSION` | Coauthoring protocol version string | read from `assets/VERSION` |
+| `OFFICE_DEBUG_LOGGING` | Verbose logging (`1` / `true`) | unset |
+| `OFFICE_DEBUG` | Legacy alias for `OFFICE_DEBUG_LOGGING` | unset |
+| `OFFICE_LOG_JSON` | JSON log lines on stderr (`1` / `true`) | unset (text) |
+| `OFFICE_POLL_HOLD` | Coauthoring long-poll hold (`0`, `2s`, `500ms`, …) | `2s` production default |
+| `OFFICE_CONVERT_LIMIT` | Max concurrent x2t subprocesses | `2` (Playwright Docker default: `4`) |
+| `OFFICE_SAVE_DELAY` | Coauthoring save debounce before flush | `5s` production default |
 
-| ONLYOFFICE / Docker-DocumentServer | go-office | Notes |
-| ---------------------------------- | --------- | ----- |
-| `JWT_SECRET` | **`OFFICE_JWT_SECRET`** | **Rename required.** Same secret value; must match integrator. |
-| `JWT_ENABLED=true` | *(not used)* | JWT is enabled when `OFFICE_JWT_SECRET` is non-empty. |
-| `JWT_HEADER` | *(not used)* | Standard `Authorization` header; same as typical ONLYOFFICE setups. |
-| `JWT_IN_BODY` | **`OFFICE_JWT_SECRET`** | When set, outbound callbacks are signed as `{"token":"…"}` and incoming callback bodies are verified the same way. |
-| `DB_*`, `REDIS_*`, `AMQP_*` | *(none)* | Not used — no Postgres/Redis/RabbitMQ. |
-| `WOPI_*` | *(none)* | WOPI not supported. |
+### ONLYOFFICE Document Server fallbacks
 
-### Early development aliases (no longer supported)
+These ONLYOFFICE variables are read **only when** the matching `OFFICE_` variable is unset (except `JWT_ENABLED`, which pairs with either secret name).
+
+| ONLYOFFICE variable | go-office equivalent | Supported | Notes |
+| ------------------- | -------------------- | :-------: | ----- |
+| `JWT_SECRET` | `OFFICE_JWT_SECRET` | ✅ | Same secret value; preferred for drop-in compose files |
+| `JWT_ENABLED` | `OFFICE_JWT_ENABLED` | ✅ | `false` disables JWT even if `JWT_SECRET` is set |
+| `JWT_HEADER` | — | ❌ | go-office uses `Authorization: Bearer` only; not configurable |
+| `JWT_IN_BODY` | — | ⚠️ | When a secret is set, callbacks are signed as `{"token":"…"}` (ONLYOFFICE `JWT_IN_BODY=true` style). Header-only callback JWT is not wired. |
+| `DB_*` (`DB_TYPE`, `DB_HOST`, …) | — | ❌ | No PostgreSQL — single process |
+| `REDIS_*` | — | ❌ | No Redis |
+| `AMQP_*` | — | ❌ | No RabbitMQ |
+| `WOPI_ENABLED` | — | ❌ | WOPI not supported |
+| `USE_UNAUTHORIZED_STORAGE` | — | ❌ | Not implemented |
+| `ALLOW_PRIVATE_IP_ADDRESS` | — | ❌ | Document downloads are not restricted by IP class |
+| `ALLOW_META_IP_ADDRESS` | — | ❌ | Not implemented |
+| `GENERATE_FONTS` | — | ❌ | Fonts ship with Euro-Office assets |
+| `ONLYOFFICE_HTTPS_HSTS_*` | — | ❌ | Use your reverse proxy for TLS/HSTS |
+
+### Early development aliases (deprecated)
 
 | Old name | Use instead |
 | -------- | ----------- |
 | `GO_OFFICE_ASSETS` | `OFFICE_ASSETS` |
-| `GO_OFFICE_DEBUG` | `OFFICE_DEBUG_LOGGING` (legacy: `OFFICE_DEBUG`) |
+| `GO_OFFICE_DEBUG` | `OFFICE_DEBUG_LOGGING` |
 
-These are **not** read by current builds. Rename in compose, CI, and shell profiles before upgrading.
+These are **not** read by current builds.
 
 ## URL and port compatibility
 
@@ -100,7 +118,7 @@ These are **not** read by current builds. Rename in compose, CI, and shell profi
 ## Integrator checklist
 
 1. **Image** — `ghcr.io/quantumx-apps/office-server:latest`, a Euro-Office tag (e.g. `9.3.4-hotfix.1`), or a go-office tag (e.g. `v0.2.0`).
-2. **JWT** — Rename `JWT_SECRET` → `OFFICE_JWT_SECRET` with the **same value** on both document server and integrator.
+2. **JWT** — Keep `JWT_SECRET` from your ONLYOFFICE compose file, or rename to `OFFICE_JWT_SECRET`. Same value on document server and integrator. Set `JWT_ENABLED=false` / `OFFICE_JWT_ENABLED=false` to disable.
 3. **documentServerUrl** — Unchanged URL shape; must end with `/` and serve `web-apps/…/api.js`.
 4. **document.url / callbackUrl** — Still point at your integrator; go-office fetches documents from those URLs on open.
 5. **Health checks** — Update probes to `GET /healthcheck` (expects body `true`) or `GET /health` (JSON).
@@ -111,7 +129,9 @@ These are **not** read by current builds. Rename in compose, CI, and shell profi
 - Open documents (word, cell, slide, PDF) via coauthoring + x2t (or `origin.pdf` for PDF)
 - Static assets, fonts, `api.js`
 - Coauthoring polling transport (license + auth + `documentOpen`)
-- JWT signing of editor config when `OFFICE_JWT_SECRET` is set
+- JWT signing of editor config when `OFFICE_JWT_SECRET` or `JWT_SECRET` is set
+- `POST /session/reset?key=` and automatic session clear in `BuildEditorConfig` (fixes editor page reload)
+- Demo warm (`GET /demo/warm`) for faster sample opens
 - Demo UI and bundled sample files (unless disabled)
 
 ## Limitations
@@ -142,7 +162,8 @@ Opening and viewing documents in the editor works; **saving edits back to storag
 FileBrowser today expects an external `onlyOfficeUrl` and signs config with `integrations.office.secret`. When pointing at go-office:
 
 - Set `onlyOfficeUrl` to this server’s public URL (e.g. `http://files.example.com:9052/`).
-- Use the **same** secret as `OFFICE_JWT_SECRET`.
+- Use the **same** secret as `OFFICE_JWT_SECRET` (or `JWT_SECRET`).
+- On each editor config request, FileBrowser should call `POST {go-office}/session/reset?key={documentKey}` (or use go-office `BuildEditorConfig`, which clears the session automatically).
 - **Office grid previews:** `POST {onlyOfficeUrl}/converter` with `outputtype: "jpg"` (sync thumbnail conversion).
 - Run `office-server` as a sidecar or standalone container.
 
@@ -167,12 +188,13 @@ Use `office.DiscoverAssets` when assets are pre-installed and you must not downl
 
 | Symptom | Likely cause |
 | ------- | ------------ |
+| Page reload spins forever | Stale coauthoring session — call `POST /session/reset?key=` when minting config, or use `BuildEditorConfig`. |
 | Editor loads but document never opens | x2t/conversion error — check server logs (`OFFICE_DEBUG_LOGGING=1` or `-debug`). go-office must **reach** the `document.url` from inside its container (not just the browser). |
 | `document open failed` / download errors | FileBrowser `document.url` uses an internal hostname (e.g. `http://beta-large/...`) that the go-office container cannot resolve. Put both on the same Docker network or use a URL reachable from go-office. |
 | Wrong `cache/files` URLs / mixed content | Set `OFFICE_PUBLIC_ORIGIN=https://your-public-host` (or ensure reverse proxy sends `X-Forwarded-Proto` / `X-Forwarded-Host`). |
 | `plugins.json` 404 | Fixed in current go-office (`[]` stub). Harmless on older builds. |
 | WebSocket `501` on `/doc/.../c/` | Expected — sdkjs falls back to polling automatically. Not an error. |
-| “Token” / JWT errors | `OFFICE_JWT_SECRET` mismatch with integrator, or secret still named `JWT_SECRET`. |
+| “Token” / JWT errors | `OFFICE_JWT_SECRET` / `JWT_SECRET` mismatch with integrator, or `JWT_ENABLED=false` on one side only. |
 | `api.js` 404 | Wrong `documentServerUrl` or `OFFICE_BASE_PATH` does not match how the URL is constructed. |
 | Health check fails | Probe still targeting internal port `8000`; use port `80` on the container. |
 | PDF stalls | Ensure go-office version includes PDF `origin.pdf` open path (not x2t). |

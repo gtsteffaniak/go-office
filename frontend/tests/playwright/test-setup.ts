@@ -10,15 +10,32 @@ function isHarmlessConsoleError(errorText: string): boolean {
     // Firefox logs background lazy-load font failures; core icons still render.
     /downloadable font: download failed.*material-symbols\.woff2/i.test(errorText) ||
     // ONLYOFFICE may warn when optional spellcheck dictionaries are absent in demo.
-    /dictionaries\/en_US/i.test(errorText)
+    /dictionaries\/en_US/i.test(errorText) ||
+    // Coauthoring falls back to long-polling when websocket upgrade is unavailable.
+    /WebSocket connection to 'ws:.*\/doc\/.*\/c\/\?.*transport=websocket' failed.*501/i.test(
+      errorText,
+    ) ||
+    /Error during WebSocket handshake: Unexpected response code: 501/i.test(errorText) ||
+    // Generic browser network summary for expected 404s (themes, dictionaries, favicon).
+    /^Failed to load resource: the server responded with a status of 404/i.test(errorText) ||
+    // Slide themes bundle may be absent in trimmed asset trees; stub is served when present.
+    /sdkjs\/slide\/themes\/themes\.js/i.test(errorText)
   );
 }
 
 function isHarmlessFailedResponse(url: string, status: number): boolean {
-  if (status !== 404) {
-    return false;
+  if (status === 404) {
+    return (
+      /\/themes\.json(?:\?|$)/.test(url) ||
+      /\/dictionaries\//.test(url) ||
+      /\/favicon\.ico(?:\?|$)/.test(url) ||
+      /\/sdkjs\/slide\/themes\//.test(url)
+    );
   }
-  return /\/themes\.json(?:\?|$)/.test(url) || /\/dictionaries\//.test(url);
+  if (status === 501 && /\/doc\/.*\/c\/\?.*transport=websocket/.test(url)) {
+    return true;
+  }
+  return false;
 }
 
 export function setupErrorTracking(page: Page) {
@@ -98,16 +115,36 @@ export function setupErrorTracking(page: Page) {
 
 export const test = base.extend<Fixtures>({
   collectPageErrors: [
-    async ({ page }, use) => {
-      const errors: string[] = [];
-      page.on("pageerror", (err) => errors.push(err.message));
+    async ({ page }, use, testInfo) => {
+      const pageErrors: string[] = [];
+      const consoleErrors: string[] = [];
+      page.on("pageerror", (err) => {
+        pageErrors.push(err.stack ?? err.message);
+      });
       page.on("console", (msg) => {
-        if (msg.type() === "error" && !isHarmlessConsoleError(msg.text())) {
-          errors.push(msg.text());
+        if (msg.type() !== "error" || isHarmlessConsoleError(msg.text())) {
+          return;
         }
+        consoleErrors.push(msg.text());
       });
       await use();
-      const fatal = errors.filter((e) => /fonts are not loaded/i.test(e));
+      if (testInfo.status !== testInfo.expectedStatus) {
+        if (pageErrors.length > 0) {
+          console.error("\n=== browser page errors ===");
+          pageErrors.forEach((err, i) => {
+            console.error(`\n[pageerror ${i + 1}]\n${err}\n---`);
+          });
+        }
+        if (consoleErrors.length > 0) {
+          console.error("\n=== browser console errors ===");
+          consoleErrors.forEach((err, i) => {
+            console.error(`\n[console.error ${i + 1}]\n${err}\n---`);
+          });
+        }
+      }
+      const fatal = [...pageErrors, ...consoleErrors].filter((e) =>
+        /fonts are not loaded/i.test(e),
+      );
       expect(fatal, `browser errors: ${fatal.join("; ")}`).toHaveLength(0);
     },
     { auto: true },

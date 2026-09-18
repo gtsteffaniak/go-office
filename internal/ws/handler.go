@@ -26,6 +26,7 @@ type Handler struct {
 	Debug        bool
 	PollHold     time.Duration
 	PublicOrigin string
+	JWTSecret    []byte
 	Opener       *Opener
 	openHook     DocumentOpener
 	Scheduler    *saveScheduler
@@ -40,6 +41,7 @@ type HandlerOptions struct {
 	Debug                  bool
 	PollHold               *time.Duration
 	PublicOrigin           string
+	JWTSecret              []byte
 	Opener                 *Opener
 	OpenHook               DocumentOpener
 	CacheDir               string
@@ -69,6 +71,7 @@ func NewWithOptions(opts HandlerOptions) *Handler {
 		h.PollHold = *opts.PollHold
 	}
 	h.PublicOrigin = opts.PublicOrigin
+	h.JWTSecret = opts.JWTSecret
 	h.Opener = opts.Opener
 	h.openHook = opts.OpenHook
 	h.saver = opts.Saver
@@ -92,7 +95,11 @@ func (h *Handler) registerDocumentSession(docKey string, req authRequest) {
 		fileType = req.Open.Format
 		documentURL = req.Open.URL
 	}
-	reg.RegisterDocumentSession(docKey, req.IntegratorCallbackURL(), fileType, documentURL)
+	userID := req.User.ID
+	if userID == "" {
+		userID = "user"
+	}
+	reg.RegisterDocumentSession(docKey, req.IntegratorCallbackURL(), fileType, documentURL, userID)
 }
 
 func (h *Handler) documentOpener() DocumentOpener {
@@ -158,12 +165,12 @@ func (h *Handler) pollHoldDuration() time.Duration {
 
 func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey string) {
 	w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
-	sid := r.URL.Query().Get("sid")
-	if sid == "" {
-		sid = defaultSessionID
-	}
+	sid := strings.TrimSpace(r.URL.Query().Get("sid"))
 
 	if r.Method == http.MethodPost {
+		if sid == "" {
+			sid = newSessionID()
+		}
 		body, _ := io.ReadAll(io.LimitReader(r.Body, 16<<20))
 		if h.Debug {
 			h.Logger.Debug("coauthoring message", "key", docKey, "sid", sid, "body", summarizeCoauthoringBody(string(body)))
@@ -172,24 +179,48 @@ func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey st
 		for _, packet := range parsePostPackets(string(body)) {
 			switch {
 			case strings.HasPrefix(packet, "40"):
-				hadOpen := sess.hadDocumentOpen()
-				sess.onConnect(connectAuthData(packet))
-				if req, ok := parseAuthPacket(packet); ok {
-					h.registerDocumentSession(docKey, req)
-					if hadOpen {
+				authData := connectAuthData(packet)
+				req, hasAuth := parseAuthPacket(packet)
+				if hasAuth {
+					if err := verifyAuthJWT(h.JWTSecret, req.Token, docKey); err != nil {
 						if h.Logger != nil {
-							h.Logger.Info("coauthoring reconnect", "key", docKey, "keptOpen", true)
+							h.Logger.Warn("coauthoring auth jwt rejected", "key", docKey, "err", err)
 						}
-					} else {
+						sess.onConnect(nil, false)
+						continue
+					}
+				}
+				var deferAuth bool
+				if hasAuth {
+					deferAuth = sess.needsDocumentOpen(req)
+				}
+				sess.onConnect(authData, deferAuth)
+				if hasAuth {
+					h.registerDocumentSession(docKey, req)
+					if sess.needsDocumentOpen(req) {
 						sess.startOpen(h.documentOpener(), req, CoauthoringOrigin(h.PublicOrigin, r))
+					} else if sess.shouldLogReconnect(req) {
+						if h.Logger != nil {
+							h.Logger.WithGroup("coauthoring").Info("reconnect",
+								"key", docKey,
+								"keptOpen", true,
+							)
+						}
 					}
 				}
 			case strings.HasPrefix(packet, "42"):
 				if req, ok := parseAuthPacket(packet); ok {
+					if err := verifyAuthJWT(h.JWTSecret, req.Token, docKey); err != nil {
+						if h.Logger != nil {
+							h.Logger.Warn("coauthoring auth jwt rejected", "key", docKey, "err", err)
+						}
+						continue
+					}
 					h.registerDocumentSession(docKey, req)
-					sess.onAuth(req)
-					if !sess.hadDocumentOpen() {
+					if sess.needsDocumentOpen(req) {
 						sess.startOpen(h.documentOpener(), req, CoauthoringOrigin(h.PublicOrigin, r))
+					} else {
+						sess.onAuth(req)
 					}
 					continue
 				}
@@ -202,8 +233,9 @@ func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey st
 		return
 	}
 
-	if r.URL.Query().Get("sid") == "" {
-		_, _ = w.Write([]byte(`0{"sid":"go-office","upgrades":[],"pingInterval":25000,"pingTimeout":20000}`))
+	if sid == "" {
+		sid = newSessionID()
+		_, _ = w.Write([]byte(`0{"sid":"` + sid + `","upgrades":[],"pingInterval":25000,"pingTimeout":20000}`))
 		return
 	}
 

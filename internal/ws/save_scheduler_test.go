@@ -16,10 +16,11 @@ import (
 )
 
 type recordingSaver struct {
-	mu    sync.Mutex
-	calls []flushCall
-	err   error
-	block chan struct{}
+	mu      sync.Mutex
+	calls   []flushCall
+	err     error
+	block   chan struct{}
+	started chan struct{}
 }
 
 type flushCall struct {
@@ -29,6 +30,12 @@ type flushCall struct {
 }
 
 func (s *recordingSaver) FlushDocument(_ context.Context, docKey, origin string, force bool) error {
+	if s.started != nil {
+		select {
+		case s.started <- struct{}{}:
+		default:
+		}
+	}
 	if s.block != nil {
 		<-s.block
 	}
@@ -47,15 +54,18 @@ func (s *recordingSaver) flushCalls() []flushCall {
 }
 
 func saveTestHandlerWithSaver(t *testing.T, saver ws.DocumentSaver, delay time.Duration) *ws.Handler {
+	return saveTestHandlerWithOptions(t, saver, delay, 100*time.Millisecond)
+}
+
+func saveTestHandlerWithOptions(t *testing.T, saver ws.DocumentSaver, delay, forceFallback time.Duration) *ws.Handler {
 	t.Helper()
 	ws.ResetSessionsForTest()
-	fallback := 100 * time.Millisecond
 	h := ws.NewWithOptions(ws.HandlerOptions{
 		Version:                "9.3.4-hotfix.1",
 		CacheDir:               t.TempDir(),
 		Saver:                  saver,
 		SaveDelay:              &delay,
-		ForceSaveFallbackDelay: &fallback,
+		ForceSaveFallbackDelay: &forceFallback,
 	})
 	h.PollHold = 0
 	return h
@@ -74,7 +84,13 @@ func TestSaveSchedulerDebounce(t *testing.T) {
 
 	postSave()
 	postSave()
-	time.Sleep(delay + 40*time.Millisecond)
+	deadline := time.Now().Add(delay + 500*time.Millisecond)
+	for time.Now().Before(deadline) {
+		if len(saver.flushCalls()) >= 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 
 	calls := saver.flushCalls()
 	if len(calls) != 1 {
@@ -275,7 +291,7 @@ func TestSaveSchedulerPartialWhileForceArmedNoDebounce(t *testing.T) {
 	ws.ResetSessionsForTest()
 	saver := &recordingSaver{}
 	delay := 30 * time.Millisecond
-	h := saveTestHandlerWithSaver(t, saver, delay)
+	h := saveTestHandlerWithOptions(t, saver, delay, time.Hour)
 
 	h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office",
 		strings.NewReader(`42["message",{"type":"forceSaveStart"}]`)), "/doc/key/c")
@@ -284,7 +300,10 @@ func TestSaveSchedulerPartialWhileForceArmedNoDebounce(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(partial)), "/doc/key/c")
 	}
-	time.Sleep(delay + 40 * time.Millisecond)
+	deadline := time.Now().Add(delay + 200*time.Millisecond)
+	for time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
 	if len(saver.flushCalls()) != 0 {
 		t.Fatalf("partial saveChanges while force armed should not debounce flush: %+v", saver.flushCalls())
 	}

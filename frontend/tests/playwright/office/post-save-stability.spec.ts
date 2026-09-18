@@ -1,10 +1,8 @@
 import { test, expect } from "../test-setup";
 import {
-  waitForEditorReady,
-  waitForEditorInteractive,
+  warmDemoFile,
   applyMinimalSaveEdit,
-  triggerEditorSave,
-  waitForSaveDone,
+  waitForPersistedMarker,
   assertEditorStable,
 } from "../editor";
 import { forkSample } from "../fork-sample";
@@ -12,32 +10,40 @@ import { samplesForTier, sampleExists } from "../samples";
 
 test.describe.configure({ mode: "parallel" });
 
-const bundledTest = process.env.OFFICE_PLAYWRIGHT_TEST === "true";
 const STATUS_OK_TIMEOUT = 8_000;
 const STABLE_MS = Number(process.env.POST_SAVE_STABLE_MS ?? 10_000);
-const SAVE_TEST_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_TEST_TIMEOUT ?? (bundledTest ? 180_000 : 150_000));
 
 const STABLE_SAMPLES = samplesForTier(3).filter((s) => s.editor !== "pdf" && sampleExists(s.path));
-
-test.use({
-  trace: bundledTest ? "retain-on-failure" : "on-first-retry",
-  timeout: SAVE_TEST_TIMEOUT,
-});
-
 for (const sample of STABLE_SAMPLES) {
-  test(`post-save stable: ${sample.path}`, async ({ page }, testInfo) => {
+  test(`post-save stable: ${sample.path}`, async ({ page, request }, testInfo) => {
     const marker = `PW_STABLE_${testInfo.testId.slice(-6)}`;
     const file = forkSample(sample.path, testInfo);
 
+    await warmDemoFile(request, file);
     await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
     await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
-    await waitForEditorReady(page, sample.editor);
-    await waitForEditorInteractive(page, sample.editor);
 
     await applyMinimalSaveEdit(page, sample.editor, marker);
-    await triggerEditorSave(page, sample.editor);
-    await waitForSaveDone(page, { request: page.request, filePath: file, marker });
+    await waitForPersistedMarker(request, file, marker, { page });
 
     await assertEditorStable(page, STABLE_MS);
   });
 }
+
+test("post-save rapid double save: sample.docx", async ({ page, request }, testInfo) => {
+  const file = forkSample("sample-files/sample.docx", testInfo);
+  const markerA = `PW_RAPID_A_${testInfo.testId.slice(-4)}`;
+  const markerB = `PW_RAPID_B_${testInfo.testId.slice(-4)}`;
+
+  await warmDemoFile(request, file);
+  await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
+  await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
+
+  await applyMinimalSaveEdit(page, "word", markerA);
+  await waitForPersistedMarker(request, file, markerA, { page });
+
+  await applyMinimalSaveEdit(page, "word", markerB);
+  await waitForPersistedMarker(request, file, markerB, { page });
+
+  await assertEditorStable(page, STABLE_MS);
+});

@@ -2,7 +2,12 @@ module github.com/quantumx-apps/go-office
 
 go 1.27.0
 
-require github.com/golang-jwt/jwt/v5 v5.2.1
+require (
+	github.com/golang-jwt/jwt/v5 v5.2.1
+	github.com/gtsteffaniak/go-cache v1.1.0
+	github.com/gtsteffaniak/go-logger v1.1.0
+	github.com/gtsteffaniak/go-push v0.1.0
+)
 
 require (
 	4d63.com/gocheckcompilerdirectives v1.4.0 // indirect

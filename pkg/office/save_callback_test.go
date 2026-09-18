@@ -24,14 +24,8 @@ func TestPersistDocumentCallbackOnlySkipsStoragePathCheck(t *testing.T) {
 	})
 
 	err = srv.PersistDocument(context.Background(), docKey)
-	if err == nil {
-		t.Fatal("expected error without Editor.bin")
-	}
-	if strings.Contains(err.Error(), "unknown document key") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if strings.Contains(err.Error(), "no storage path") {
-		t.Fatalf("unexpected error: %v", err)
+	if err != nil {
+		t.Fatalf("expected no-op without Editor.bin or pending changes: %v", err)
 	}
 	if store.savedPath != "" {
 		t.Fatalf("storage.Save should not run in callback-only mode, got path %q", store.savedPath)

@@ -229,3 +229,59 @@ func TestEditorBinIsNotBrowserCached(t *testing.T) {
 		t.Fatalf("Editor.bin Cache-Control = %q, want no-store", rec.Header().Get("Cache-Control"))
 	}
 }
+
+func TestSessionResetEndpoint(t *testing.T) {
+	srv, err := office.New(nopStorage{}, office.Options{BasePath: "/office"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/office/session/reset?key=doc-key", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d body = %q", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/office/session/reset?key=doc-key", nil)
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET status = %d, want 405", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/office/session/reset", nil)
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing key status = %d, want 400", rec.Code)
+	}
+}
+
+func TestBuildEditorConfigClearsCoauthoringSession(t *testing.T) {
+	srv, err := office.New(nopStorage{}, office.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = srv.BuildEditorConfig(context.Background(), config.EditorRequest{
+		DocumentKey: "clear-me",
+		Title:       "t",
+		FileType:    "docx",
+		DocumentURL: "http://example/doc",
+		CallbackURL: "http://example/cb",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Second config for same key must not error; coauthoring session was cleared.
+	_, err = srv.BuildEditorConfig(context.Background(), config.EditorRequest{
+		DocumentKey: "clear-me",
+		Title:       "t",
+		FileType:    "docx",
+		DocumentURL: "http://example/doc",
+		CallbackURL: "http://example/cb",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

@@ -32,6 +32,9 @@ func (s *Server) RunConverter(ctx context.Context, origin string, req ConverterR
 	convDir := filepath.Join(s.cacheDir(), cacheName)
 	outPath := filepath.Join(convDir, outName)
 
+	unlock := lockConverter(cacheName)
+	defer unlock()
+
 	if st, statErr := os.Stat(outPath); statErr == nil && st.Size() > 0 {
 		return ConverterResponse{
 			EndConvert: true,
@@ -61,14 +64,16 @@ func (s *Server) RunConverter(ctx context.Context, origin string, req ConverterR
 	}
 
 	thumb := thumbnailToConvert(req.Thumbnail)
+	lowPriority := req.Thumbnail != nil
 	if err := conv.ConvertFile(ctx, convert.ConvertRequest{
-		SourcePath: srcPath,
-		DestPath:   outPath,
-		FileType:   req.FileType,
-		OutputType: req.OutputType,
-		Thumbnail:  thumb,
+		SourcePath:  srcPath,
+		DestPath:    outPath,
+		FileType:    req.FileType,
+		OutputType:  req.OutputType,
+		Thumbnail:   thumb,
+		LowPriority: lowPriority,
 	}); err != nil {
-		return ConverterResponse{Error: -4}, err
+		return ConverterResponse{Error: convert.ConverterErrorCode(err)}, err
 	}
 
 	return ConverterResponse{
@@ -183,7 +188,7 @@ func (s *Server) handleConverter(w http.ResponseWriter, r *http.Request) {
 		if s.opts.Debug && s.opts.Logger != nil {
 			s.opts.Logger.Debug("converter jwt", "err", jwtErr)
 		}
-		writeConverterError(w, r, -20, "token")
+		writeConverterError(w, r, convert.ErrCodeInvalidToken, "token")
 		return
 	}
 	if req.Async {
@@ -205,7 +210,7 @@ func (s *Server) handleConverter(w http.ResponseWriter, r *http.Request) {
 			s.opts.Logger.Error("converter failed", "key", req.Key, "err", err)
 		}
 		if res.Error == nil {
-			res.Error = -4
+			res.Error = convert.ConverterErrorCode(err)
 		}
 		writeConverterResponse(w, r, res)
 		return

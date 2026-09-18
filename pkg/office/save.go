@@ -12,10 +12,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/quantumx-apps/go-office/internal/changes"
 	"github.com/quantumx-apps/go-office/internal/convert"
 	"github.com/quantumx-apps/go-office/internal/session"
 	"github.com/quantumx-apps/go-office/pkg/callback"
 )
+
+// maxPersistCoalesceRounds bounds mid-flush re-convert loops when change blobs arrive
+// during x2t; prevents unbounded work if the journal keeps growing.
+const maxPersistCoalesceRounds = 8
 
 // HandleCallback processes ONLYOFFICE editor callback POSTs (status 2/6 → persist).
 func (s *Server) HandleCallback(w http.ResponseWriter, r *http.Request) {
@@ -24,7 +29,7 @@ func (s *Server) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := callback.ReadBodyWithSecret(r.Body, s.opts.JWTSecret)
+	body, err := callback.ReadRequest(r, s.opts.JWTSecret)
 	if err != nil {
 		callback.WriteError(w, 1)
 		return
@@ -55,45 +60,108 @@ func (s *Server) HandleCallback(w http.ResponseWriter, r *http.Request) {
 
 // PersistDocument converts Editor.bin in cache and writes to Storage.
 func (s *Server) PersistDocument(ctx context.Context, docKey string) error {
-	doc, ok := s.sessions.Get(docKey)
+	ackBlobs, err := s.persistDocument(ctx, docKey, true)
+	if err != nil {
+		return err
+	}
+	return s.finalizePersist(docKey, ackBlobs)
+}
+
+func (s *Server) persistDocument(ctx context.Context, docKey string, ackOnSuccess bool) (int, error) {
+	doc, ok := s.sessions.Lookup(docKey)
 	if !ok {
-		return fmt.Errorf("office: unknown document key %q", docKey)
+		return 0, fmt.Errorf("office: unknown document key %q", docKey)
 	}
 	callbackOnly := doc.Path == "" && strings.TrimSpace(doc.CallbackURL) != ""
 	if doc.Path == "" && !callbackOnly {
-		return fmt.Errorf("office: no storage path or callback URL for key %q", docKey)
+		return 0, fmt.Errorf("office: no storage path or callback URL for key %q", docKey)
 	}
 	ext := strings.TrimPrefix(strings.ToLower(doc.FileType), ".")
 	if ext == "" {
-		return fmt.Errorf("office: missing file type for key %q", docKey)
+		return 0, fmt.Errorf("office: missing file type for key %q", docKey)
 	}
 	if convert.IsBrowserEditorFormat(ext) {
-		return fmt.Errorf("office: save not supported for %s format", ext)
+		return 0, fmt.Errorf("office: save not supported for %s format", ext)
+	}
+
+	cacheDir := filepath.Join(s.cacheDir(), docKey)
+	if !hasPendingChanges(cacheDir) {
+		if s.opts.Logger != nil {
+			s.opts.Logger.Debug("persist skipped; no pending changes", "key", docKey)
+		}
+		return 0, nil
 	}
 
 	conv, err := s.converter()
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	cacheDir := filepath.Join(s.cacheDir(), docKey)
 	outPath := filepath.Join(cacheDir, "saved."+ext)
 	pending := hasPendingChanges(cacheDir)
 	if s.opts.Logger != nil {
 		s.opts.Logger.Debug("persist convert", "key", docKey, "path", doc.Path, "ext", ext, "pendingChanges", pending, "callbackOnly", callbackOnly)
 	}
-	if err = s.convertDocument(ctx, conv, cacheDir, outPath, ext); err != nil {
-		return err
+	var ackBlobs int
+	for round := 0; ; round++ {
+		if round >= maxPersistCoalesceRounds {
+			return 0, fmt.Errorf("office: coalesce round limit exceeded for key %q", docKey)
+		}
+		var beforePending int
+		beforePending, err = changes.Count(cacheDir)
+		if err != nil {
+			return 0, err
+		}
+		ackBlobs, err = s.convertDocument(ctx, conv, cacheDir, outPath, ext)
+		if err != nil {
+			return 0, err
+		}
+		var pendingCount int
+		pendingCount, err = changes.Count(cacheDir)
+		if err != nil {
+			return 0, err
+		}
+		if pendingCount <= ackBlobs {
+			break
+		}
+		if ackBlobs == 0 {
+			break
+		}
+		if s.opts.Logger != nil {
+			s.opts.Logger.Debug("persist coalescing mid-flush changes",
+				"key", docKey,
+				"converted", ackBlobs,
+				"pending", pendingCount,
+				"round", round+1,
+			)
+		}
+		// New blobs arrived during x2t. Rebuild Editor.bin from the partial output
+		// and acknowledge converted blobs before applying the remainder.
+		if err = s.refreshEditorBinFromSaved(ctx, cacheDir, outPath); err != nil {
+			return 0, err
+		}
+		if err = changes.Acknowledge(cacheDir, ackBlobs); err != nil {
+			return 0, err
+		}
+		changes.RemoveSnapshot(cacheDir)
+		var afterPending int
+		afterPending, err = changes.Count(cacheDir)
+		if err != nil {
+			return 0, err
+		}
+		if afterPending >= beforePending {
+			return 0, fmt.Errorf("office: coalesce made no journal progress for key %q", docKey)
+		}
 	}
 
 	f, err := os.Open(outPath)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer f.Close()
 	raw, err := io.ReadAll(f)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	raw = convert.NormalizePersistedOutput(ext, raw)
 	xlsxInfo, _ := os.Stat(filepath.Join(cacheDir, "changes-applied.xlsx"))
@@ -112,7 +180,7 @@ func (s *Server) PersistDocument(ctx context.Context, docKey string) error {
 
 	if !callbackOnly {
 		if err := s.storage.Save(ctx, doc.Path, bytes.NewReader(raw)); err != nil {
-			return err
+			return 0, err
 		}
 		s.sessions.UpsertDoc(session.Document{Key: docKey, Path: doc.Path, FileType: ext, UpdatedAt: time.Now().UTC()})
 		if s.opts.Logger != nil {
@@ -121,14 +189,31 @@ func (s *Server) PersistDocument(ctx context.Context, docKey string) error {
 	} else if s.opts.Logger != nil {
 		s.opts.Logger.Info("document converted for callback", "key", docKey, "bytes", len(raw))
 	}
-	_ = os.Remove(filepath.Join(cacheDir, "source.sha256"))
-	if err := conv.ToEditorBin(ctx, outPath, cacheDir); err != nil {
-		return fmt.Errorf("office: refresh Editor.bin after persist: %w", err)
+	if ackBlobs > 0 {
+		if err := s.refreshEditorBinFromSaved(ctx, cacheDir, outPath); err != nil {
+			return 0, err
+		}
 	}
-	_ = os.RemoveAll(filepath.Join(cacheDir, "changes"))
-	if s.opts.Logger != nil {
-		s.opts.Logger.Debug("refreshed Editor.bin after persist", "key", docKey, "cache", cacheDir)
+	if ackOnSuccess {
+		if err := s.finalizePersist(docKey, ackBlobs); err != nil {
+			return 0, err
+		}
+		return 0, nil
 	}
+	return ackBlobs, nil
+}
+
+func (s *Server) finalizePersist(docKey string, ackBlobs int) error {
+	cacheDir := filepath.Join(s.cacheDir(), docKey)
+	if ackBlobs > 0 {
+		if err := changes.Acknowledge(cacheDir, ackBlobs); err != nil {
+			return err
+		}
+	} else if !hasPendingChanges(cacheDir) {
+		_ = changes.Clear(cacheDir)
+	}
+	changes.RemoveSnapshot(cacheDir)
+	s.afterPersistCacheUpdate(cacheDir)
 	return nil
 }
 
@@ -173,19 +258,29 @@ func (s *Server) downloadAndSave(ctx context.Context, rawURL, storagePath, fileT
 }
 
 // NotifyCallback POSTs a save notification to the integrator callback URL.
-func (s *Server) NotifyCallback(ctx context.Context, docKey, callbackURL, downloadURL string, force bool) error {
+func (s *Server) NotifyCallback(ctx context.Context, docKey, callbackURL, downloadURL string, force bool, doc session.Document) error {
 	callbackURL = strings.TrimSpace(callbackURL)
 	if callbackURL == "" {
 		return nil
 	}
 	status := callback.StatusMustSave
+	forceSaveType := 0
 	if force {
 		status = callback.StatusForceSaved
+		forceSaveType = 1
+	}
+	ext := strings.TrimPrefix(strings.ToLower(doc.FileType), ".")
+	users := []string{}
+	if doc.UserID != "" {
+		users = []string{doc.UserID}
 	}
 	body, err := json.Marshal(callback.Payload{
-		Key:    docKey,
-		Status: status,
-		URL:    downloadURL,
+		Key:           docKey,
+		Status:        status,
+		URL:           downloadURL,
+		FileType:      ext,
+		Users:         users,
+		ForceSaveType: forceSaveType,
 	})
 	if err != nil {
 		return err
@@ -212,15 +307,22 @@ func (s *Server) NotifyCallback(ctx context.Context, docKey, callbackURL, downlo
 		return err
 	}
 	defer resp.Body.Close()
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return err
+	}
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("callback POST %s: %s", callbackURL, resp.Status)
 	}
-	return nil
+	return callback.ParseCallbackResponse(respBody)
 }
 
 // CacheFileURL builds a public URL for a file under cache/files/{key}/.
 func (s *Server) CacheFileURL(origin, docKey, name string) string {
-	origin = strings.TrimSuffix(origin, "/")
+	origin = strings.TrimSuffix(strings.TrimSpace(origin), "/")
+	if origin == "" {
+		origin = strings.TrimSuffix(strings.TrimSpace(s.opts.PublicOrigin), "/")
+	}
 	base := strings.TrimSuffix(s.opts.BasePath, "/")
 	if base == "" || base == "/" {
 		return origin + "/cache/files/" + docKey + "/" + name

@@ -56,10 +56,55 @@ jobs:
           OFFICE_ASSETS: ${{ github.workspace }}/assets
         run: make test-convert-linux
 
-  playwright:
-    name: Playwright E2E
+  prepare_playwright_assets:
+    name: Prepare Playwright assets
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Cache Euro-Office assets
+        uses: actions/cache@v4
+        with:
+          path: assets
+          key: euro-office-assets-v6-arm64-${{ hashFiles('scripts/euro-office.version') }}
+      - name: Prepare assets
+        run: make ensure-assets
+
+  prime_playwright_cache:
+    name: Prime Playwright docker cache
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Prime cache
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: _docker/Dockerfile.playwright-prime
+          push: false
+          load: false
+          cache-to: type=gha,mode=max,scope=${{ github.ref_name }}-playwright-base
+
+  test_playwright:
+    name: Playwright - ${{ matrix.name }}
+    needs: [prepare_playwright_assets, prime_playwright_cache]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: chromium
+            project: chromium
+          - name: save
+            project: chromium-save
+          - name: post-save
+            project: chromium-post-save
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -75,12 +120,23 @@ jobs:
         run: make ensure-assets
       - name: Verify sample matrix
         run: make check-sample-matrix
+      - name: Build go-office binary
+        run: GOOS=linux go build -o bin/go-office ./cmd/go-office
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Playwright E2E
-        env:
-          OFFICE_ASSETS: ${{ github.workspace }}/assets
-        run: make test-playwright
+      - name: Build and test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: _docker/Dockerfile.playwright
+          target: test
+          push: false
+          load: false
+          build-args: |
+            PLAYWRIGHT_PROJECT=${{ matrix.project }}
+          cache-from: |
+            type=gha,scope=${{ github.ref_name }}-playwright-base
+            type=gha,scope=main-playwright-base
 
   docker-build:
     name: Docker image build

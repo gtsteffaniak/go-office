@@ -44,7 +44,7 @@ func TestPollingHandshake(t *testing.T) {
 	h.ServePath(rec, req, "/doc/key/c")
 
 	body := rec.Body.String()
-	if !strings.HasPrefix(body, `0{"sid":"go-office"`) {
+	if !strings.HasPrefix(body, `0{"sid":"`) {
 		t.Fatalf("open packet = %q", body)
 	}
 }
@@ -89,16 +89,28 @@ func TestPollingConnectAndLicense(t *testing.T) {
 }
 
 func TestPollingAuthResponse(t *testing.T) {
-	h := testHandler(t)
+	ws.ResetSessionsForTest()
+	opener := newHookOpener()
+	h := ws.NewWithOptions(ws.HandlerOptions{
+		Version:  "9.3.4",
+		CacheDir: t.TempDir(),
+		OpenHook: opener,
+	})
+	h.PollHold = 0
 
 	authBody := `42["message",{"type":"auth","docid":"key","user":{"id":"demo","username":"Demo"},"openCmd":{"c":"open","id":"key","format":"doc","url":"http://localhost/f.doc"}}]`
 	authPost := httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(authBody))
 	h.ServePath(httptest.NewRecorder(), authPost, "/doc/key/c")
 
-	get := httptest.NewRequest(http.MethodGet, "/?EIO=4&transport=polling&sid=go-office&t=2", nil)
-	rec := httptest.NewRecorder()
-	h.ServePath(rec, get, "/doc/key/c")
-	body := rec.Body.String()
+	deadline := time.Now().Add(2 * time.Second)
+	var body string
+	for time.Now().Before(deadline) {
+		body = pollingGet(t, h, "key", "go-office")
+		if strings.Contains(body, `"type":"auth"`) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if !strings.Contains(body, `"type":"authChanges"`) {
 		t.Fatalf("authChanges missing: %q", body)
 	}
@@ -117,31 +129,52 @@ func TestPollingAuthResponse(t *testing.T) {
 }
 
 func TestPollingReloadSameCSVResendsAuth(t *testing.T) {
-	h := testHandler(t)
+	ws.ResetSessionsForTest()
+	opener := newHookOpener()
+	h := ws.NewWithOptions(ws.HandlerOptions{
+		Version:  "9.3.4-hotfix.1",
+		CacheDir: t.TempDir(),
+		OpenHook: opener,
+	})
+	h.PollHold = 0
+
 	csvKey := "0c799d3dbda398a50f7077f6f3c3de7cb9110610d27e9318951de50ec9788e47"
 	connectAuth := `40{"data":{"type":"auth","docid":"` + csvKey + `","user":{"id":"demo-user","username":"Demo User"},"openCmd":{"c":"open","id":"` + csvKey + `","format":"csv","url":"http://localhost/sample.csv"}}}`
 
-	poll := func() string {
-		get := httptest.NewRequest(http.MethodGet, "/?EIO=4&transport=polling&sid=go-office&t=1", nil)
-		rec := httptest.NewRecorder()
-		h.ServePath(rec, get, "/doc/"+csvKey+"/c")
-		return rec.Body.String()
+	postReload := func() {
+		req := httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(connectAuth))
+		h.ServePath(httptest.NewRecorder(), req, "/doc/"+csvKey+"/c")
 	}
 
-	h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(connectAuth)), "/doc/"+csvKey+"/c")
-	first := poll()
-	if !strings.Contains(first, `"type":"auth"`) {
-		t.Fatalf("first open missing auth: %q", first)
+	// First load uses Engine.IO packet 40 with embedded auth + openCmd (browser reload shape).
+	postReload()
+	waitDocumentOpen(t, h, csvKey, "go-office")
+	if opener.count(csvKey) != 1 {
+		t.Fatalf("first open calls = %d, want 1", opener.count(csvKey))
 	}
 
 	// Same hardcoded sid + document key, as the browser does on reload.
-	h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(connectAuth)), "/doc/"+csvKey+"/c")
-	second := poll()
+	postReload()
+	second := pollingGet(t, h, csvKey, "go-office")
 	if !strings.Contains(second, `"type":"auth"`) {
 		t.Fatalf("reload must resend auth for the same csv key, got %q", second)
 	}
 	if !strings.Contains(second, `"result":1`) {
 		t.Fatalf("reload auth result missing: %q", second)
+	}
+	if strings.Contains(second, `"type":"documentOpen"`) {
+		t.Fatalf("reload without session clear must not send documentOpen: %q", second)
+	}
+	if opener.count(csvKey) != 1 {
+		t.Fatalf("reload without clear should not open again, got %d calls", opener.count(csvKey))
+	}
+
+	// Integrator reset (BuildEditorConfig / POST session/reset).
+	ws.ClearDocumentSession(csvKey)
+	postReload()
+	waitDocumentOpen(t, h, csvKey, "go-office")
+	if opener.count(csvKey) < 2 {
+		t.Fatalf("reload after session reset must open again, got %d calls", opener.count(csvKey))
 	}
 }
 

@@ -1,16 +1,16 @@
 import { test, expect } from "../test-setup";
 import {
-  waitForEditorReady,
-  waitForEditorInteractive,
-  setCellContent,
-  waitForSaveDone,
-  insertSaveMarker,
-  triggerEditorSave,
+  warmDemoFile,
+  editCellForSave,
+  editWordForSave,
+  waitForPersistedMarker,
+  triggerManualSave,
   assertDemoFileContains,
 } from "../editor";
 import { forkSample } from "../fork-sample";
 
-const bundledTest = process.env.OFFICE_PLAYWRIGHT_TEST === "true";
+test.describe.configure({ mode: "parallel" });
+
 const STATUS_OK_TIMEOUT = 8_000;
 
 const CSV_SOURCE = "sample-files/sample.csv";
@@ -38,31 +38,27 @@ const PPT_SOURCE = "sample-files/sample.ppt";
 const PPT_FIND = "My Presentation";
 const PPT_MARKER = "PW_SAVE_PPT_MARKER";
 
-const SAVE_TEST_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_TEST_TIMEOUT ?? (bundledTest ? 150_000 : 120_000));
+async function openForkedDemo(
+  page: import("@playwright/test").Page,
+  request: import("@playwright/test").APIRequestContext,
+  file: string,
+): Promise<void> {
+  await warmDemoFile(request, file);
+  await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
+}
 
-test.use({
-  trace: bundledTest ? "retain-on-failure" : "on-first-retry",
-  timeout: SAVE_TEST_TIMEOUT,
-});
-
-test("docx save round-trip via demo file API", async ({ page, request }, testInfo) => {
+test("docx save round-trip via Save button", async ({ page, request }, testInfo) => {
   const file = forkSample(DOCX_SOURCE, testInfo);
   await assertDemoFileContains(request, file, DOCX_ORIGINAL);
 
-  await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
+  await openForkedDemo(page, request, file);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
   });
-  await waitForEditorReady(page, "word");
-  await waitForEditorInteractive(page, "word");
 
-  await insertSaveMarker(page, "word", DOCX_MARKER);
-  await triggerEditorSave(page, "word");
-  await waitForSaveDone(page, {
-    request,
-    filePath: file,
-    marker: DOCX_MARKER,
-  });
+  await editWordForSave(page, "word", DOCX_MARKER);
+  await triggerManualSave(page, "word");
+  await waitForPersistedMarker(request, file, DOCX_MARKER, { page });
 
   await assertDemoFileContains(request, file, DOCX_MARKER);
 });
@@ -71,20 +67,13 @@ test("csv save round-trip via demo file API", async ({ page, request }, testInfo
   const file = forkSample(CSV_SOURCE, testInfo);
   await assertDemoFileContains(request, file, CSV_ORIGINAL);
 
-  await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
+  await openForkedDemo(page, request, file);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
   });
-  await waitForEditorReady(page, "cell");
-  await waitForEditorInteractive(page, "cell");
 
-  await setCellContent(page, "cell", CSV_CELL, CSV_REPLACEMENT);
-  await triggerEditorSave(page, "cell");
-  await waitForSaveDone(page, {
-    request,
-    filePath: file,
-    marker: CSV_REPLACEMENT,
-  });
+  await editCellForSave(page, "cell", CSV_CELL, CSV_REPLACEMENT);
+  await waitForPersistedMarker(request, file, CSV_REPLACEMENT, { page });
 
   await assertDemoFileContains(request, file, CSV_REPLACEMENT);
   await assertDemoFileContains(request, file, CSV_ORIGINAL, { present: false });
@@ -94,20 +83,13 @@ test("txt save round-trip via demo file API", async ({ page, request }, testInfo
   const file = forkSample(TXT_SOURCE, testInfo);
   await assertDemoFileContains(request, file, TXT_ORIGINAL);
 
-  await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
+  await openForkedDemo(page, request, file);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
   });
-  await waitForEditorReady(page, "word");
-  await waitForEditorInteractive(page, "word");
 
-  await insertSaveMarker(page, "word", TXT_MARKER);
-  await triggerEditorSave(page, "word");
-  await waitForSaveDone(page, {
-    request,
-    filePath: file,
-    marker: TXT_MARKER,
-  });
+  await editWordForSave(page, "word", TXT_MARKER);
+  await waitForPersistedMarker(request, file, TXT_MARKER, { page });
 
   await assertDemoFileContains(request, file, TXT_MARKER);
 });
@@ -118,20 +100,13 @@ test("rtf save round-trip via demo file API", async ({ page, request }, testInfo
   await assertDemoFileContains(request, file, "&amp;", { present: false });
   await assertDemoFileContains(request, file, "> Reminder");
 
-  await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
+  await openForkedDemo(page, request, file);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
   });
-  await waitForEditorReady(page, "word");
-  await waitForEditorInteractive(page, "word");
 
-  await insertSaveMarker(page, "word", "PW_RTF_SAVE_ROUNDTRIP");
-  await triggerEditorSave(page, "word");
-  await waitForSaveDone(page, {
-    request,
-    filePath: file,
-    marker: "PW_RTF_SAVE_ROUNDTRIP",
-  });
+  await editWordForSave(page, "word", "PW_RTF_SAVE_ROUNDTRIP");
+  await waitForPersistedMarker(request, file, "PW_RTF_SAVE_ROUNDTRIP", { page });
 
   await assertDemoFileContains(request, file, "PW_RTF_SAVE_ROUNDTRIP");
   await assertDemoFileContains(request, file, RTF_ORIGINAL);
@@ -144,20 +119,13 @@ test("ods save round-trip via demo file API", async ({ page, request }, testInfo
   const file = forkSample(ODS_SOURCE, testInfo);
   await assertDemoFileContains(request, file, ODS_ORIGINAL);
 
-  await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
+  await openForkedDemo(page, request, file);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
   });
-  await waitForEditorReady(page, "cell");
-  await waitForEditorInteractive(page, "cell");
 
-  await setCellContent(page, "cell", ODS_CELL, ODS_REPLACEMENT);
-  await triggerEditorSave(page, "cell");
-  await waitForSaveDone(page, {
-    request,
-    filePath: file,
-    marker: ODS_REPLACEMENT,
-  });
+  await editCellForSave(page, "cell", ODS_CELL, ODS_REPLACEMENT);
+  await waitForPersistedMarker(request, file, ODS_REPLACEMENT, { page });
 
   await assertDemoFileContains(request, file, ODS_REPLACEMENT);
   await assertDemoFileContains(request, file, ODS_ORIGINAL, { present: false });
@@ -167,20 +135,13 @@ test("ppt save round-trip via demo file API", async ({ page, request }, testInfo
   const file = forkSample(PPT_SOURCE, testInfo);
   await assertDemoFileContains(request, file, PPT_FIND);
 
-  await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
+  await openForkedDemo(page, request, file);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, {
     timeout: STATUS_OK_TIMEOUT,
   });
-  await waitForEditorReady(page, "slide");
-  await waitForEditorInteractive(page, "slide");
 
-  await insertSaveMarker(page, "slide", PPT_MARKER);
-  await triggerEditorSave(page, "slide");
-  await waitForSaveDone(page, {
-    request,
-    filePath: file,
-    marker: PPT_MARKER,
-  });
+  await editWordForSave(page, "slide", PPT_MARKER);
+  await waitForPersistedMarker(request, file, PPT_MARKER, { page });
 
   await assertDemoFileContains(request, file, PPT_MARKER);
 });

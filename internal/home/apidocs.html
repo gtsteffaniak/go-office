@@ -150,7 +150,7 @@
         <p><strong>WebSocket upgrade:</strong> <span class="no">not implemented</span> (HTTP 501). Polling transport is used.</p>
       </div>
       <h3>Save flow (single-user)</h3>
-      <p>Cell edits send <code>getLock</code> (server replies with granted <code>locks</code>) then <code>saveChanges</code> → <code>unSaveLock</code>. With <code>customization.forcesave</code>, the Save button sends <code>forceSaveStart</code>; the server replies and then <code>forceSave</code> after converting cache. Without forcesave: <code>isSaveLock</code> → <code>saveChanges</code> → <code>unSaveLock</code>, then callback status <code>2</code> or <code>6</code>.</p>
+      <p>Cell edits send <code>getLock</code> (server replies with granted <code>locks</code>) then <code>saveChanges</code> → <code>unSaveLock</code>. With <code>customization.forcesave</code>, the Save button sends <code>forceSaveStart</code>; the server replies with <code>inProgress:true</code> when a prior flush is still running, then <code>forceSave</code> after x2t finishes. Without forcesave: <code>isSaveLock</code> → <code>saveLock</code> (<code>true</code> = wait) → <code>saveChanges</code> → <code>unSaveLock</code>, then callback status <code>2</code> or <code>6</code>. Polling and WebSocket use the same messages; polling is fully supported.</p>
     </section>
 
     <section>

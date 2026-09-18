@@ -118,6 +118,21 @@ func legacySpreadsheetBinaryExt(ext string) bool {
 	}
 }
 
+// legacyBinarySaveUsesOOXMLFallback reports save targets where x2t cannot emit the
+// legacy binary format; persist the OOXML bridge file at the target path instead.
+func legacyBinarySaveUsesOOXMLFallback(bridge SaveBridge, ext string) bool {
+	switch bridge {
+	case bridgeDOCX:
+		return legacyWordBinaryExt(ext)
+	case bridgePPTX:
+		return legacySlideBinaryExt(ext)
+	case bridgeXLSX:
+		return legacySpreadsheetBinaryExt(ext)
+	default:
+		return false
+	}
+}
+
 func editorImportSourceHash(contentHash, ext string) string {
 	if openNeedsDocxPrelude(ext) {
 		return contentHash + ":open-docx-v1"

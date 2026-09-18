@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -65,7 +64,7 @@ func TestSessionReconnectSkipsReopen(t *testing.T) {
 		Open:      &openCmd{Command: "open", Format: "rtf", URL: "http://localhost/f.rtf"},
 	}
 	raw := connectAuthData(`40{"data":{"type":"auth","docid":"doc-key","sessionId":"reconnect-session-id","user":{"id":"demo-user","username":"Demo"},"openCmd":{"c":"open","id":"doc-key","format":"rtf","url":"http://localhost/f.rtf"}}}`)
-	sess.onConnect(raw)
+	sess.onConnect(raw, false)
 	sess.startOpen(opener, reconnectReq, "http://localhost")
 	time.Sleep(20 * time.Millisecond)
 
@@ -83,7 +82,7 @@ func TestSessionReconnectSkipsReopen(t *testing.T) {
 	}
 }
 
-func TestSessionReconnectWithoutSessionIDSkipsReopen(t *testing.T) {
+func TestSessionReconnectWithoutSessionIDReopens(t *testing.T) {
 	ResetSessionsForTest()
 	opener := &countingOpener{}
 	sess := getSession(defaultSessionID, "doc-key", ParseBuild("9.3.4"), "")
@@ -101,12 +100,12 @@ func TestSessionReconnectWithoutSessionIDSkipsReopen(t *testing.T) {
 	sess.mu.Unlock()
 
 	raw := connectAuthData(`40{"data":{"type":"auth","docid":"doc-key","user":{"id":"demo-user","username":"Demo"},"openCmd":{"c":"open","id":"doc-key","format":"rtf","url":"http://localhost/f.rtf"}}}`)
-	sess.onConnect(raw)
+	sess.onConnect(raw, false)
 	sess.startOpen(opener, authRequest{Open: req.Open}, "http://localhost")
-	time.Sleep(20 * time.Millisecond)
+	waitForOpenComplete(t, opener, 2)
 
-	if opener.callCount() != 1 {
-		t.Fatalf("reconnect without sessionId should not reopen, calls = %d", opener.callCount())
+	if opener.callCount() != 2 {
+		t.Fatalf("connect without sessionId must reopen, calls = %d", opener.callCount())
 	}
 }
 
@@ -128,7 +127,7 @@ func TestSessionReopenSameDocKey(t *testing.T) {
 
 	ClearDocumentSession("doc-key")
 	sess = getSession(defaultSessionID, "doc-key", ParseBuild("9.3.4"), "")
-	sess.onConnect(nil)
+	sess.onConnect(nil, false)
 	sess.startOpen(opener, req, "http://localhost")
 	waitForOpenComplete(t, opener, 2)
 
@@ -149,7 +148,7 @@ func TestSessionSwitchIndependentDocKeys(t *testing.T) {
 	docx.startOpen(opener, authRequest{Open: &openCmd{Command: "open", Format: "docx"}}, "http://localhost")
 	waitForOpenComplete(t, opener, 2)
 
-	csv.onConnect(nil)
+	csv.onConnect(nil, false)
 	csv.startOpen(opener, authRequest{Open: &openCmd{Command: "open", Format: "csv"}}, "http://localhost")
 	waitForOpenComplete(t, opener, 3)
 
@@ -183,13 +182,13 @@ func TestSessionConnectReloadResendsAuth(t *testing.T) {
 	sess := getSession(defaultSessionID, "csv-key", ParseBuild("9.3.4"), "")
 	raw := connectAuthData(`40{"data":{"type":"auth","docid":"csv-key","user":{"id":"demo-user","username":"Demo"},"openCmd":{"c":"open","id":"csv-key","format":"csv","url":"http://localhost/sample.csv"}}}`)
 
-	sess.onConnect(raw)
+	sess.onConnect(raw, false)
 	first := sess.drain()
 	if authCount(first) != 1 {
 		t.Fatalf("first connect auth packets = %d, body=%v", authCount(first), first)
 	}
 
-	sess.onConnect(raw)
+	sess.onConnect(raw, false)
 	second := sess.drain()
 	if authCount(second) != 1 {
 		t.Fatalf("reload connect must resend auth, got %d packets=%v", authCount(second), second)
@@ -285,18 +284,16 @@ func TestSessionWaitForPacketsConcurrentPoll(t *testing.T) {
 	ResetSessionsForTest()
 	sess := getSession(defaultSessionID, "key", ParseBuild("9.3.4"), "")
 
-	var ready atomic.Bool
 	go func() {
 		time.Sleep(20 * time.Millisecond)
 		sess.enqueue(`42["message",{"type":"ping"}]`)
-		ready.Store(true)
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	packets := sess.waitForPackets(ctx, 100*time.Millisecond)
-	if !ready.Load() || len(packets) == 0 {
-		t.Fatalf("expected packet after enqueue, got %v", packets)
+	if len(packets) == 0 || !containsType(packets[0], "ping") {
+		t.Fatalf("expected ping packet after enqueue, got %v", packets)
 	}
 }
 
@@ -313,7 +310,7 @@ func TestSessionStalePollDoesNotStealReloadAuth(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	raw := connectAuthData(`40{"data":{"type":"auth","docid":"csv-key","user":{"id":"demo"},"openCmd":{"c":"open","format":"csv","url":"http://localhost/sample.csv"}}}`)
-	sess.onConnect(raw)
+	sess.onConnect(raw, false)
 
 	stale := <-got
 	if authCount(stale) != 0 {
@@ -322,5 +319,30 @@ func TestSessionStalePollDoesNotStealReloadAuth(t *testing.T) {
 	fresh := sess.drain()
 	if authCount(fresh) != 1 {
 		t.Fatalf("reload auth should remain for the new client, got %v", fresh)
+	}
+}
+
+func TestHasActiveDocumentSession(t *testing.T) {
+	ResetSessionsForTest()
+	if HasActiveDocumentSession("ppt-key") {
+		t.Fatal("expected no active session")
+	}
+	sess := getSession(defaultSessionID, "ppt-key", ParseBuild("9.3.4"), "")
+	sess.mu.Lock()
+	sess.openStarted = true
+	sess.mu.Unlock()
+	if !HasActiveDocumentSession("ppt-key") {
+		t.Fatal("expected openStarted session to count as active")
+	}
+	sess.mu.Lock()
+	sess.openStarted = false
+	sess.documentOpened = true
+	sess.mu.Unlock()
+	if !HasActiveDocumentSession("ppt-key") {
+		t.Fatal("expected documentOpened session to count as active")
+	}
+	ClearDocumentSession("ppt-key")
+	if HasActiveDocumentSession("ppt-key") {
+		t.Fatal("expected cleared session to be inactive")
 	}
 }

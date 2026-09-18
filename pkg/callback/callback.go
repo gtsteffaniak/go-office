@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 )
 
@@ -19,9 +20,12 @@ const (
 
 // Payload is the JSON body POSTed to editorConfig.callbackUrl.
 type Payload struct {
-	Key    string `json:"key"`
-	Status int    `json:"status"`
-	URL    string `json:"url"`
+	Key           string   `json:"key"`
+	Status        int      `json:"status"`
+	URL           string   `json:"url"`
+	FileType      string   `json:"filetype,omitempty"`
+	Users         []string `json:"users,omitempty"`
+	ForceSaveType int      `json:"forcesavetype,omitempty"`
 }
 
 // Parse reads a callback JSON body.
@@ -56,10 +60,21 @@ func ReadBodyWithSecret(r io.Reader, secret []byte) (Payload, error) {
 	if err != nil {
 		return Payload{}, err
 	}
+	return ParseRequest(body, secret)
+}
+
+// ReadRequest parses a callback HTTP request body and optional Authorization header.
+func ReadRequest(r *http.Request, secret []byte) (Payload, error) {
 	if len(secret) > 0 {
-		return ParseRequest(body, secret)
+		if token := TrimToken(r.Header.Get("Authorization")); token != "" {
+			return VerifyBody(secret, token)
+		}
 	}
-	return Parse(body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		return Payload{}, err
+	}
+	return ParseRequest(body, secret)
 }
 
 // Response writes the standard ONLYOFFICE callback success JSON.
@@ -70,6 +85,23 @@ func WriteOK(w interface{ Write([]byte) (int, error) }) {
 // WriteError writes a callback error response.
 func WriteError(w interface{ Write([]byte) (int, error) }, code int) {
 	_, _ = fmt.Fprintf(w, `{"error":%d}`, code)
+}
+
+// CallbackResponse is the integrator response to a save callback.
+type CallbackResponse struct {
+	Error int `json:"error"`
+}
+
+// ParseCallbackResponse validates an integrator callback HTTP response body.
+func ParseCallbackResponse(body []byte) error {
+	var res CallbackResponse
+	if err := json.Unmarshal(body, &res); err != nil {
+		return fmt.Errorf("callback: invalid response: %w", err)
+	}
+	if res.Error != 0 {
+		return fmt.Errorf("callback: integrator returned error %d", res.Error)
+	}
+	return nil
 }
 
 // TrimToken returns a bearer token from Authorization header.

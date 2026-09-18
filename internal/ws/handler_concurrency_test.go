@@ -85,13 +85,35 @@ func authPostBody(format, url string) string {
 }
 
 func authPostRequest(format, docURL string) *http.Request {
-	return httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office",
+	return authPostRequestWithSID("go-office", format, docURL)
+}
+
+func authPostRequestWithSID(sid, format, docURL string) *http.Request {
+	return httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid="+sid,
 		strings.NewReader(authPostBody(format, docURL)))
 }
 
-func pollingGet(t *testing.T, h *ws.Handler, docKey string) string {
+func handshakeSID(t *testing.T, h *ws.Handler, docKey string) string {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/?EIO=4&transport=polling&sid=go-office&t=1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/?EIO=4&transport=polling", nil)
+	rec := httptest.NewRecorder()
+	h.ServePath(rec, req, "/doc/"+docKey+"/c")
+	body := rec.Body.String()
+	const prefix = `0{"sid":"`
+	if !strings.HasPrefix(body, prefix) {
+		t.Fatalf("handshake body = %q", body)
+	}
+	rest := strings.TrimPrefix(body, prefix)
+	end := strings.IndexByte(rest, '"')
+	if end < 0 {
+		t.Fatalf("handshake sid missing in %q", body)
+	}
+	return rest[:end]
+}
+
+func pollingGet(t *testing.T, h *ws.Handler, docKey, sid string) string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/?EIO=4&transport=polling&sid="+sid+"&t=1", nil)
 	rec := httptest.NewRecorder()
 	h.ServePath(rec, req, "/doc/"+docKey+"/c")
 	return rec.Body.String()
@@ -165,7 +187,7 @@ func TestCrossDocCSVSaveDoesNotBlockDocxOpen(t *testing.T) {
 	docxDone := make(chan struct{})
 	go func() {
 		defer close(docxDone)
-		waitDocumentOpen(t, h, docxKey)
+		waitDocumentOpen(t, h, docxKey, "go-office")
 	}()
 
 	select {
@@ -200,13 +222,106 @@ func TestHandlerSwitchCSVThenDocxSameSid(t *testing.T) {
 	docxKey := "docx-switch"
 
 	h.ServePath(httptest.NewRecorder(), authPostRequest("csv", "http://localhost/sample.csv"), "/doc/"+csvKey+"/c")
-	waitDocumentOpen(t, h, csvKey)
+	waitDocumentOpen(t, h, csvKey, "go-office")
 
 	h.ServePath(httptest.NewRecorder(), authPostRequest("docx", "http://localhost/sample.docx"), "/doc/"+docxKey+"/c")
-	waitDocumentOpen(t, h, docxKey)
+	waitDocumentOpen(t, h, docxKey, "go-office")
 
 	if opener.count(csvKey) == 0 || opener.count(docxKey) == 0 {
 		t.Fatalf("expected both documents to open, csv=%d docx=%d", opener.count(csvKey), opener.count(docxKey))
+	}
+}
+
+func reloadConnectPacket(docKey, format, docURL string) string {
+	return `40{"data":{"type":"auth","docid":"` + docKey + `","user":{"id":"demo","username":"Demo"},"openCmd":{"c":"open","id":"` + docKey + `","format":"` + format + `","url":"` + docURL + `"}}}`
+}
+
+func TestHandlerIndependentTransportOutboxIsolation(t *testing.T) {
+	ws.ResetSessionsForTest()
+	opener := newHookOpener()
+	h := ws.NewWithOptions(ws.HandlerOptions{
+		Version:  "9.3.4",
+		CacheDir: t.TempDir(),
+		OpenHook: opener,
+	})
+	h.PollHold = 0
+
+	csvKey := "tab-csv"
+	docxKey := "tab-docx"
+	csvURL := "http://localhost/sample.csv"
+	docxURL := "http://localhost/sample.docx"
+
+	sidCSV := handshakeSID(t, h, csvKey)
+	sidDocx := handshakeSID(t, h, docxKey)
+
+	h.ServePath(httptest.NewRecorder(), authPostRequestWithSID(sidCSV, "csv", csvURL), "/doc/"+csvKey+"/c")
+	h.ServePath(httptest.NewRecorder(), authPostRequestWithSID(sidDocx, "docx", docxURL), "/doc/"+docxKey+"/c")
+	waitDocumentOpen(t, h, csvKey, sidCSV)
+	waitDocumentOpen(t, h, docxKey, sidDocx)
+
+	csvPoll := pollingGet(t, h, csvKey, sidCSV)
+	docxPoll := pollingGet(t, h, docxKey, sidDocx)
+	if strings.Contains(csvPoll, docxKey) {
+		t.Fatalf("csv transport outbox leaked docx key: %s", csvPoll)
+	}
+	if strings.Contains(docxPoll, csvKey) {
+		t.Fatalf("docx transport outbox leaked csv key: %s", docxPoll)
+	}
+	if sidCSV == sidDocx {
+		t.Fatalf("expected distinct transport sids, both %q", sidCSV)
+	}
+}
+
+func TestHandlerReloadWithFreshTransportOpens(t *testing.T) {
+	ws.ResetSessionsForTest()
+	opener := newHookOpener()
+	h := ws.NewWithOptions(ws.HandlerOptions{
+		Version:  "9.3.4",
+		CacheDir: t.TempDir(),
+		OpenHook: opener,
+	})
+	h.PollHold = 0
+	docKey := "reload-open-key"
+	docURL := "http://localhost/a.docx"
+
+	sid1 := handshakeSID(t, h, docKey)
+	h.ServePath(httptest.NewRecorder(), authPostRequestWithSID(sid1, "docx", docURL), "/doc/"+docKey+"/c")
+	waitDocumentOpen(t, h, docKey, sid1)
+
+	sid2 := handshakeSID(t, h, docKey)
+	reload := httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid="+sid2,
+		strings.NewReader(reloadConnectPacket(docKey, "docx", docURL)))
+	h.ServePath(httptest.NewRecorder(), reload, "/doc/"+docKey+"/c")
+	waitDocumentOpen(t, h, docKey, sid2)
+
+	if opener.count(docKey) < 2 {
+		t.Fatalf("open calls = %d, want 2 after fresh transport reload", opener.count(docKey))
+	}
+}
+
+func TestHandlerReloadAfterSessionReset(t *testing.T) {
+	ws.ResetSessionsForTest()
+	opener := newHookOpener()
+	h := ws.NewWithOptions(ws.HandlerOptions{
+		Version:  "9.3.4",
+		CacheDir: t.TempDir(),
+		OpenHook: opener,
+	})
+	h.PollHold = 0
+	docKey := "reload-ok-key"
+	docURL := "http://localhost/a.docx"
+
+	h.ServePath(httptest.NewRecorder(), authPostRequest("docx", docURL), "/doc/"+docKey+"/c")
+	waitDocumentOpen(t, h, docKey, "go-office")
+
+	ws.ClearDocumentSession(docKey)
+	reload := httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office",
+		strings.NewReader(reloadConnectPacket(docKey, "docx", docURL)))
+	h.ServePath(httptest.NewRecorder(), reload, "/doc/"+docKey+"/c")
+	waitDocumentOpen(t, h, docKey, "go-office")
+
+	if opener.count(docKey) < 2 {
+		t.Fatalf("expected 2 opens after session reset reload, got %d", opener.count(docKey))
 	}
 }
 
@@ -223,23 +338,23 @@ func TestHandlerReopenAfterFirstOpenCompletes(t *testing.T) {
 	docURL := "http://localhost/a.docx"
 
 	h.ServePath(httptest.NewRecorder(), authPostRequest("docx", docURL), "/doc/"+docKey+"/c")
-	waitDocumentOpen(t, h, docKey)
+	waitDocumentOpen(t, h, docKey, "go-office")
 
 	ws.ClearDocumentSession(docKey)
 	reloadConnect := `40{"data":{"type":"auth","docid":"` + docKey + `","user":{"id":"demo","username":"Demo"},"openCmd":{"c":"open","id":"` + docKey + `","format":"docx","url":"` + docURL + `"}}}`
 	h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(reloadConnect)), "/doc/"+docKey+"/c")
-	waitDocumentOpen(t, h, docKey)
+	waitDocumentOpen(t, h, docKey, "go-office")
 
 	if opener.count(docKey) < 2 {
 		t.Fatalf("expected 2 opens on reload, got %d", opener.count(docKey))
 	}
 }
 
-func waitDocumentOpen(t *testing.T, h *ws.Handler, docKey string) {
+func waitDocumentOpen(t *testing.T, h *ws.Handler, docKey, sid string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		body := pollingGet(t, h, docKey)
+		body := pollingGet(t, h, docKey, sid)
 		if strings.Contains(body, `"type":"documentOpen"`) {
 			return
 		}

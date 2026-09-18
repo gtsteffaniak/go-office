@@ -45,6 +45,7 @@ type Handler struct {
 
 	landingTmpl *template.Template
 	viewerTmpl  *template.Template
+	thumbs      *thumbnailCoordinator
 }
 
 type landingFile struct {
@@ -98,13 +99,15 @@ func New(srv *office.Server, store office.Storage, opts Options) (*Handler, erro
 		return nil, fmt.Errorf("demo: viewer template: %w", err)
 	}
 
-	return &Handler{
+	h := &Handler{
 		office:      srv,
 		store:       store,
 		opts:        opts,
 		landingTmpl: landingTmpl,
 		viewerTmpl:  viewerTmpl,
-	}, nil
+	}
+	h.thumbs = newThumbnailCoordinator()
+	return h, nil
 }
 
 // Attach registers demo UI routes under the office base path and API routes under APIBasePath.
@@ -173,7 +176,6 @@ func (h *Handler) serveConfig(w http.ResponseWriter, r *http.Request) {
 	apiBase := h.opts.APIBasePath
 	fileURL := origin + apiBase + "/demo/file/" + strings.TrimPrefix(doc.RelPath, "/")
 	callbackURL := origin + apiBase + "/demo/callback"
-	h.office.ResetCoauthoringSession(doc.Key)
 
 	cfg, err := h.office.BuildEditorConfig(ctx, config.EditorRequest{
 		DocumentKey: doc.Key,
@@ -221,20 +223,29 @@ func (h *Handler) serveWarm(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	go func() {
-		ctx := context.WithoutCancel(r.Context())
-		if warmErr := h.warmDocument(ctx, doc); warmErr != nil && h.opts.Logger != nil {
-			h.opts.Logger.Warn("demo warm failed", "file", doc.RelPath, "key", doc.Key, "err", warmErr)
+	ctx := r.Context()
+	if err := h.warmDocument(ctx, doc); err != nil {
+		if h.office.EditorBinFresh(doc.Key, doc.LocalPath, doc.Ext) {
+			if h.opts.Logger != nil {
+				h.opts.Logger.Debug("demo warm error but cache ready",
+					"file", doc.RelPath, "key", doc.Key, "err", err)
+			}
+		} else {
+			if h.opts.Logger != nil {
+				h.opts.Logger.Warn("demo warm failed", "file", doc.RelPath, "key", doc.Key, "err", err)
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-	}()
-	w.WriteHeader(http.StatusAccepted)
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func (h *Handler) warmDocument(ctx context.Context, doc sampleDoc) error {
 	if _, err := os.Stat(doc.LocalPath); err != nil {
 		return err
 	}
-	return h.office.EnsureEditorBin(ctx, doc.Key, doc.LocalPath, doc.Ext)
+	return h.office.EnsureEditorBinWarm(ctx, doc.Key, doc.LocalPath, doc.Ext)
 }
 
 func (h *Handler) resolveSampleDoc(ctx context.Context, file string) (sampleDoc, error) {
@@ -249,7 +260,7 @@ func (h *Handler) resolveSampleDoc(ctx context.Context, file string) (sampleDoc,
 	if err != nil {
 		return sampleDoc{}, errSampleNotFound
 	}
-	key := documentKey(file, info, h.fileFingerprint(ctx, file, info))
+	key := demoDocumentKey(file)
 	ext := strings.TrimPrefix(strings.ToLower(path.Ext(info.Name)), ".")
 	localPath := filepath.Join(h.opts.DataRoot, filepath.FromSlash(file))
 	return sampleDoc{
@@ -357,7 +368,7 @@ func (h *Handler) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 	apiBase := h.opts.APIBasePath
 	fileURL := origin + apiBase + "/demo/file/" + strings.TrimPrefix(file, "/")
 	ext := strings.TrimPrefix(strings.ToLower(path.Ext(info.Name)), ".")
-	key := documentKey(file, info, h.fileFingerprint(ctx, file, info))
+	key := demoDocumentKey(file)
 	req := office.ConverterRequest{
 		FileType:   ext,
 		Key:        key,
@@ -366,18 +377,12 @@ func (h *Handler) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 		URL:        fileURL,
 		Thumbnail:  &office.ConverterThumbnail{Width: 200, Height: 200, Aspect: 2, First: true},
 	}
-	if _, runErr := h.office.RunConverter(ctx, origin, req); runErr != nil {
+	raw, runErr := h.thumbnailJPEG(ctx, origin, file, req)
+	if runErr != nil {
 		if h.opts.Logger != nil {
 			h.opts.Logger.Error("demo thumbnail", "file", file, "err", runErr)
 		}
 		http.Error(w, "thumbnail failed", http.StatusInternalServerError)
-		return
-	}
-	cacheName := office.ConvCacheDirName(key, "jpg")
-	outPath := filepath.Join(h.office.CacheDir(), cacheName, office.ConvOutputBasename("jpg", req.Thumbnail))
-	raw, err := os.ReadFile(outPath)
-	if err != nil {
-		http.Error(w, "thumbnail missing", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
@@ -488,20 +493,11 @@ func documentKey(file string, info office.FileInfo, contentSum string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (h *Handler) fileFingerprint(ctx context.Context, file string, info office.FileInfo) string {
-	if h == nil || h.store == nil {
-		return fmt.Sprintf("%d:%d", info.Size, info.ModTime.UnixNano())
-	}
-	rc, err := h.store.Open(ctx, file)
-	if err != nil {
-		return fmt.Sprintf("%d:%d", info.Size, info.ModTime.UnixNano())
-	}
-	defer rc.Close()
-	sum := sha256.New()
-	if _, err := io.Copy(sum, io.LimitReader(rc, 32<<20)); err != nil {
-		return fmt.Sprintf("%d:%d", info.Size, info.ModTime.UnixNano())
-	}
-	return hex.EncodeToString(sum.Sum(nil))
+// demoDocumentKey is stable per sample path so refresh reuses the editor cache
+// directory; EnsureEditorBin revalidates Editor.bin when storage bytes change.
+func demoDocumentKey(file string) string {
+	sum := sha256.Sum256([]byte("demo:" + file))
+	return hex.EncodeToString(sum[:])
 }
 
 func formatSize(size int64) string {

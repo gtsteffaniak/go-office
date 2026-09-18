@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/quantumx-apps/go-office/pkg/callback"
 )
 
 // handleDownloadFile serves the original document bytes for PDF preview and similar
@@ -25,7 +27,7 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	doc, ok := s.sessions.Get(key)
+	doc, ok := s.sessions.Lookup(key)
 	if !ok || (doc.Path == "" && doc.URL == "") {
 		http.NotFound(w, r)
 		return
@@ -34,8 +36,15 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 	if docURL == "" {
 		docURL = doc.Path
 	}
-	if bodyURL := parseDownloadFileBody(r); bodyURL != "" {
+	bodyURL, bodyToken := parseDownloadFileBody(r)
+	if bodyURL != "" {
 		docURL = bodyURL
+	}
+	if len(s.opts.JWTSecret) > 0 && bodyToken != "" {
+		if _, err := callback.VerifyBody(s.opts.JWTSecret, bodyToken); err != nil {
+			http.Error(w, "invalid token", http.StatusUnauthorized)
+			return
+		}
 	}
 	if err := s.serveDocumentBytes(r.Context(), w, r, docURL); err != nil {
 		if s.opts.Debug && s.opts.Logger != nil {
@@ -67,21 +76,22 @@ func parseDownloadFileKey(urlPath, basePath string) (string, bool) {
 	return "", false
 }
 
-func parseDownloadFileBody(r *http.Request) string {
+func parseDownloadFileBody(r *http.Request) (url string, token string) {
 	if r.Body == nil {
-		return ""
+		return "", ""
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil || len(body) == 0 {
-		return ""
+		return "", ""
 	}
 	var payload struct {
-		URL string `json:"url"`
+		URL   string `json:"url"`
+		Token string `json:"token"`
 	}
 	if json.Unmarshal(body, &payload) != nil {
-		return ""
+		return "", ""
 	}
-	return strings.TrimSpace(payload.URL)
+	return strings.TrimSpace(payload.URL), strings.TrimSpace(payload.Token)
 }
 
 func (s *Server) serveDocumentBytes(ctx context.Context, w http.ResponseWriter, r *http.Request, rawURL string) error {

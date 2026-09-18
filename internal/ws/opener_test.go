@@ -8,7 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/quantumx-apps/go-office/internal/convert"
 )
 
 func TestOpenerOpenPDF(t *testing.T) {
@@ -60,14 +64,26 @@ func TestOpenerOpenSkipsDownloadWhenEditorBinCached(t *testing.T) {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(outDir, "Editor.bin"), []byte("editor-bin"), 0o644); err != nil {
+	csvBody := []byte("a,b\n1,2\n")
+	tmp := filepath.Join(cacheDir, "src.csv")
+	if err := os.WriteFile(tmp, csvBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srcHash, err := convert.FileSHA256(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(outDir, "Editor.bin"), []byte("editor-bin"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err = convert.WriteSourceHash(outDir, srcHash); err != nil {
 		t.Fatal(err)
 	}
 
 	downloads := 0
 	fileSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		downloads++
-		http.Error(w, "should not download", http.StatusInternalServerError)
+		_, _ = w.Write(csvBody)
 	}))
 	t.Cleanup(fileSrv.Close)
 
@@ -80,8 +96,8 @@ func TestOpenerOpenSkipsDownloadWhenEditorBinCached(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if downloads != 0 {
-		t.Fatalf("download calls = %d, want 0 on cache hit", downloads)
+	if downloads != 1 {
+		t.Fatalf("download calls = %d, want 1 hash check on fresh cache hit", downloads)
 	}
 	if len(packets) != 1 || !strings.Contains(packets[0], `"status":"ok"`) {
 		t.Fatalf("unexpected packet: %v", packets)
@@ -97,6 +113,112 @@ type recordingFlushSaver struct {
 
 func (s *recordingFlushSaver) FlushDocument(context.Context, string, string, bool) error {
 	s.calls++
+	return nil
+}
+
+func TestCoauthoringOriginPrefersPublicOrigin(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://localhost:9999/demo", nil)
+	req.Host = "localhost:9999"
+	if got := CoauthoringOrigin("https://docs.example.com", req); got != "https://docs.example.com" {
+		t.Fatalf("public origin = %q, want https://docs.example.com", got)
+	}
+	if got := CoauthoringOrigin("", req); got != "http://localhost:9999" {
+		t.Fatalf("request origin = %q, want http://localhost:9999", got)
+	}
+}
+
+func TestOpenerOpenBlocksUntilPendingChangesFlushed(t *testing.T) {
+	cacheDir := t.TempDir()
+	key := "fast-open"
+	outDir := filepath.Join(cacheDir, key)
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	csvBody := []byte("a,b\n1,2\n")
+	tmp := filepath.Join(cacheDir, "src.csv")
+	if err := os.WriteFile(tmp, csvBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srcHash, err := convert.FileSHA256(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outDir, "Editor.bin"), []byte("editor-bin"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := convert.WriteSourceHash(outDir, srcHash); err != nil {
+		t.Fatal(err)
+	}
+	changesDir := filepath.Join(outDir, "changes")
+	if err := os.MkdirAll(changesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(changesDir, "changes0.json"), []byte(`["chg"]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	block := make(chan struct{})
+	started := make(chan struct{}, 1)
+	saver := &blockingFlushSaver{block: block, started: started}
+	opener := &Opener{CacheDir: cacheDir, Saver: saver, Logger: slog.Default()}
+
+	fileSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(csvBody)
+	}))
+	t.Cleanup(fileSrv.Close)
+
+	done := make(chan struct{})
+	go func() {
+		packets, err := opener.Open(context.Background(), "http://example.com", "/office", key, openCmd{
+			Command: "open",
+			Format:  "csv",
+			URL:     fileSrv.URL,
+		})
+		if err != nil {
+			t.Error(err)
+			close(done)
+			return
+		}
+		if len(packets) != 1 || !strings.Contains(packets[0], `"status":"ok"`) {
+			t.Errorf("unexpected packet: %v", packets)
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("open completed before pending flush started")
+	case <-started:
+	}
+
+	close(block)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("open did not complete after flush unblocked")
+	}
+	if saver.calls.Load() != 1 {
+		t.Fatalf("expected exactly one synchronous flush, got %d", saver.calls.Load())
+	}
+}
+
+type blockingFlushSaver struct {
+	block   chan struct{}
+	started chan struct{}
+	calls   atomic.Int32
+}
+
+func (s *blockingFlushSaver) FlushDocument(context.Context, string, string, bool) error {
+	s.calls.Add(1)
+	if s.started != nil {
+		select {
+		case s.started <- struct{}{}:
+		default:
+		}
+	}
+	if s.block != nil {
+		<-s.block
+	}
 	return nil
 }
 

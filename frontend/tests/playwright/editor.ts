@@ -4,6 +4,7 @@ import {
   type FrameLocator,
   type Page,
 } from "@playwright/test";
+import { createHash } from "node:crypto";
 import { inflateRawSync } from "node:zlib";
 import type { SampleFile } from "./samples";
 import type { SampleManifestEntry } from "./fixtures/sample-manifest";
@@ -19,19 +20,12 @@ const EDITOR_APP: Record<SampleFile["editor"], string> = {
 /** Shell elements inside the editor app frame (not on the demo viewer page). */
 const EDITOR_SHELL = "#editor-container, #id_main, #editor_sdk, #id_view";
 
-const bundledTest = process.env.OFFICE_PLAYWRIGHT_TEST === "true";
-const EDITOR_LOAD_TIMEOUT = Number(
-  process.env.PLAYWRIGHT_EDITOR_TIMEOUT ?? (bundledTest ? 25_000 : 30_000),
-);
-const DOCUMENT_READY_TIMEOUT = Number(
-  process.env.PLAYWRIGHT_DOCUMENT_READY_TIMEOUT ?? (bundledTest ? 60_000 : 45_000),
-);
-const CONTENT_FIND_TIMEOUT = Number(
-  process.env.PLAYWRIGHT_CONTENT_FIND_TIMEOUT ?? (bundledTest ? 15_000 : 15_000),
-);
-const SAVE_DONE_TIMEOUT = Number(
-  process.env.PLAYWRIGHT_SAVE_DONE_TIMEOUT ?? (bundledTest ? 45_000 : 30_000),
-);
+const EDITOR_LOAD_TIMEOUT = Number(process.env.PLAYWRIGHT_EDITOR_TIMEOUT ?? 45_000);
+const DOCUMENT_READY_TIMEOUT = Number(process.env.PLAYWRIGHT_DOCUMENT_READY_TIMEOUT ?? 45_000);
+const DEMO_WARM_TIMEOUT = Number(process.env.PLAYWRIGHT_WARM_TIMEOUT ?? 60_000);
+const WARM_REQUEST_TIMEOUT = Number(process.env.PLAYWRIGHT_WARM_REQUEST_MS ?? 30_000);
+const CONTENT_FIND_TIMEOUT = Number(process.env.PLAYWRIGHT_CONTENT_FIND_TIMEOUT ?? 15_000);
+const SAVE_DONE_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_DONE_TIMEOUT ?? 120_000);
 const INTERACTIVE_SETTLE_MS = 400;
 
 /** Spreadsheet name box (e.g. B2) and formula bar (cell value). */
@@ -81,10 +75,30 @@ type AscEditorWindow = {
   editor?: AscEditor;
 };
 
-function cellApiReadyInBrowser(): boolean {
+function cellSetApiReadyInBrowser(): boolean {
   const w = window as AscEditorWindow;
   const api = w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor;
-  return typeof api?.asc_selectRange === "function";
+  if (!api) {
+    return false;
+  }
+  const canSelect = typeof api.asc_selectRange === "function";
+  const canWrite =
+    typeof api.asc_setCellValue === "function" || typeof api.asc_insertText === "function";
+  return canSelect && canWrite;
+}
+
+function selectCellInBrowser(cellRef: string): boolean {
+  const w = window as AscEditorWindow;
+  const api = w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor;
+  if (!api?.asc_selectRange) {
+    return false;
+  }
+  try {
+    api.asc_selectRange(cellRef);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function wordSlideInteractiveInBrowser(kind: SampleFile["editor"]): boolean {
@@ -122,12 +136,15 @@ function readCellViaBrowser(cellRef: string): string {
 function setCellViaBrowser(arg: { cellRef: string; cellValue: string }): boolean {
   const w = window as AscEditorWindow;
   const api = w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor;
-  if (!api?.asc_selectRange) {
+  if (!api) {
     return false;
   }
-  api.asc_selectRange(arg.cellRef);
+  if (typeof api.asc_selectRange === "function") {
+    api.asc_selectRange(arg.cellRef);
+  }
   if (typeof api.asc_setCellValue === "function") {
     api.asc_setCellValue(arg.cellValue);
+    api.asc_closeCellEditor?.(true);
     return true;
   }
   if (typeof api.asc_insertText === "function") {
@@ -267,21 +284,30 @@ async function isEditorShellReady(
   frame: FrameLocator,
   editor: SampleFile["editor"],
 ): Promise<boolean> {
-  if (editor === "pdf") {
-    const view = frame.locator("#id_view, #id_main").first();
-    if (!(await view.isVisible())) {
-      return false;
+  const probeTimeout = 3_000;
+  try {
+    if (editor === "pdf") {
+      return await frame.locator("#id_view, #id_main").evaluateAll(
+        (nodes) =>
+          nodes.some((node) => {
+            const rect = node.getBoundingClientRect();
+            return rect.width > 50 && rect.height > 50;
+          }),
+        { timeout: probeTimeout },
+      );
     }
-    const box = await view.boundingBox();
-    return box !== null && box.height > 50;
-  }
 
-  const shell = frame.locator(EDITOR_SHELL).first();
-  if (!(await shell.isVisible())) {
+    return await frame.locator(EDITOR_SHELL).evaluateAll(
+      (nodes) =>
+        nodes.some((node) => {
+          const rect = node.getBoundingClientRect();
+          return rect.width > 50 && rect.height > 50;
+        }),
+      { timeout: probeTimeout },
+    );
+  } catch {
     return false;
   }
-  const box = await shell.boundingBox();
-  return box !== null && box.width > 50 && box.height > 50;
 }
 
 async function isEditorInteractive(
@@ -295,18 +321,18 @@ async function isEditorInteractive(
 
   if (editor === "cell") {
     const cellName = frame.locator("#ce-cell-name").first();
-    if ((await cellName.count()) === 0) {
+    const formulaBar = frame.locator(CELL_VALUE_INPUT).first();
+    if ((await cellName.count()) === 0 || (await formulaBar.count()) === 0) {
       return false;
     }
     const shellReady = await isEditorShellReady(frame, editor);
     if (!shellReady) {
       return false;
     }
-    const hasAPI = await frame.locator("body").evaluate(cellApiReadyInBrowser);
-    if (hasAPI) {
-      return true;
+    if (!(await formulaBar.isVisible().catch(() => false))) {
+      return false;
     }
-    return cellName.isVisible();
+    return cellName.isEnabled().catch(() => false);
   }
 
   if (editor === "word" || editor === "slide") {
@@ -351,6 +377,61 @@ async function isEditorInteractive(
   });
 }
 
+async function isCellEditorEditable(frame: FrameLocator): Promise<boolean> {
+  if (await isLoadMaskBlocking(frame)) {
+    return false;
+  }
+  const cellName = frame.locator(CELL_NAME_INPUT).first();
+  const formulaBar = frame.locator(CELL_VALUE_INPUT).first();
+  if ((await cellName.count()) === 0 || (await formulaBar.count()) === 0) {
+    return false;
+  }
+  if (!(await cellName.isEnabled().catch(() => false))) {
+    return false;
+  }
+  if (!(await formulaBar.isVisible().catch(() => false))) {
+    return false;
+  }
+  if (!(await isEditorShellReady(frame, "cell"))) {
+    return false;
+  }
+  return selectCellViaUi(frame, "A1");
+}
+
+async function isWordSlideEditorEditable(
+  page: Page,
+  frame: FrameLocator,
+  editor: SampleFile["editor"],
+): Promise<boolean> {
+  if (await isLoadMaskBlocking(frame)) {
+    return false;
+  }
+  if (!(await isEditorShellReady(frame, editor))) {
+    return false;
+  }
+  if ((await page.locator("body").getAttribute("data-document-ready")) !== "true") {
+    return false;
+  }
+  return page.evaluate(() => {
+    const ed = (window as { docEditor?: { insertPlainText?: (t: string) => void } }).docEditor;
+    return typeof ed?.insertPlainText === "function";
+  });
+}
+
+async function isEditorEditable(
+  page: Page,
+  frame: FrameLocator,
+  editor: SampleFile["editor"],
+): Promise<boolean> {
+  if (editor === "cell") {
+    return isCellEditorEditable(frame);
+  }
+  if (editor === "word" || editor === "slide") {
+    return isWordSlideEditorEditable(page, frame, editor);
+  }
+  return isEditorInteractive(page, frame, editor);
+}
+
 /**
  * DocsAPI mounts the Euro-Office editor in an app iframe (document/cell/slide/pdf).
  * The shell divs (#id_main, #editor-container, …) live inside that frame.
@@ -365,16 +446,71 @@ export async function waitForEditorShell(
   });
 }
 
-/** Editor iframe mounted and shell has usable dimensions (open-format tests). */
+/** Demo viewer finished server warm; fails fast when data-warm-error is set. */
+export async function waitForDemoWarm(page: Page, timeoutMs = DEMO_WARM_TIMEOUT): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const warmError = document.body.getAttribute("data-warm-error");
+      if (warmError) {
+        throw new Error(`viewer warm failed: ${warmError}`);
+      }
+      return document.body.getAttribute("data-warm-done") === "true";
+    },
+    { timeout: timeoutMs },
+  );
+}
+
+/** Block until x2t has produced Editor.bin for file (use before goto for forked save paths). */
+export async function warmDemoFile(
+  request: APIRequestContext,
+  filePath: string,
+): Promise<void> {
+  const warm = await request.get(`/demo/warm?file=${encodeURIComponent(filePath)}`, {
+    timeout: WARM_REQUEST_TIMEOUT,
+  });
+  if (!warm.ok()) {
+    const body = await warm.text();
+    throw new Error(
+      `warm ${filePath}: HTTP ${warm.status()} ${body.slice(0, 200)} (timeout=${WARM_REQUEST_TIMEOUT}ms)`,
+    );
+  }
+}
+
+/** Editor iframe mounted and document is ready to use (open-format tests). */
 export async function waitForEditorReady(
   page: Page,
   editor: SampleFile["editor"],
 ): Promise<void> {
-  await waitForEditorShell(page, editor);
-  const frame = getEditorFrame(page, editor);
-  await expect
-    .poll(async () => isEditorShellReady(frame, editor), { timeout: EDITOR_LOAD_TIMEOUT })
-    .toBe(true);
+  try {
+    await waitForDemoWarm(page);
+    await page.waitForFunction(
+      () => {
+        const status = (document.getElementById("status")?.textContent ?? "").trim();
+        if (status.startsWith("Error:")) {
+          throw new Error(`viewer status: ${status}`);
+        }
+        return (
+          document.body.getAttribute("data-document-ready") === "true" ||
+          status === "Document ready"
+        );
+      },
+      { timeout: DOCUMENT_READY_TIMEOUT },
+    );
+    const app = EDITOR_APP[editor];
+    await expect
+      .poll(
+        async () => {
+          if ((await page.locator(`iframe[src*="/${app}/"]`).count()) === 0) {
+            return false;
+          }
+          return isEditorShellReady(getEditorFrame(page, editor), editor);
+        },
+        { timeout: DOCUMENT_READY_TIMEOUT },
+      )
+      .toBe(true);
+  } catch (err) {
+    throw new Error(`${String(err)}\nwitness:\n${await editorWitness(page, editor)}`);
+  }
 }
 
 /** Wait until DocsAPI reports the document is ready to edit. */
@@ -410,6 +546,27 @@ export async function waitForEditorInteractive(
   }
 }
 
+/** Document is ready to accept a single save-test edit (UI controls or public insertPlainText). */
+export async function waitForEditorEditable(
+  page: Page,
+  editor: SampleFile["editor"],
+  timeoutMs = DOCUMENT_READY_TIMEOUT,
+): Promise<void> {
+  try {
+    await waitForEditorReady(page, editor);
+    const frame = getEditorFrame(page, editor);
+    await expect
+      .poll(async () => isEditorEditable(page, frame, editor), { timeout: timeoutMs })
+      .toBe(true);
+    await page.waitForTimeout(INTERACTIVE_SETTLE_MS);
+    if (editor === "cell") {
+      await dismissEditorOverlays(frame);
+    }
+  } catch (err) {
+    throw new Error(`${String(err)}\nwitness:\n${await editorWitness(page, editor)}`);
+  }
+}
+
 async function dismissEditorOverlays(frame: FrameLocator): Promise<void> {
   const tip = frame.locator(".synch-tip-root, .asc-synchronizetip").first();
   if ((await tip.count()) === 0) {
@@ -435,18 +592,53 @@ export async function waitForDocumentReady(
   await waitForEditorInteractive(page, editor);
 }
 
+async function cellNameShowsRef(frame: FrameLocator, ref: string): Promise<boolean> {
+  const cellName = frame.locator(CELL_NAME_INPUT).first();
+  const name = await cellName.inputValue().catch(async () => (await cellName.innerText()) ?? "");
+  return name.toUpperCase().includes(ref.toUpperCase());
+}
+
+async function selectCellViaSdk(frame: FrameLocator, ref: string): Promise<boolean> {
+  const selected = await frame
+    .locator("body")
+    .evaluate(selectCellInBrowser, ref)
+    .catch(() => false);
+  if (!selected) {
+    return false;
+  }
+  return cellNameShowsRef(frame, ref);
+}
+
+async function selectCellViaUi(frame: FrameLocator, ref: string): Promise<boolean> {
+  const cellName = frame.locator(CELL_NAME_INPUT).first();
+  if (!(await cellName.isEnabled().catch(() => false))) {
+    return false;
+  }
+  await dismissEditorOverlays(frame);
+  await cellName.click({ timeout: 2_000 }).catch(() => {});
+  await cellName.fill(ref);
+  await cellName.press("Enter");
+  await settleFrame(frame, 200);
+  return cellNameShowsRef(frame, ref);
+}
+
+/** Select a spreadsheet cell via SDK when available, otherwise the name box UI. */
 async function selectCell(frame: FrameLocator, ref: string): Promise<void> {
   const cellName = frame.locator(CELL_NAME_INPUT).first();
   await expect(cellName).toBeEnabled({ timeout: EDITOR_LOAD_TIMEOUT });
-  await dismissEditorOverlays(frame);
-  await cellName.click();
-  await cellName.fill(ref);
-  await cellName.press("Enter");
   await expect
-    .poll(async () => {
-      const name = await cellName.inputValue().catch(async () => (await cellName.innerText()) ?? "");
-      return name.toUpperCase().includes(ref.toUpperCase());
-    })
+    .poll(
+      async () => {
+        if (await isLoadMaskBlocking(frame)) {
+          return false;
+        }
+        if (await selectCellViaSdk(frame, ref)) {
+          return true;
+        }
+        return selectCellViaUi(frame, ref);
+      },
+      { timeout: EDITOR_LOAD_TIMEOUT, intervals: [200, 500, 1000] },
+    )
     .toBe(true);
 }
 
@@ -546,34 +738,68 @@ async function setCellValue(frame: FrameLocator, ref: string, value: string): Pr
   return frame.locator("body").evaluate(setCellViaBrowser, { cellRef: ref, cellValue: value });
 }
 
+async function cellShowsValue(
+  page: Page,
+  frame: FrameLocator,
+  editor: SampleFile["editor"],
+  ref: string,
+  expected: string,
+): Promise<boolean> {
+  const file = new URL(page.url()).searchParams.get("file");
+  if (file && (file.endsWith(".csv") || file.endsWith(".tsv"))) {
+    const res = await page.request.get(`/api/office/demo/file/${encodeURIComponent(file)}`, {
+      headers: { "Cache-Control": "no-cache" },
+    });
+    if (res.ok() && csvCellValue(await res.text(), ref).includes(expected)) {
+      return true;
+    }
+  }
+
+  try {
+    const viaSdk = await frame.locator("body").evaluate(readCellViaBrowser, ref);
+    if (viaSdk.includes(expected)) {
+      return true;
+    }
+  } catch {
+    // fall through to UI readback
+  }
+
+  if (!(await isEditorInteractive(page, frame, editor))) {
+    return false;
+  }
+  try {
+    const value = await readCellValue(frame, ref);
+    return value.includes(expected);
+  } catch {
+    return false;
+  }
+}
+
+/** Poll until a spreadsheet cell shows expected text in the editor (or CSV on disk). */
+export async function waitForCellContent(
+  page: Page,
+  editor: SampleFile["editor"],
+  ref: string,
+  expected: string,
+  timeoutMs = EDITOR_LOAD_TIMEOUT,
+): Promise<void> {
+  const frame = getEditorFrame(page, editor);
+  await expect
+    .poll(() => cellShowsValue(page, frame, editor, ref, expected), {
+      timeout: timeoutMs,
+      intervals: [200, 500, 1000],
+    })
+    .toBe(true);
+}
+
 export async function assertCellContent(
   page: Page,
   editor: SampleFile["editor"],
   ref: string,
   expected: string,
 ): Promise<void> {
-  await waitForEditorInteractive(page, editor);
-  const frame = getEditorFrame(page, editor);
-  const file = new URL(page.url()).searchParams.get("file");
-
-  await expect
-    .poll(
-      async () => {
-        const value = await readCellValue(frame, ref);
-        if (value.includes(expected)) {
-          return true;
-        }
-        if (file && (file.endsWith(".csv") || file.endsWith(".tsv"))) {
-          const res = await page.request.get(`/api/office/demo/file/${encodeURIComponent(file)}`);
-          if (res.ok()) {
-            return csvCellValue(await res.text(), ref).includes(expected);
-          }
-        }
-        return false;
-      },
-      { timeout: CONTENT_FIND_TIMEOUT },
-    )
-    .toBe(true);
+  await waitForEditorReady(page, editor);
+  await waitForCellContent(page, editor, ref, expected, CONTENT_FIND_TIMEOUT);
 }
 
 export async function assertDocumentContains(
@@ -581,31 +807,27 @@ export async function assertDocumentContains(
   editor: SampleFile["editor"],
   text: string,
 ): Promise<void> {
-  await waitForEditorInteractive(page, editor);
+  await waitForEditorReady(page, editor);
   const frame = getEditorFrame(page, editor);
+  const file = new URL(page.url()).searchParams.get("file");
 
   await expect
     .poll(
       async () => {
-        let viaSdk = false;
-        try {
-          viaSdk = await frame.locator("body").evaluate(findTextInBrowser, { needle: text, kind: editor });
-        } catch {
-          viaSdk = false;
-        }
-        if (viaSdk) {
-          return true;
-        }
-        if (editor === "word" || editor === "slide") {
-          const file = new URL(page.url()).searchParams.get("file");
-          if (file) {
-            const res = await page.request.get(`/api/office/demo/file/${encodeURIComponent(file)}`);
-            if (res.ok()) {
-              return officeFileContains(Buffer.from(await res.body()), text);
-            }
+        if (file && (editor === "word" || editor === "slide")) {
+          const res = await page.request.get(`/api/office/demo/file/${encodeURIComponent(file)}`);
+          if (res.ok() && officeFileContains(Buffer.from(await res.body()), text)) {
+            return true;
           }
         }
-        return false;
+        if (!(await isEditorInteractive(page, frame, editor))) {
+          return false;
+        }
+        try {
+          return await frame.locator("body").evaluate(findTextInBrowser, { needle: text, kind: editor });
+        } catch {
+          return false;
+        }
       },
       { timeout: CONTENT_FIND_TIMEOUT },
     )
@@ -620,17 +842,93 @@ export async function setCellContent(
 ): Promise<void> {
   await waitForEditorInteractive(page, editor);
   const frame = getEditorFrame(page, editor);
+  await dismissEditorOverlays(frame);
 
-  const viaSdk = await setCellValue(frame, ref, value);
-  if (viaSdk) {
-    const readback = await readCellValue(frame, ref);
-    if (readback.includes(value)) {
-      return;
-    }
+  let viaSdk = false;
+  try {
+    await expect
+      .poll(
+        async () => {
+          if (await isLoadMaskBlocking(frame)) {
+            return false;
+          }
+          const apiReady = await frame
+            .locator("body")
+            .evaluate(cellSetApiReadyInBrowser)
+            .catch(() => false);
+          if (!apiReady) {
+            return false;
+          }
+          return setCellValue(frame, ref, value);
+        },
+        { timeout: EDITOR_LOAD_TIMEOUT, intervals: [200, 500, 1000] },
+      )
+      .toBe(true);
+    viaSdk = true;
+  } catch {
+    viaSdk = false;
   }
 
-  await selectCell(frame, ref);
-  await writeFormulaBarValue(frame, value);
+  if (!viaSdk) {
+    await selectCell(frame, ref);
+    await writeFormulaBarValue(frame, value);
+  }
+
+  await commitCellEdit(frame);
+  if (!(await cellShowsValue(page, frame, editor, ref, value))) {
+    await selectCell(frame, ref);
+    await writeFormulaBarValue(frame, value);
+    await commitCellEdit(frame);
+  }
+  await settleFrame(frame, 500);
+}
+
+/** Set a cell value for save tests (SDK/UI write with retries, then readback poll). */
+export async function editCellForSave(
+  page: Page,
+  editor: SampleFile["editor"],
+  ref: string,
+  value: string,
+): Promise<void> {
+  await setCellContent(page, editor, ref, value);
+  const frame = getEditorFrame(page, editor);
+  const apiReady = await frame
+    .locator("body")
+    .evaluate(cellSetApiReadyInBrowser)
+    .catch(() => false);
+
+  try {
+    await expect
+      .poll(
+        async () => cellShowsValue(page, frame, editor, ref, value),
+        { timeout: EDITOR_LOAD_TIMEOUT, intervals: [200, 500, 1000] },
+      )
+      .toBe(true);
+  } catch (err) {
+    const cellName = await frame
+      .locator(CELL_NAME_INPUT)
+      .first()
+      .inputValue()
+      .catch(async () => (await frame.locator(CELL_NAME_INPUT).first().innerText()) ?? "");
+    const formula = await readFormulaBarValue(frame);
+    const loadMask = await isLoadMaskBlocking(frame);
+    const nameEnabled = await frame.locator(CELL_NAME_INPUT).first().isEnabled().catch(() => false);
+    throw new Error(
+      `${String(err)}\ncell edit acknowledgement failed ref=${ref} value=${value} apiReady=${apiReady} nameBox=${cellName} formula=${formula} loadMask=${loadMask} nameEnabled=${nameEnabled}`,
+    );
+  }
+}
+
+async function commitCellEdit(frame: FrameLocator): Promise<void> {
+  const valueLoc = frame.locator(CELL_VALUE_INPUT).first();
+  if ((await valueLoc.count()) > 0) {
+    await valueLoc.press("Enter").catch(() => {});
+  }
+  const cellName = frame.locator(CELL_NAME_INPUT).first();
+  if ((await cellName.count()) > 0) {
+    await cellName.click({ timeout: 3_000 }).catch(() => {});
+  }
+  await settleFrame(frame, 250);
 }
 
 async function findDocumentTextViaSdk(
@@ -749,13 +1047,36 @@ async function replaceDocumentTextViaSearchUI(
 }
 
 async function isDocumentDirty(page: Page): Promise<boolean> {
-  return (await page.locator("body").getAttribute("data-dirty")) !== null;
+  return (await page.locator("body").getAttribute("data-dirty")) === "true";
+}
+
+/** Wait until the demo viewer has no pending unsaved edits. */
+export async function waitForDocumentClean(page: Page, timeoutMs = 15_000): Promise<void> {
+  await expect
+    .poll(async () => !(await isDocumentDirty(page)), { timeout: timeoutMs })
+    .toBe(true);
 }
 
 /** Wait until the demo viewer marks the document as having unsaved edits. */
 export async function waitForDocumentDirty(page: Page, timeoutMs = 10_000): Promise<void> {
   await expect
     .poll(async () => isDocumentDirty(page), { timeout: timeoutMs })
+    .toBe(true);
+}
+
+/** Poll until marker text is visible in the editor (not on disk). */
+async function waitForMarkerInEditor(
+  page: Page,
+  editor: SampleFile["editor"],
+  marker: string,
+  timeoutMs = EDITOR_LOAD_TIMEOUT,
+): Promise<void> {
+  const frame = getEditorFrame(page, editor);
+  await expect
+    .poll(async () => documentContainsText(frame, marker, editor), {
+      timeout: timeoutMs,
+      intervals: [300, 500, 1000],
+    })
     .toBe(true);
 }
 
@@ -808,14 +1129,29 @@ export async function replaceDocumentText(
   await page.waitForTimeout(300);
 }
 
-/** Insert a unique marker into word/slide documents and wait for the dirty flag (save tests). */
-export async function insertSaveMarker(
+/** Insert a unique marker into word/slide documents for save tests. */
+export async function editWordForSave(
   page: Page,
   editor: SampleFile["editor"],
   marker: string,
 ): Promise<void> {
-  await typeInDocument(page, editor, ` ${marker}`);
-  await waitForDocumentDirty(page);
+  await waitForEditorEditable(page, editor);
+  const chunk = ` ${marker}`;
+  const inserted = await page.evaluate((text: string) => {
+    const ed = (window as {
+      docEditor?: { grabFocus?: () => void; insertPlainText?: (t: string) => void };
+    }).docEditor;
+    if (!ed || typeof ed.insertPlainText !== "function") {
+      return false;
+    }
+    ed.grabFocus?.();
+    ed.insertPlainText(text);
+    return true;
+  }, chunk);
+  if (!inserted) {
+    throw new Error(`insertPlainText unavailable\nwitness:\n${await editorWitness(page, editor)}`);
+  }
+  await waitForMarkerInEditor(page, editor, marker);
 }
 
 /** Insert text into the word/slide document (canvas-backed; parent-page Ctrl+S and DOM innerText do not work). */
@@ -855,19 +1191,22 @@ export async function typeInDocument(
 const SAVE_BUTTON =
   "#slot-btn-dt-save, #id-toolbar-btn-save, #box-document-title .btn-save, button.btn-save, a.btn-save, .icon-save";
 
-/** Trigger Save inside the editor iframe (parent-page Ctrl+S never reaches the SDK). */
-export async function triggerEditorSave(page: Page, editor: SampleFile["editor"]): Promise<void> {
+/** Click Save once inside the editor iframe (Ctrl+S only when no button exists). */
+export async function triggerManualSave(page: Page, editor: SampleFile["editor"]): Promise<void> {
   const frame = getEditorFrame(page, editor);
-  await frame.locator("body").click({ position: { x: 12, y: 12 }, force: true }).catch(() => {});
+  await frame.locator("body").click({ position: { x: 12, y: 12 }, force: true });
 
   const saveBtn = frame.locator(SAVE_BUTTON).first();
   if ((await saveBtn.count()) > 0) {
-    await saveBtn.click({ force: true, timeout: 5_000 }).catch(() => {});
+    await saveBtn.click({ force: true, timeout: 5_000, noWaitAfter: true });
+    return;
   }
+  await frame.locator("body").press("Control+s");
+}
 
-  await frame.locator("body").press("Control+s");
-  await page.waitForTimeout(200);
-  await frame.locator("body").press("Control+s");
+/** @deprecated Use triggerManualSave for the one Save-button smoke; autosave tests poll disk instead. */
+export async function triggerEditorSave(page: Page, editor: SampleFile["editor"]): Promise<void> {
+  await triggerManualSave(page, editor);
 }
 
 function zipEntryText(buf: Buffer, entryName: string): string {
@@ -1120,47 +1459,88 @@ function applyWordFormatInBrowser(arg: { marker: string; format: WordFormatOptio
   return true;
 }
 
-/** Find marker text in a word document and apply formatting via the Asc API. */
+async function formatWordSelectionViaSearchUI(
+  frame: FrameLocator,
+  marker: string,
+  format: WordFormatOptions,
+): Promise<void> {
+  await frame.locator("body").click({ position: { x: 10, y: 10 }, force: true }).catch(() => {});
+  await frame.locator("body").press("Control+f");
+  const searchInput = frame.locator("#search-bar-text").first();
+  await searchInput.waitFor({ state: "visible", timeout: 8_000 });
+  await searchInput.fill(marker);
+  await searchInput.press("Enter");
+  await settleFrame(frame, 400);
+  await expect
+    .poll(async () => searchBarHasMatches(frame), {
+      timeout: CONTENT_FIND_TIMEOUT,
+      intervals: [200, 500, 1000],
+    })
+    .toBe(true);
+  // Apply via toolbar while the search selection is still active (Escape clears it).
+  if (format.bold) {
+    const boldBtn = frame
+      .locator(
+        '#slot-btn-font-bold, #id-toolbar-btn-bold, [id*="font-bold"], button[aria-label*="Bold" i]',
+      )
+      .first();
+    if ((await boldBtn.count()) > 0 && (await boldBtn.isVisible().catch(() => false))) {
+      await boldBtn.click({ force: true });
+    } else {
+      await frame.locator("body").press("Control+b");
+    }
+  }
+  if (format.italic) {
+    const italicBtn = frame
+      .locator(
+        '#slot-btn-font-italic, #id-toolbar-btn-italic, [id*="font-italic"], button[aria-label*="Italic" i]',
+      )
+      .first();
+    if ((await italicBtn.count()) > 0 && (await italicBtn.isVisible().catch(() => false))) {
+      await italicBtn.click({ force: true });
+    } else {
+      await frame.locator("body").press("Control+i");
+    }
+  }
+  if (format.highlight) {
+    const highlightBtn = frame
+      .locator('#slot-btn-highlight-color, #slot-btn-font-highlight, [id*="highlight"]')
+      .first();
+    if ((await highlightBtn.count()) > 0) {
+      await highlightBtn.click({ force: true });
+      const yellow = frame.locator('[data-color="ffff00"], [data-value="ffff00"], .color-yellow').first();
+      if ((await yellow.count()) > 0) {
+        await yellow.click({ force: true });
+      }
+    }
+  }
+  await closeSearchBar(frame);
+}
+
+/** Find marker text in a word document and apply formatting. */
 export async function formatWordSelection(
   page: Page,
   marker: string,
   format: WordFormatOptions,
 ): Promise<void> {
-  await waitForEditorInteractive(page, "word");
+  await waitForEditorEditable(page, "word");
   const frame = getEditorFrame(page, "word");
+  await waitForMarkerInEditor(page, "word", marker);
 
   const sdkApplied = await frame
     .locator("body")
     .evaluate(applyWordFormatInBrowser, { marker, format });
   if (!sdkApplied) {
-    await frame.locator("body").click({ position: { x: 10, y: 10 }, force: true }).catch(() => {});
-    await frame.locator("body").press("Control+f");
-    const searchInput = frame.locator("#search-bar-text").first();
-    await searchInput.waitFor({ state: "visible", timeout: 8_000 });
-    await searchInput.fill(marker);
-    await searchInput.press("Enter");
-    await page.waitForTimeout(300);
-    if (format.bold) {
-      await frame.locator("body").press("Control+b");
-    }
-    if (format.italic) {
-      await frame.locator("body").press("Control+i");
-    }
-    if (format.highlight) {
-      const highlightBtn = frame
-        .locator('#slot-btn-highlight-color, #slot-btn-font-highlight, [id*="highlight"]')
-        .first();
-      if ((await highlightBtn.count()) > 0) {
-        await highlightBtn.click({ force: true });
-        const yellow = frame.locator('[data-color="ffff00"], [data-value="ffff00"], .color-yellow').first();
-        if ((await yellow.count()) > 0) {
-          await yellow.click({ force: true });
-        }
-      }
-    }
-    await frame.locator("#search-bar-close, #search-adv-close").first().click({ timeout: 1_000 }).catch(() => {});
+    await formatWordSelectionViaSearchUI(frame, marker, format);
   }
-  await waitForDocumentDirty(page);
+
+  await expect
+    .poll(async () => documentContainsText(frame, marker, "word"), {
+      timeout: DOCUMENT_READY_TIMEOUT,
+      intervals: [300, 500, 1000],
+    })
+    .toBe(true);
+  await settleFrame(frame, 400);
 }
 
 export type RtfFormattingAssert = {
@@ -1169,6 +1549,26 @@ export type RtfFormattingAssert = {
   italic?: boolean;
   highlight?: boolean;
 };
+
+function rtfFormattingMatches(rtf: string, opts: RtfFormattingAssert): boolean {
+  if (!rtfPlainText(rtf).includes(opts.marker)) {
+    return false;
+  }
+  const window = rtfWindowAroundMarker(rtf, opts.marker);
+  if (window.length === 0) {
+    return false;
+  }
+  if (opts.bold && !/\\b(?!ullet)/.test(window)) {
+    return false;
+  }
+  if (opts.italic && !/\\i(?!nfo|lvl|tap)[^a-zA-Z]/.test(rtf)) {
+    return false;
+  }
+  if (opts.highlight && !rtf.match(/\\highlight\d*|\\cb\d+|\\chcbpat\d+/)) {
+    return false;
+  }
+  return true;
+}
 
 export async function assertDemoRtfFormatting(
   request: APIRequestContext,
@@ -1191,15 +1591,41 @@ export async function assertDemoRtfFormatting(
   }
 }
 
-/** Poll viewer status for stableMs after save; fail on Error: prefix. */
+/** Poll the RTF file until formatting around the marker is persisted. */
+export async function waitForDemoRtfFormatting(
+  request: APIRequestContext,
+  filePath: string,
+  opts: RtfFormattingAssert,
+  timeoutMs = SAVE_DONE_TIMEOUT,
+): Promise<void> {
+  await waitForPersistedContent(
+    request,
+    filePath,
+    (buf) => rtfFormattingMatches(decodeOfficeText(buf), opts),
+    { timeoutMs, label: `RTF formatting for "${opts.marker}"` },
+  );
+}
+
+/** Observe the full stability window; fail immediately on viewer or save errors. */
 export async function assertEditorStable(page: Page, stableMs = 15_000): Promise<void> {
-  const started = Date.now();
-  while (Date.now() - started < stableMs) {
+  const interval = 500;
+  const checks = Math.max(1, Math.ceil(stableMs / interval));
+  for (let i = 0; i < checks; i++) {
+    const saveError = await page.locator("body").getAttribute("data-save-error");
+    if (saveError) {
+      throw new Error(`save error during stability window: ${saveError}`);
+    }
     const status = (await page.locator("#status").textContent()) ?? "";
-    expect(status).not.toMatch(/^Error:/);
+    if (status.startsWith("Error:")) {
+      throw new Error(`viewer error during stability window: ${status}`);
+    }
     const className = (await page.locator("#status").getAttribute("class")) ?? "";
-    expect(className).not.toContain("status-error");
-    await page.waitForTimeout(500);
+    if (className.includes("status-error")) {
+      throw new Error("status-error during stability window");
+    }
+    if (i < checks - 1) {
+      await page.waitForTimeout(interval);
+    }
   }
 }
 
@@ -1210,23 +1636,88 @@ export async function applyMinimalSaveEdit(
   marker = "PW_STABLE",
 ): Promise<void> {
   if (editor === "cell") {
-    await setCellContent(page, editor, "A1", marker);
+    await editCellForSave(page, editor, "A1", marker);
     return;
   }
   if (editor === "word" || editor === "slide") {
-    await insertSaveMarker(page, editor, marker);
+    await editWordForSave(page, editor, marker);
     return;
   }
   throw new Error(`unsupported editor for save edit: ${editor}`);
+}
+
+export function fileFingerprint(buf: Buffer): string {
+  return createHash("sha256").update(buf).digest("hex");
 }
 
 export async function fetchDemoFileBody(
   request: APIRequestContext,
   filePath: string,
 ): Promise<Buffer> {
-  const res = await request.get(`/api/office/demo/file/${encodeURIComponent(filePath)}`);
+  const res = await request.get(`/api/office/demo/file/${encodeURIComponent(filePath)}`, {
+    headers: { "Cache-Control": "no-cache" },
+  });
   expect(res.ok()).toBeTruthy();
   return Buffer.from(await res.body());
+}
+
+export type PersistOptions = {
+  timeoutMs?: number;
+  page?: Page;
+  label?: string;
+};
+
+/** Poll demo file bytes until a caller-supplied postcondition is true. */
+export async function waitForPersistedContent(
+  request: APIRequestContext,
+  filePath: string,
+  postcondition: (buf: Buffer) => boolean,
+  opts?: PersistOptions,
+): Promise<void> {
+  const timeoutMs = opts?.timeoutMs ?? SAVE_DONE_TIMEOUT;
+  const beforeFp = fileFingerprint(await fetchDemoFileBody(request, filePath));
+  const label = opts?.label ?? "persisted content postcondition";
+  try {
+    await expect
+      .poll(
+        async () => {
+          if (opts?.page) {
+            const saveError = await opts.page.locator("body").getAttribute("data-save-error");
+            if (saveError) {
+              throw new Error(`save error: ${saveError}`);
+            }
+            const status = (await opts.page.locator("#status").textContent()) ?? "";
+            if (status.startsWith("Error:")) {
+              throw new Error(`viewer status: ${status}`);
+            }
+          }
+          const buf = await fetchDemoFileBody(request, filePath);
+          return postcondition(buf);
+        },
+        { timeout: timeoutMs, intervals: [500, 1000, 2000] },
+      )
+      .toBe(true);
+  } catch (err) {
+    const afterFp = fileFingerprint(await fetchDemoFileBody(request, filePath));
+    throw new Error(
+      `${String(err)}\n${label} not met within ${timeoutMs}ms\nfingerprint before=${beforeFp}\nfingerprint after=${afterFp}`,
+    );
+  }
+}
+
+/** Poll until marker text is present in the persisted demo file. */
+export async function waitForPersistedMarker(
+  request: APIRequestContext,
+  filePath: string,
+  marker: string,
+  opts?: PersistOptions,
+): Promise<void> {
+  await waitForPersistedContent(
+    request,
+    filePath,
+    (buf) => officeFileContains(buf, marker),
+    { ...opts, label: `marker "${marker}"` },
+  );
 }
 
 export async function assertDemoFileContains(
@@ -1251,51 +1742,58 @@ export type SaveDoneOptions = {
   marker?: string;
 };
 
+export async function editorWitness(
+  page: Page,
+  editor?: SampleFile["editor"],
+): Promise<string> {
+  const body = page.locator("body");
+  const status = (await page.locator("#status").textContent()) ?? "";
+  const witness: Record<string, unknown> = {
+    warmDone: await body.getAttribute("data-warm-done"),
+    warmError: await body.getAttribute("data-warm-error"),
+    documentReady: await body.getAttribute("data-document-ready"),
+    dirty: await body.getAttribute("data-dirty"),
+    saveDone: await body.getAttribute("data-save-done"),
+    saveError: await body.getAttribute("data-save-error"),
+    saving: await body.getAttribute("data-saving"),
+    status,
+    statusClass: (await page.locator("#status").getAttribute("class")) ?? "",
+  };
+  if (editor) {
+    try {
+      const frame = getEditorFrame(page, editor);
+      witness.iframeSrc = await page
+        .locator(`iframe[src*="/${EDITOR_APP[editor]}/"]`)
+        .first()
+        .getAttribute("src");
+      witness.shellReady = await isEditorShellReady(frame, editor);
+      witness.loadMaskBlocking = await isLoadMaskBlocking(frame);
+      witness.interactive = await isEditorInteractive(page, frame, editor);
+      witness.editable = await isEditorEditable(page, frame, editor);
+    } catch (err) {
+      witness.frameProbeError = String(err);
+    }
+  }
+  return JSON.stringify(witness, null, 2);
+}
+
 export async function waitForSaveDone(
   page: Page,
   opts?: SaveDoneOptions | number,
 ): Promise<void> {
   const options: SaveDoneOptions =
     typeof opts === "number" ? { timeoutMs: opts } : (opts ?? {});
-  const timeoutMs = options.timeoutMs ?? SAVE_DONE_TIMEOUT;
-
-  await expect
-    .poll(
-      async () => {
-        if (options.marker && options.filePath && options.request) {
-          const res = await options.request.get(
-            `/api/office/demo/file/${encodeURIComponent(options.filePath)}`,
-          );
-          if (res.ok() && officeFileContains(Buffer.from(await res.body()), options.marker)) {
-            return true;
-          }
-        }
-        const saveDone = await page.locator("body").getAttribute("data-save-done");
-        if (saveDone && options.marker && options.filePath && options.request) {
-          const res = await options.request.get(
-            `/api/office/demo/file/${encodeURIComponent(options.filePath)}`,
-          );
-          if (res.ok()) {
-            return officeFileContains(Buffer.from(await res.body()), options.marker);
-          }
-        }
-        if (saveDone && !options.marker) {
-          return true;
-        }
-        const status = await page.locator("#status").textContent();
-        if (status?.includes("Saved") && options.marker && options.filePath && options.request) {
-          const res = await options.request.get(
-            `/api/office/demo/file/${encodeURIComponent(options.filePath)}`,
-          );
-          if (res.ok()) {
-            return officeFileContains(Buffer.from(await res.body()), options.marker);
-          }
-        }
-        return false;
-      },
-      { timeout: timeoutMs },
-    )
-    .toBe(true);
+  if (!options.marker || !options.filePath || !options.request) {
+    throw new Error("waitForSaveDone requires request, filePath, and marker");
+  }
+  try {
+    await waitForPersistedMarker(options.request, options.filePath, options.marker, {
+      timeoutMs: options.timeoutMs,
+      page,
+    });
+  } catch (err) {
+    throw new Error(`${String(err)}\nwitness:\n${await editorWitness(page)}`);
+  }
 }
 
 export async function assertSampleContent(

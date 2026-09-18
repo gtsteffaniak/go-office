@@ -14,6 +14,8 @@
 .DEFAULT_GOAL := help
 
 GO ?= go
+# All go test invocations use the race detector (CI and local).
+GO_TEST_FLAGS ?= -race
 OFFICE_ASSETS ?= $(CURDIR)/assets
 ADDR ?= :8080
 BIN_DIR ?= bin
@@ -45,7 +47,7 @@ DOCKER_DEV_RUN = docker run --rm $(DOCKER_DEV_MOUNTS) -w /src
 
 .PHONY: help setup build serve doctor fonts test test-integration clean \
         check-docker docker-dev-image check-go mod-download fetch-assets compile check-assets check-samples test-x2t test-x2t-concurrent \
-        playwright-npm test-playwright test-playwright-ui check-sample-matrix extract-sample-manifest \
+        playwright-npm test-playwright test-playwright-project test-playwright-ui check-sample-matrix extract-sample-manifest \
         build-docker build-docker-image build-docker-builder run-docker stop-docker ensure-assets \
         build-native serve-native fetch-assets-native compile-native fonts-native \
         test-integration-native test-convert-linux-native test-x2t-native test-x2t-concurrent-native doctor-native
@@ -66,7 +68,8 @@ help:
 	@echo "  make test-convert-linux x2t convert tests in ./internal/convert/ (runs build first)"
 	@echo "  make check-sample-matrix  Verify all Playwright sample files exist (git-tracked under sample-files/)"
 	@echo "  make extract-sample-manifest  Regenerate Playwright content expectations from sample-files/"
-	@echo "  make test-playwright    E2E Playwright tests in Docker (runs build first)"
+	@echo "  make test-playwright    E2E Playwright tests in Docker (all projects)"
+	@echo "  make test-playwright-project  Single Playwright project (PLAYWRIGHT_PROJECT=…)"
 	@echo "  make test-playwright-ui Local Playwright UI (server in Docker, tests on host)"
 	@echo "  make build-docker       Build Docker image (office-server)"
 	@echo "  make build-docker-image Build Docker image only (debian-slim runtime for x2t)"
@@ -180,15 +183,11 @@ endif
 
 fetch-assets-native:
 	@mkdir -p "$(BIN_DIR)" "$(OFFICE_ASSETS)"
-	@if [ -f "$(OFFICE_ASSETS)/.extracted" ] && [ -f "$(ALL_FONTS)" ] && [ -s "$(FONT_SELECTION)" ] && [ -f "$(X2T_BIN)" ]; then \
-		echo "==> Euro-Office assets already present in $(OFFICE_ASSETS)/"; \
-	else \
-		echo "==> Euro-Office assets → $(OFFICE_ASSETS)/"; \
-		$(GO) build -o "$(FETCH_ASSETS_BIN)" ./cmd/fetch-assets; \
-		$(FETCH_ASSETS_BIN) -out "$(OFFICE_ASSETS)"; \
-		test -f "$(ALL_FONTS)" || (echo "error: fetch-assets did not create $(ALL_FONTS)" && exit 1); \
-		test -s "$(FONT_SELECTION)" || (echo "error: fetch-assets did not create $(FONT_SELECTION)" && exit 1); \
-	fi
+	@echo "==> Euro-Office assets → $(OFFICE_ASSETS)/"
+	@$(GO) build -o "$(FETCH_ASSETS_BIN)" ./cmd/fetch-assets
+	@$(FETCH_ASSETS_BIN) -out "$(OFFICE_ASSETS)"
+	@test -f "$(ALL_FONTS)" || (echo "error: fetch-assets did not create $(ALL_FONTS)" && exit 1)
+	@test -s "$(FONT_SELECTION)" || (echo "error: fetch-assets did not create $(FONT_SELECTION)" && exit 1)
 
 ensure-assets: fetch-assets check-assets
 
@@ -261,7 +260,7 @@ endif
 
 test-x2t-concurrent-native: build-native check-samples
 	@echo "==> Concurrent CSV save (Playwright load regression, needs x2t)"
-	$(GO) test ./internal/convert/ -run 'TestSaveChangesCSVConcurrent|TestPrepareX2TRunDir' -count=3 -v
+	$(GO) test $(GO_TEST_FLAGS) ./internal/convert/ -run 'TestSaveChangesCSVConcurrent|TestPrepareX2TRunDir' -count=3 -v
 
 doctor:
 ifeq ($(USE_DOCKER_DEV),1)
@@ -290,13 +289,14 @@ fonts-native:
 	$(FETCH_ASSETS_BIN) -fonts -out "$(OFFICE_ASSETS)"
 
 test:
-	$(GO) test -race ./...
+	$(GO) test $(GO_TEST_FLAGS) ./...
 
 lint:
 	$(GO) tool golangci-lint run ./...
 
-PLAYWRIGHT_TEST_IMAGE ?= go-office-playwright-tests
-PLAYWRIGHT_LOCAL_CONTAINER ?= go-office-playwright-local
+PLAYWRIGHT_IMAGE ?= go-office-playwright
+PLAYWRIGHT_DOCKERFILE := _docker/Dockerfile.playwright
+PLAYWRIGHT_LOCAL_CONTAINER ?= go-office-playwright-server
 
 DOCKER_IMAGE ?= ghcr.io/quantumx-apps/office-server:local
 DOCKER_BUILDER_IMAGE ?= go-office:builder
@@ -342,29 +342,40 @@ else
 endif
 
 test-integration-native: build-native
-	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test -tags=integration ./integration/... -count=1
+	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test $(GO_TEST_FLAGS) -tags=integration ./integration/... -count=1
 
 test-convert-linux-native: build-native
-	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test ./internal/convert/... -count=1
+	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test $(GO_TEST_FLAGS) ./internal/convert/... -count=1
 
 test-save-integration: build
-	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test -tags=integration ./integration/... -race -count=1
+	OFFICE_ASSETS="$(OFFICE_ASSETS)" $(GO) test $(GO_TEST_FLAGS) -tags=integration ./integration/... -count=1
 
 playwright-npm:
 	@echo "==> Playwright npm dependencies"
 	cd frontend && npm install
 
 test-playwright: ensure-assets check-sample-matrix check-docker
-	@echo "==> Playwright E2E (Docker)"
+	@echo "==> Playwright E2E (Docker, all projects)"
 	GOOS=linux $(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
-	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_TEST_IMAGE)" -f _docker/Dockerfile.playwright-office .
+	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_IMAGE)" --target test -f "$(PLAYWRIGHT_DOCKERFILE)" .
+
+test-playwright-project: ensure-assets check-sample-matrix check-docker
+	@if [ -z "$(PLAYWRIGHT_PROJECT)" ]; then \
+		echo "error: PLAYWRIGHT_PROJECT is required (e.g. chromium, chromium-save, chromium-post-save)"; \
+		exit 1; \
+	fi
+	@echo "==> Playwright E2E (Docker, project=$(PLAYWRIGHT_PROJECT))"
+	GOOS=linux $(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
+	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_IMAGE)-$(PLAYWRIGHT_PROJECT)" \
+		--build-arg PLAYWRIGHT_PROJECT="$(PLAYWRIGHT_PROJECT)" \
+		--target test -f "$(PLAYWRIGHT_DOCKERFILE)" .
 
 test-playwright-ui: build check-sample-matrix check-docker
 	@echo "==> Playwright UI (server in Docker, tests on host)"
 	GOOS=linux $(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
 	docker rm -f "$(PLAYWRIGHT_LOCAL_CONTAINER)" 2>/dev/null || true
-	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_LOCAL_CONTAINER)" -f _docker/Dockerfile.playwright-local .
-	docker run -d -p 8080:8080 --name "$(PLAYWRIGHT_LOCAL_CONTAINER)" "$(PLAYWRIGHT_LOCAL_CONTAINER)"
+	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_IMAGE)" --target server -f "$(PLAYWRIGHT_DOCKERFILE)" .
+	docker run -d -p 8080:8080 --name "$(PLAYWRIGHT_LOCAL_CONTAINER)" "$(PLAYWRIGHT_IMAGE)"
 	cd frontend && npm install && npx playwright install chromium
 	@echo "Open Playwright UI — server at http://127.0.0.1:8080/"
 	cd frontend && npx playwright test --ui

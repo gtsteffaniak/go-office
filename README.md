@@ -22,6 +22,7 @@ Embedded Go document server library compatible with ONLYOFFICE / Euro-Office bro
 - Coauthoring over Engine.IO **polling** (WebSocket upgrade returns 501; sdkjs falls back automatically)
 - Demo UI, sample matrix, and Playwright E2E in CI
 - Runtime asset discovery/fetch via `DiscoverAssets`, `FetchAssets`, and `EnsureAssets` (caller-controlled; `office.New` never downloads)
+- Demo warm endpoint (`GET /demo/warm`) pre-converts samples; coauthoring session reset on config (`BuildEditorConfig`, `POST /session/reset`)
 
 ## Quick start (Makefile)
 
@@ -41,7 +42,7 @@ make test     # unit tests (no assets)
 | `make setup` | Verify Go 1.27+, `go mod download` |
 | `make build` | Download Euro-Office assets into `./assets/`, compile `bin/go-office` |
 | `make serve` | Runs `build` then starts the server on `:8080` |
-| `make test` | `go test ./...` (no assets) |
+| `make test` | `go test -race ./...` (no assets) |
 | `make test-integration` | `build` then integration tests |
 | `make test-playwright` | `build` then Playwright E2E in Docker |
 | `make test-playwright-ui` | Demo server in Docker + Playwright UI on host |
@@ -49,7 +50,7 @@ make test     # unit tests (no assets)
 | `make run-docker` | Run built image on host port 8080 → container 80 |
 | `make clean` | Remove `bin/` and downloaded `assets/` |
 
-Useful variables: `OFFICE_ADDR`, `OFFICE_ASSETS`, `OFFICE_JWT_SECRET`, `OFFICE_DISABLE_SAMPLES`. See [migration.md](migration.md) when replacing `onlyoffice/documentserver`.
+Useful environment variables: `OFFICE_JWT_SECRET` (or ONLYOFFICE `JWT_SECRET`), `OFFICE_ASSETS`, `OFFICE_ADDR`, `OFFICE_DISABLE_SAMPLES`, `OFFICE_DEBUG_LOGGING`, `OFFICE_LOG_JSON`. See [migration.md](migration.md) for the full list and ONLYOFFICE Document Server mapping when replacing `onlyoffice/documentserver`.
 
 ## Euro-Office assets
 
@@ -98,6 +99,7 @@ Open **http://localhost:8080/** and **http://localhost:8080/demo/**.
 | `/demo/view?file=sample-files/sample.docx` | Editor viewer |
 | `/health` | Health check (JSON) |
 | `/healthcheck` | ONLYOFFICE-compatible health (`true`) |
+| `/session/reset?key=` | Clear coauthoring session before editor reload (POST, `204`) |
 | `/web-apps/apps/api/documents/api.js` | Integrator `api.js` |
 
 ## Library integration
@@ -150,6 +152,8 @@ make build
 make check-sample-matrix
 make test-playwright
 ```
+
+Playwright Docker defaults: `PLAYWRIGHT_WORKERS=10`, `OFFICE_CONVERT_LIMIT=4`. Override via environment when running locally or in CI.
 
 ## Layout
 

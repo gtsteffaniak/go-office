@@ -69,6 +69,7 @@ Paths are relative to `documentServerUrl` (default site root). `OFFICE_BASE_PATH
 | `/healthcheck` | GET | ✅ | ⚠️ | Body `true`. ONLYOFFICE also probes DB/Redis/broker; go-office returns `true` without those dependencies |
 | `/health` | GET | ⚠️ | ✅ | go-office JSON: `status`, `version`, `sessions`, `cacheDirs`, `cacheBytes` |
 | `/healthz` | GET | — | ✅ | Alias of `/health` (k8s convention; not ONLYOFFICE-specific) |
+| `/session/reset?key={documentKey}` | POST | — | ✅ | Clears in-memory coauthoring session for a document key before a new editor page load. Integrators that build config outside `BuildEditorConfig` (e.g. FileBrowser) should call this when minting editor config. Returns `204 No Content`. |
 | `/info/info.json` | GET | ✅ | ✅ | `{"version":"…"}` |
 
 ### 1.2 Conversion API (FileBrowser previews, print/export pipelines)
@@ -134,8 +135,9 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 | `42["message",{"type":"license",…}]` | ✅ | ✅ | Handshake type `3`, `buildVersion` from assets |
 | `auth` + `authChanges` | ✅ | ✅ | `openCmd` → download + x2t or PDF path |
 | `documentOpen` ok/error | ✅ | ✅ | Cache file list |
-| `isSaveLock` → `saveLock` | ✅ | ✅ | Golden fixture |
+| `isSaveLock` → `saveLock` | ✅ | ✅ | `saveLock:true` = blocked (flush running or lock held); `false` = proceed |
 | `saveChanges` → `unSaveLock` | ✅ | ✅ | Changes appended; debounced flush |
+| `forceSaveStart` → `forceSave` | ✅ | ✅ | `messages.inProgress:true` when a flush is already running; `forceSave` after x2t completes |
 | Other coauthoring messages (cursor, chat, presence, …) | ✅ | ❌ | Ignored (POST returns `ok`, no reply) |
 | Multi-user on same `key` | ✅ | ❌ | Single session per document key |
 
@@ -155,8 +157,8 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 | `editorConfig.lang`, `customization`, `user` | ✅ | ✅ | Passed through when set by host |
 | `editorConfig.coEditing` | ✅ | ⚠️ | Accepted; no multi-user semantics |
 | `editorConfig.plugins`, `templates`, `embedded`, … | ✅ | ⚠️ | Passed if host supplies; not validated server-side |
-| Config JWT (`token` top-level field) | ✅ | ✅ | Signed with `OFFICE_JWT_SECRET` when set |
-| Server-side JWT verify on coauthoring `auth` | ✅ | ❌ | go-office does not validate editor JWT on coauthoring packets |
+| Config JWT (`token` top-level field) | ✅ | ✅ | Signed when `OFFICE_JWT_SECRET` or `JWT_SECRET` is set |
+| Server-side JWT verify on coauthoring `auth` | ✅ | ✅ | When `JWTSecret` is set, `auth` packets must include a valid HS256 JWT |
 
 ### 3.2 Callback — integrator receives POSTs (Document Server → your app)
 
@@ -172,12 +174,12 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 | Status **3** (save error) | ✅ | ❌ | Not emitted |
 | Status **4** (closed, no changes) | ✅ | ❌ | Not emitted |
 | Status **7** (force save error) | ✅ | ❌ | Not emitted |
-| Payload fields: `users`, `actions` | ✅ | ❌ | Not in outbound `NotifyCallback` |
-| Payload fields: `changesurl`, `history`, `filetype` | ✅ | ❌ | Not in outbound payload |
-| Payload fields: `forcesavetype`, `userdata` | ✅ | ❌ | Not in outbound payload |
+| Payload fields: `users`, `actions` | ✅ | ⚠️ | Outbound includes `users` (document opener user id); `actions` not emitted |
+| Payload fields: `changesurl`, `history`, `filetype` | ✅ | ⚠️ | Outbound includes `filetype`; `changesurl` / `history` not emitted |
+| Payload fields: `forcesavetype`, `userdata` | ✅ | ⚠️ | Outbound includes `forcesavetype` on force save; `userdata` not emitted |
 | Inbound: accept status 1/4 and return `error:0` | ✅ | ✅ | `HandleCallback` — no persist, OK response |
 | Callback JWT `{"token":"…"}` (JWT_IN_BODY) | ✅ | ✅ | Sign outbound; verify inbound when secret set |
-| Callback JWT in `Authorization` header only | ✅ | ⚠️ | `TrimToken` helper exists; **not wired** in `HandleCallback` |
+| Callback JWT in `Authorization` header only | ✅ | ✅ | `HandleCallback` uses `callback.ReadRequest` (Bearer or body token) |
 
 **Important:** Integrators that only implement status **2** and **6** (typical save path) work. Integrators that track **status 1** “who is editing” or **status 4** “closed without save” from the document server will not receive those events from go-office.
 
@@ -185,12 +187,30 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 
 | JWT usage | ONLYOFFICE | go-office |
 | --------- | :--------: | :-------: |
-| `OFFICE_JWT_SECRET` / `JWT_SECRET` | ✅ | ✅ (renamed env) |
+| `OFFICE_JWT_SECRET` (preferred) / `JWT_SECRET` (fallback) | ✅ | ✅ |
+| `OFFICE_JWT_ENABLED` / `JWT_ENABLED=false` | ✅ | ✅ |
 | Sign editor config `token` | ✅ | ✅ |
 | Verify config token on server | ✅ | ❌ |
 | Callback body `{"token":"…"}` | ✅ | ✅ |
-| Converter `Authorization: Bearer` | ✅ | ✅ | When `OFFICE_JWT_SECRET` set |
+| Converter `Authorization: Bearer` | ✅ | ✅ | When JWT secret is set (`OFFICE_JWT_SECRET` or `JWT_SECRET`) |
 | Command service `{"token":"…"}` | ✅ | ❌ (no `/command`) |
+
+### 3.4 Environment variables
+
+See [migration.md](migration.md) for the full matrix. Summary:
+
+| Category | ONLYOFFICE | go-office |
+| -------- | :--------: | :-------: |
+| JWT secret | `JWT_SECRET` | `OFFICE_JWT_SECRET` (preferred) or `JWT_SECRET` |
+| JWT disable | `JWT_ENABLED=false` | `OFFICE_JWT_ENABLED=false` or `JWT_ENABLED=false` |
+| JWT header name | `JWT_HEADER` | ❌ not configurable (`Authorization` only) |
+| JWT in callback body | `JWT_IN_BODY` | ⚠️ always signs body when secret set |
+| Database / Redis / RabbitMQ | `DB_*`, `REDIS_*`, `AMQP_*` | ❌ not used |
+| WOPI | `WOPI_ENABLED` | ❌ not supported |
+| Listen port | Docker `-p host:80` | `OFFICE_ADDR` (default `:80` in image) |
+| Public URL for cache links | nginx / proxy config | `OFFICE_PUBLIC_ORIGIN` |
+| Debug logging | nginx / service logs | `OFFICE_DEBUG_LOGGING`, `OFFICE_LOG_JSON` |
+| x2t concurrency | internal DS tuning | `OFFICE_CONVERT_LIMIT` (default `2`) |
 
 ---
 
@@ -199,7 +219,7 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 | FileBrowser feature | ONLYOFFICE URL / API | go-office |
 | ------------------- | -------------------- | --------- |
 | In-browser editor | `{url}/web-apps/…/api.js` + config | ✅ |
-| Config JWT (`integrations.onlyOffice.secret`) | Same as `OFFICE_JWT_SECRET` | ✅ |
+| Config JWT (`integrations.onlyOffice.secret`) | Same as `OFFICE_JWT_SECRET` / `JWT_SECRET` | ✅ |
 | **Grid preview thumbnails** | `POST {url}/converter` | **✅** |
 | Document download URL in config | Your app’s download route | ✅ (host responsibility) |
 | Callback save | Your app’s callback route | ✅ |
@@ -249,7 +269,7 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 - [Conversion API](https://api.onlyoffice.com/docs/docs-api/additional-api/conversion-api/)
 - [Command service](https://api.onlyoffice.com/docs/docs-api/additional-api/command-service/)
 - [Callback handler](https://api.onlyoffice.com/docs/docs-api/usage-api/callback-handler/)
-- [migration.md](migration.md) — Docker env mapping
+- [migration.md](migration.md) — Docker env mapping (`OFFICE_*` + ONLYOFFICE fallbacks)
 - Live HTML matrix: `/docs/api#compatibility`
 
 ---
@@ -261,3 +281,4 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 | Phase 2 | Initial matrix; FileBrowser `/converter` gap |
 | Follow-up audit | Added: legacy `.ashx` paths, WOPI, spellchecker, command subcommands, callback outbound field gaps, JWT matrix, `shardkey`, `downloadfile` partial, healthcheck semantics, coauthoring message gaps, integrator vs document-server callback direction |
 | v0.2.0 | `/converter` + `/ConvertService.ashx` implemented (sync JPG); JWT on converter; demo thumbnails; library `DiscoverAssets` / `FetchAssets` / `EnsureAssets` |
+| 2026-09 | `POST /session/reset`; `BuildEditorConfig` clears coauthoring session; demo warm; `JWT_SECRET` env fallback; reload/session tests |

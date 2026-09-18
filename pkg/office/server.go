@@ -85,7 +85,7 @@ func (s *Server) ResetCoauthoringSession(docKey string) {
 }
 
 // RegisterDocumentSession stores integrator metadata from coauthoring auth (external integrators).
-func (s *Server) RegisterDocumentSession(docKey, callbackURL, fileType, documentURL string) {
+func (s *Server) RegisterDocumentSession(docKey, callbackURL, fileType, documentURL, userID string) {
 	if docKey == "" {
 		return
 	}
@@ -94,6 +94,7 @@ func (s *Server) RegisterDocumentSession(docKey, callbackURL, fileType, document
 		CallbackURL: callbackURL,
 		FileType:    fileType,
 		URL:         documentURL,
+		UserID:      userID,
 	})
 }
 
@@ -122,6 +123,7 @@ func (s *Server) BuildEditorConfig(ctx context.Context, req config.EditorRequest
 	if req.DocumentKey == "" {
 		return nil, errors.New("office: document key is required")
 	}
+	ws.ClearDocumentSession(req.DocumentKey)
 	s.sessions.UpsertDoc(session.Document{
 		Key:         req.DocumentKey,
 		Path:        req.StoragePath,
@@ -174,6 +176,7 @@ func (s *Server) buildRoutes() {
 	s.mux.HandleFunc(joinURLPath(prefix, "plugins.json"), s.handlePluginsJSON)
 	s.mux.HandleFunc(joinURLPath(prefix, "converter"), s.handleConverter)
 	s.mux.HandleFunc(joinURLPath(prefix, "ConvertService.ashx"), s.handleConverter)
+	s.mux.HandleFunc(joinURLPath(prefix, "session/reset"), s.handleSessionReset)
 
 	if s.opts.AssetDir != "" {
 		webApps := static.Dir(s.opts.AssetDir, "web-apps")
@@ -203,6 +206,7 @@ func (s *Server) buildRoutes() {
 			s.mux.HandleFunc("/plugins.json", s.handlePluginsJSON)
 			s.mux.HandleFunc("/converter", s.handleConverter)
 			s.mux.HandleFunc("/ConvertService.ashx", s.handleConverter)
+			s.mux.HandleFunc("/session/reset", s.handleSessionReset)
 		}
 	}
 
@@ -237,6 +241,7 @@ func (s *Server) registerCoauthoringFallback() {
 		Debug:        s.opts.Debug,
 		PollHold:     s.opts.PollHold,
 		PublicOrigin: s.opts.PublicOrigin,
+		JWTSecret:    s.opts.JWTSecret,
 		Opener:       opener,
 		CacheDir:     s.cacheDir(),
 		Saver:        s,
@@ -310,6 +315,20 @@ func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleInfoJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"version":` + strconvQuote(s.opts.ProtocolVersion) + `}`))
+}
+
+func (s *Server) handleSessionReset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	key := strings.TrimSpace(r.URL.Query().Get("key"))
+	if key == "" {
+		http.Error(w, "key query parameter is required", http.StatusBadRequest)
+		return
+	}
+	ws.ClearDocumentSession(key)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handlePluginsJSON(w http.ResponseWriter, r *http.Request) {

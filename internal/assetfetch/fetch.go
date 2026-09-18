@@ -103,7 +103,7 @@ func fetchLocked(ctx context.Context, opts Options, version string) error {
 	}
 	fmt.Printf("Extracting from package (%s)\n", dsRoot)
 
-	if err := os.RemoveAll(opts.OutDir); err != nil && !os.IsNotExist(err) {
+	if err := clearDirContents(opts.OutDir); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(opts.OutDir, 0o755); err != nil {

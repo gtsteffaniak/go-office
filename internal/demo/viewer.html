@@ -127,7 +127,7 @@
     // Poll the server's save outcome until a flush settles after the given baseline
     // sequence. A reported failure is surfaced immediately rather than waiting out the
     // watchdog, so tests fail fast instead of hanging.
-    function pollSaveComplete() {
+    function pollSaveComplete(requireNewerSequence) {
       if (autosavePollTimer) {
         clearTimeout(autosavePollTimer);
       }
@@ -135,11 +135,12 @@
       document.body.removeAttribute("data-save-error");
       var attempts = 0;
       var baseline = lastSaveSequence;
+      var needNewer = requireNewerSequence !== false;
       function tick() {
         attempts += 1;
         fetchSaveState()
           .then(function (state) {
-            if (state && state.known && state.sequence > baseline) {
+            if (state && state.known && (!needNewer || state.sequence > baseline)) {
               lastSaveSequence = state.sequence;
               clearSaveWatchdog();
               if (!state.success) {
@@ -170,6 +171,13 @@
           });
       }
       autosavePollTimer = setTimeout(tick, 100);
+    }
+
+    // reconcileSaveState resolves save status after the editor reports the document clean.
+    // The flush may already have settled, in which case the latest recorded outcome is the
+    // answer, so accept it without requiring a newer sequence.
+    function reconcileSaveState() {
+      pollSaveComplete(false);
     }
 
     function warmDocument() {
@@ -241,15 +249,15 @@
                     clearTimeout(autosavePollTimer);
                     autosavePollTimer = null;
                   }
-                  // Always reconcile save status against the server. Previously this
-                  // returned early when data-dirty was already clear, which meant a
-                  // genuinely persisted save could leave the viewer reporting nothing and
-                  // tests waiting for a completion signal that would never arrive.
+                  // The editor reports the document is clean, i.e. it has flushed its changes
+                  // to the server. Reconcile against the authoritative save state instead of
+                  // requiring a strictly *newer* sequence: the flush can settle before this
+                  // handler runs, and demanding a greater sequence would then never resolve.
                   document.body.removeAttribute("data-save-done");
                   document.body.removeAttribute("data-save-error");
                   setStatus("Saving…");
                   beginSaveWatchdog();
-                  pollSaveComplete();
+                  reconcileSaveState();
                 }
                 if (typeof baseEvents.onDocumentStateChange === "function") {
                   baseEvents.onDocumentStateChange(event);

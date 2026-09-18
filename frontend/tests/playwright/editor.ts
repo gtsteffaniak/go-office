@@ -556,7 +556,12 @@ export async function waitForEditorInteractive(
     interactive = true;
   } catch (err) {
     if (required) {
-      throw err;
+      // Report why the editor never became interactive, rather than a bare poll timeout.
+      // The witness records the viewer status, load-mask and frame-readiness state; the
+      // browser console is attached separately by the collectPageErrors fixture.
+      throw new Error(
+        `editor did not become interactive within ${timeoutMs}ms\nwitness:\n${await editorWitness(page, editor).catch(() => "<unavailable>")}\n${String(err)}`,
+      );
     }
   }
 
@@ -569,7 +574,9 @@ export async function waitForEditorInteractive(
       interactive = true;
     } catch (err) {
       if (required) {
-        throw err;
+        throw new Error(
+          `load mask still blocking after ${timeoutMs}ms\nwitness:\n${await editorWitness(page, editor).catch(() => "<unavailable>")}\n${String(err)}`,
+        );
       }
     }
   }

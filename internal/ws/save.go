@@ -24,6 +24,23 @@ type DocumentSaver interface {
 	FlushDocument(ctx context.Context, docKey, origin string, force bool) error
 }
 
+// FlushDetail is the outcome of a flush for clients that report richer save status.
+type FlushDetail struct {
+	// RolledBack reports the target format was unwritable and OOXML bridge bytes were
+	// persisted at the original path (assemblyFormatAsOrigin).
+	RolledBack bool
+	// Bridge names the OOXML format persisted when RolledBack is true.
+	Bridge string
+	// Bytes is the size of the persisted file.
+	Bytes int64
+}
+
+// DetailedDocumentSaver is an optional DocumentSaver extension. When a saver implements it,
+// the scheduler uses the returned detail to enrich the broadcast save result.
+type DetailedDocumentSaver interface {
+	FlushDocumentDetailed(ctx context.Context, docKey, origin string, force bool) (FlushDetail, error)
+}
+
 // DocumentSessionRegistrar records integrator session metadata from coauthoring auth.
 type DocumentSessionRegistrar interface {
 	RegisterDocumentSession(docKey, callbackURL, fileType, documentURL, userID string)
@@ -58,6 +75,9 @@ type saveScheduler struct {
 	saveIntent     map[string]bool
 	pendingEndSave map[string]bool
 	flushCoords    map[string]*keyFlushCoordinator
+	// outcomeSeq numbers broadcast save results per document key so clients can
+	// discard out-of-order events.
+	outcomeSeq map[string]uint64
 }
 
 func newSaveScheduler(cacheDir string, saver DocumentSaver, logger *slog.Logger, delayOverride, forceFallbackOverride *time.Duration) *saveScheduler {
@@ -86,7 +106,16 @@ func newSaveScheduler(cacheDir string, saver DocumentSaver, logger *slog.Logger,
 		saveIntent:     make(map[string]bool),
 		pendingEndSave: make(map[string]bool),
 		flushCoords:    make(map[string]*keyFlushCoordinator),
+		outcomeSeq:     make(map[string]uint64),
 	}
+}
+
+// nextOutcomeSeq returns the next per-key save-result sequence number.
+func (s *saveScheduler) nextOutcomeSeq(docKey string) uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.outcomeSeq[docKey]++
+	return s.outcomeSeq[docKey]
 }
 
 func (s *saveScheduler) stop() {
@@ -208,6 +237,18 @@ func (s *saveScheduler) takePendingEndSave(docKey string) bool {
 	}
 	delete(s.pendingEndSave, docKey)
 	return true
+}
+
+// markPendingEndSave records that a non-final saveChanges batch is awaiting its
+// endSaveChanges. forceSaveStart consults this to flush immediately rather than waiting
+// out the force-save fallback timer.
+func (s *saveScheduler) markPendingEndSave(docKey string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.pendingEndSave[docKey] = true
+	s.mu.Unlock()
 }
 
 func (s *saveScheduler) isForceArmed(docKey string) bool {
@@ -379,7 +420,15 @@ func (s *saveScheduler) runOneFlush(docKey, origin string, force bool) error {
 	s.logger.Debug("document flush start", "key", docKey, "force", force)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	err := s.saver.FlushDocument(ctx, docKey, origin, force)
+
+	var detail FlushDetail
+	var err error
+	if detailed, ok := s.saver.(DetailedDocumentSaver); ok {
+		detail, err = detailed.FlushDocumentDetailed(ctx, docKey, origin, force)
+	} else {
+		err = s.saver.FlushDocument(ctx, docKey, origin, force)
+	}
+
 	if err != nil {
 		s.logger.Error("document flush failed", "key", docKey, "err", err)
 		if convert.NonRecoverableConvertError(err) {
@@ -387,16 +436,34 @@ func (s *saveScheduler) runOneFlush(docKey, origin string, force bool) error {
 		} else {
 			notifyForceSaveResult(docKey, false)
 		}
+		// Tell clients the flush failed. Without this the editor keeps believing the save
+		// succeeded, because unSaveLock already cleared its retry timer.
+		broadcastSaveOutcome(docKey, SaveOutcome{
+			Key:      docKey,
+			Success:  false,
+			Force:    force,
+			Sequence: s.nextOutcomeSeq(docKey),
+			Error:    err.Error(),
+		})
 		return err
 	}
 
-	s.logger.Debug("document flush ok", "key", docKey, "force", force)
+	s.logger.Debug("document flush ok", "key", docKey, "force", force, "rolledBack", detail.RolledBack)
 	// finalizePersist already acknowledges converted blobs. Only clear an empty
 	// journal; do not compare counts before/after flush — acknowledging shrinks the
 	// journal and can look like "no progress" even when new blobs arrived mid-flush.
 	if !hasPendingChanges(docCache) {
 		clearChanges(docCache)
 	}
+	broadcastSaveOutcome(docKey, SaveOutcome{
+		Key:        docKey,
+		Success:    true,
+		Force:      force,
+		RolledBack: detail.RolledBack,
+		Bridge:     detail.Bridge,
+		Bytes:      detail.Bytes,
+		Sequence:   s.nextOutcomeSeq(docKey),
+	})
 	return nil
 }
 
@@ -698,6 +765,14 @@ func (h *Handler) handleSaveChanges(sess *session, msg map[string]any, docKey st
 		return
 	}
 	if h.Scheduler.isForceArmed(docKey) {
+		// A force save is armed and will flush (or its fallback timer will). Record that this
+		// batch's endSaveChanges is still outstanding so forceSaveStart can flush immediately
+		// instead of waiting out the fallback, then still schedule a debounced flush so the
+		// batch is persisted even if the force save never completes. Previously this returned
+		// without scheduling anything, so an interrupted force save deferred the autosave by
+		// the full force-save fallback delay (5s) regardless of the configured save delay.
+		h.Scheduler.markPendingEndSave(docKey)
+		h.Scheduler.schedule(docKey, origin, force)
 		return
 	}
 	h.Scheduler.schedule(docKey, origin, force)

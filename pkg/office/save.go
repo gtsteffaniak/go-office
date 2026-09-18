@@ -58,30 +58,46 @@ func (s *Server) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	callback.WriteOK(w)
 }
 
+// PersistOutcome reports what persistDocument did.
+type PersistOutcome struct {
+	// AckBlobs is how many journal blobs were converted and acknowledged.
+	AckBlobs int
+	// RolledBack reports the target format was unwritable and OOXML bridge bytes were
+	// persisted at the original path (assemblyFormatAsOrigin).
+	RolledBack bool
+	// Bridge names the OOXML format persisted when RolledBack is true.
+	Bridge convert.SaveBridge
+	// Bytes is the size of the persisted file.
+	Bytes int64
+	// Snapshot identifies the exact journal entries converted, for transactional
+	// acknowledgement. Zero when nothing was converted.
+	Snapshot changes.Snapshot
+}
+
 // PersistDocument converts Editor.bin in cache and writes to Storage.
 func (s *Server) PersistDocument(ctx context.Context, docKey string) error {
-	ackBlobs, err := s.persistDocument(ctx, docKey, true)
+	out, err := s.persistDocument(ctx, docKey, true)
 	if err != nil {
 		return err
 	}
-	return s.finalizePersist(docKey, ackBlobs)
+	return s.finalizePersist(docKey, out.AckBlobs)
 }
 
-func (s *Server) persistDocument(ctx context.Context, docKey string, ackOnSuccess bool) (int, error) {
+func (s *Server) persistDocument(ctx context.Context, docKey string, ackOnSuccess bool) (PersistOutcome, error) {
 	doc, ok := s.sessions.Lookup(docKey)
 	if !ok {
-		return 0, fmt.Errorf("office: unknown document key %q", docKey)
+		return PersistOutcome{}, fmt.Errorf("office: unknown document key %q", docKey)
 	}
 	callbackOnly := doc.Path == "" && strings.TrimSpace(doc.CallbackURL) != ""
 	if doc.Path == "" && !callbackOnly {
-		return 0, fmt.Errorf("office: no storage path or callback URL for key %q", docKey)
+		return PersistOutcome{}, fmt.Errorf("office: no storage path or callback URL for key %q", docKey)
 	}
 	ext := strings.TrimPrefix(strings.ToLower(doc.FileType), ".")
 	if ext == "" {
-		return 0, fmt.Errorf("office: missing file type for key %q", docKey)
+		return PersistOutcome{}, fmt.Errorf("office: missing file type for key %q", docKey)
 	}
 	if convert.IsBrowserEditorFormat(ext) {
-		return 0, fmt.Errorf("office: save not supported for %s format", ext)
+		return PersistOutcome{}, fmt.Errorf("office: save not supported for %s format", ext)
 	}
 
 	cacheDir := filepath.Join(s.cacheDir(), docKey)
@@ -89,12 +105,12 @@ func (s *Server) persistDocument(ctx context.Context, docKey string, ackOnSucces
 		if s.opts.Logger != nil {
 			s.opts.Logger.Debug("persist skipped; no pending changes", "key", docKey)
 		}
-		return 0, nil
+		return PersistOutcome{}, nil
 	}
 
 	conv, err := s.converter()
 	if err != nil {
-		return 0, err
+		return PersistOutcome{}, err
 	}
 
 	outPath := filepath.Join(cacheDir, "saved."+ext)
@@ -103,67 +119,94 @@ func (s *Server) persistDocument(ctx context.Context, docKey string, ackOnSucces
 		s.opts.Logger.Debug("persist convert", "key", docKey, "path", doc.Path, "ext", ext, "pendingChanges", pending, "callbackOnly", callbackOnly)
 	}
 	var ackBlobs int
+	var rolledBack bool
+	var rollbackBridge convert.SaveBridge
+	var lastSnapshot changes.Snapshot
+	var outcome PersistOutcome
 	for round := 0; ; round++ {
 		if round >= maxPersistCoalesceRounds {
-			return 0, fmt.Errorf("office: coalesce round limit exceeded for key %q", docKey)
+			return PersistOutcome{}, fmt.Errorf("office: coalesce round limit exceeded for key %q", docKey)
 		}
-		var beforePending int
-		beforePending, err = changes.Count(cacheDir)
-		if err != nil {
-			return 0, err
+		res, convErr := s.convertDocument(ctx, conv, cacheDir, outPath, ext)
+		if convErr != nil {
+			return PersistOutcome{}, convErr
 		}
-		ackBlobs, err = s.convertDocument(ctx, conv, cacheDir, outPath, ext)
-		if err != nil {
-			return 0, err
+		ackBlobs = res.AckBlobs
+		lastSnapshot = res.Snapshot
+		if res.RolledBack {
+			rolledBack = true
+			rollbackBridge = res.Bridge
 		}
-		var pendingCount int
-		pendingCount, err = changes.Count(cacheDir)
-		if err != nil {
-			return 0, err
+		// converted is the number of journal entries the converter actually consumed. It is
+		// the only sound measure of progress: the raw journal length can grow without bound
+		// while a busy editor appends mid-flush, so comparing totals reports false "no
+		// progress" (or hides real lack of progress) depending on timing.
+		converted := res.Snapshot.BlobCount
+		if converted == 0 {
+			converted = ackBlobs
 		}
-		if pendingCount <= ackBlobs {
+		if converted == 0 {
 			break
 		}
-		if ackBlobs == 0 {
+		pendingAfterConvert, countErr := changes.Count(cacheDir)
+		if countErr != nil {
+			return PersistOutcome{}, countErr
+		}
+		if pendingAfterConvert <= converted {
 			break
 		}
 		if s.opts.Logger != nil {
 			s.opts.Logger.Debug("persist coalescing mid-flush changes",
 				"key", docKey,
-				"converted", ackBlobs,
-				"pending", pendingCount,
+				"converted", converted,
+				"pending", pendingAfterConvert,
 				"round", round+1,
 			)
 		}
-		// New blobs arrived during x2t. Rebuild Editor.bin from the partial output
-		// and acknowledge converted blobs before applying the remainder.
-		if err = s.refreshEditorBinFromSaved(ctx, cacheDir, outPath); err != nil {
-			return 0, err
+		// New blobs arrived during x2t. Rebuild Editor.bin from the partial output and
+		// acknowledge exactly the converted snapshot before applying the remainder.
+		if refreshErr := s.refreshEditorBinFromSaved(ctx, cacheDir, outPath); refreshErr != nil {
+			return PersistOutcome{}, refreshErr
 		}
-		if err = changes.Acknowledge(cacheDir, ackBlobs); err != nil {
-			return 0, err
+		removed, ackErr := changes.AcknowledgeSnapshot(cacheDir, res.Snapshot)
+		if ackErr != nil {
+			return PersistOutcome{}, ackErr
 		}
 		changes.RemoveSnapshot(cacheDir)
-		var afterPending int
-		afterPending, err = changes.Count(cacheDir)
-		if err != nil {
-			return 0, err
+		if removed == 0 {
+			// The journal no longer starts with the converted snapshot, so nothing was
+			// removed and another round cannot make progress on the same snapshot.
+			return PersistOutcome{}, fmt.Errorf(
+				"office: coalesce made no journal progress for key %q (converted=%d pending=%d)",
+				docKey, converted, pendingAfterConvert)
 		}
-		if afterPending >= beforePending {
-			return 0, fmt.Errorf("office: coalesce made no journal progress for key %q", docKey)
-		}
+	}
+	if rolledBack && s.opts.Logger != nil {
+		s.opts.Logger.Warn("saved with assembly rollback (OOXML bytes at original path)",
+			"key", docKey,
+			"ext", ext,
+			"bridge", string(rollbackBridge),
+			"path", doc.Path,
+		)
 	}
 
 	f, err := os.Open(outPath)
 	if err != nil {
-		return 0, err
+		return PersistOutcome{}, err
 	}
 	defer f.Close()
 	raw, err := io.ReadAll(f)
 	if err != nil {
-		return 0, err
+		return PersistOutcome{}, err
 	}
 	raw = convert.NormalizePersistedOutput(ext, raw)
+	outcome = PersistOutcome{
+		AckBlobs:   ackBlobs,
+		RolledBack: rolledBack,
+		Bridge:     rollbackBridge,
+		Bytes:      int64(len(raw)),
+		Snapshot:   lastSnapshot,
+	}
 	xlsxInfo, _ := os.Stat(filepath.Join(cacheDir, "changes-applied.xlsx"))
 	xlsxBytes := int64(0)
 	if xlsxInfo != nil {
@@ -180,7 +223,7 @@ func (s *Server) persistDocument(ctx context.Context, docKey string, ackOnSucces
 
 	if !callbackOnly {
 		if err := s.storage.Save(ctx, doc.Path, bytes.NewReader(raw)); err != nil {
-			return 0, err
+			return PersistOutcome{}, err
 		}
 		s.sessions.UpsertDoc(session.Document{Key: docKey, Path: doc.Path, FileType: ext, UpdatedAt: time.Now().UTC()})
 		if s.opts.Logger != nil {
@@ -191,26 +234,45 @@ func (s *Server) persistDocument(ctx context.Context, docKey string, ackOnSucces
 	}
 	if ackBlobs > 0 {
 		if err := s.refreshEditorBinFromSaved(ctx, cacheDir, outPath); err != nil {
-			return 0, err
+			return PersistOutcome{}, err
 		}
 	}
 	if ackOnSuccess {
-		if err := s.finalizePersist(docKey, ackBlobs); err != nil {
-			return 0, err
+		if err := s.finalizePersistOutcome(docKey, outcome); err != nil {
+			return outcome, err
 		}
-		return 0, nil
+		return outcome, nil
 	}
-	return ackBlobs, nil
+	return outcome, nil
 }
 
 func (s *Server) finalizePersist(docKey string, ackBlobs int) error {
+	return s.finalizePersistOutcome(docKey, PersistOutcome{AckBlobs: ackBlobs})
+}
+
+// finalizePersistOutcome acknowledges converted blobs and drops the transient snapshot.
+// When the outcome carries the converted snapshot, acknowledgement is verified against the
+// journal so blobs that were never applied are not silently discarded.
+func (s *Server) finalizePersistOutcome(docKey string, outcome PersistOutcome) error {
 	cacheDir := filepath.Join(s.cacheDir(), docKey)
-	if ackBlobs > 0 {
-		if err := changes.Acknowledge(cacheDir, ackBlobs); err != nil {
+	switch {
+	case outcome.Snapshot.BlobCount > 0:
+		removed, err := changes.AcknowledgeSnapshot(cacheDir, outcome.Snapshot)
+		if err != nil {
 			return err
 		}
-	} else if !hasPendingChanges(cacheDir) {
-		_ = changes.Clear(cacheDir)
+		if removed == 0 && outcome.AckBlobs > 0 && s.opts.Logger != nil {
+			s.opts.Logger.Warn("save acknowledgement skipped; journal changed since conversion",
+				"key", docKey, "converted", outcome.AckBlobs)
+		}
+	case outcome.AckBlobs > 0:
+		if err := changes.Acknowledge(cacheDir, outcome.AckBlobs); err != nil {
+			return err
+		}
+	default:
+		if !hasPendingChanges(cacheDir) {
+			_ = changes.Clear(cacheDir)
+		}
 	}
 	changes.RemoveSnapshot(cacheDir)
 	s.afterPersistCacheUpdate(cacheDir)

@@ -11,6 +11,10 @@ testdata/.work/
 *.test
 coverage.out
 
+# Workspace-local Go build/temp dirs (used when GOCACHE is read-only)
+/.gocache/
+/.gotmp/
+
 # IDE
 .idea/
 .vscode/

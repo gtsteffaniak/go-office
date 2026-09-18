@@ -23,6 +23,7 @@ import (
 
 	"github.com/quantumx-apps/go-office/internal/home"
 	"github.com/quantumx-apps/go-office/internal/netutil"
+	"github.com/quantumx-apps/go-office/internal/ws"
 	"github.com/quantumx-apps/go-office/pkg/config"
 	office "github.com/quantumx-apps/go-office/pkg/office"
 )
@@ -135,6 +136,9 @@ func Attach(srv *office.Server, store office.Storage, opts Options) error {
 	})
 	api.HandleFunc("GET /thumbnail", func(w http.ResponseWriter, r *http.Request) {
 		h.serveThumbnail(w, r)
+	})
+	api.HandleFunc("GET /savestate", func(w http.ResponseWriter, r *http.Request) {
+		h.serveSaveState(w, r)
 	})
 	srv.Mount(apiBase+"/", http.StripPrefix(apiBase, api))
 	return nil
@@ -347,6 +351,45 @@ func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) serveCallback(w http.ResponseWriter, r *http.Request) {
 	h.office.HandleCallback(w, r)
+}
+
+// serveSaveState reports the authoritative last-save outcome for a demo file.
+//
+// The demo viewer used to discover save completion by hashing the served file on disk,
+// which is why a persisted save could still look unsaved and why failures only surfaced
+// after a long timeout. This endpoint exposes the backend's own flush result instead.
+func (h *Handler) serveSaveState(w http.ResponseWriter, r *http.Request) {
+	file := strings.TrimSpace(r.URL.Query().Get("file"))
+	if file == "" || !h.isAllowedSample(file) {
+		http.NotFound(w, r)
+		return
+	}
+	key := demoDocumentKey(file)
+	outcome, ok := ws.LastSaveOutcome(key)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	if !ok {
+		// No flush has settled yet for this key. Report a well-formed "pending" state so the
+		// client can distinguish "nothing saved yet" from "saved".
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"key":     key,
+			"known":   false,
+			"success": false,
+		})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"key":        outcome.Key,
+		"known":      true,
+		"success":    outcome.Success,
+		"force":      outcome.Force,
+		"rolledBack": outcome.RolledBack,
+		"bridge":     outcome.Bridge,
+		"bytes":      outcome.Bytes,
+		"sequence":   outcome.Sequence,
+		"time":       outcome.Time,
+		"error":      outcome.Error,
+	})
 }
 
 func (h *Handler) serveThumbnail(w http.ResponseWriter, r *http.Request) {

@@ -99,8 +99,14 @@ func TestDemoLandingAndConfig(t *testing.T) {
 	if strings.Contains(body, "data-content-ready") || strings.Contains(body, "beginContentReadyPoll") {
 		t.Fatal("viewer should not use content-ready polling")
 	}
-	if !strings.Contains(body, "fetchDemoFileFingerprint") {
-		t.Fatal("expected fingerprint-based save verification in viewer page")
+	if strings.Contains(body, "fetchDemoFileFingerprint") || strings.Contains(body, "crypto.subtle.digest") {
+		t.Fatal("viewer must not verify saves by hashing the served file; use /demo/savestate")
+	}
+	if !strings.Contains(body, "/demo/savestate") {
+		t.Fatal("expected server-driven save verification via /demo/savestate in viewer page")
+	}
+	if !strings.Contains(body, "data-save-error") || !strings.Contains(body, "data-save-done") {
+		t.Fatal("expected save status attributes in viewer page")
 	}
 	if !strings.Contains(body, "rel=\"preload\"") {
 		t.Fatal("expected api.js preload in viewer page")

@@ -25,13 +25,29 @@ const DOCUMENT_READY_TIMEOUT = Number(process.env.PLAYWRIGHT_DOCUMENT_READY_TIME
 const DEMO_WARM_TIMEOUT = Number(process.env.PLAYWRIGHT_WARM_TIMEOUT ?? 60_000);
 const WARM_REQUEST_TIMEOUT = Number(process.env.PLAYWRIGHT_WARM_REQUEST_MS ?? 30_000);
 const CONTENT_FIND_TIMEOUT = Number(process.env.PLAYWRIGHT_CONTENT_FIND_TIMEOUT ?? 15_000);
-// Budget for the persisted-marker wait. This must fit inside the per-test timeout together
-// with the readiness gates that run before it (see setCellContent/editCellForSave), otherwise
-// a slow test exhausts the test budget and reports a confusing locator error instead of the
-// real failure. A healthy flush lands in ~6s and the marker is visible ~2s later, so the
-// previous 120s was ~20x the real need and dominated the budget.
+// Budget for the persisted-marker wait. A healthy flush lands in ~6s and the marker is
+// visible ~2s later, so this is generous. It must fit inside the per-test timeout together
+// with the readiness gates that run before it (see setCellContent/editCellForSave); the
+// worst-case sum of those gates is what actually determines whether a failure is reported
+// as a save problem or as a bare test timeout.
 const SAVE_DONE_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_DONE_TIMEOUT ?? 45_000);
 const INTERACTIVE_SETTLE_MS = 400;
+
+// Cell-editing gates are SEQUENTIAL, so their timeouts add up. The per-test timeout is
+// PLAYWRIGHT_SAVE_TEST_TIMEOUT (150s) and it must also cover warm + page.goto + editor boot
+// (~20-35s under parallel load). Keeping each gate modest is what ensures a failure is
+// reported as a named problem (e.g. "cell editor not ready") rather than as a bare
+// "Test timeout exceeded" after the browser has already been torn down.
+//
+// Budget: warm/boot ~35s + gates ~45s + marker 45s = ~125s, inside 150s.
+const CELL_SELECT_TIMEOUT = Number(process.env.PLAYWRIGHT_CELL_SELECT_TIMEOUT ?? 20_000);
+const CELL_INTERACTIVE_TIMEOUT = Number(process.env.PLAYWRIGHT_CELL_INTERACTIVE_TIMEOUT ?? 20_000);
+const CELL_SDK_TIMEOUT = Number(process.env.PLAYWRIGHT_CELL_SDK_TIMEOUT ?? 20_000);
+const CELL_SDK_TIMEOUT_FALLBACK = Number(
+  process.env.PLAYWRIGHT_CELL_SDK_TIMEOUT_FALLBACK ?? 8_000,
+);
+const CELL_ACK_TIMEOUT = Number(process.env.PLAYWRIGHT_CELL_ACK_TIMEOUT ?? 10_000);
+const CELL_DIAG_TIMEOUT = Number(process.env.PLAYWRIGHT_CELL_DIAG_TIMEOUT ?? 3_000);
 
 /** Spreadsheet name box (e.g. B2) and formula bar (cell value). */
 const CELL_NAME_INPUT = "#ce-cell-name";
@@ -662,10 +678,26 @@ async function selectCellViaUi(frame: FrameLocator, ref: string): Promise<boolea
   return cellNameShowsRef(frame, ref);
 }
 
-/** Select a spreadsheet cell via SDK when available, otherwise the name box UI. */
+/**
+ * Select a spreadsheet cell via SDK when available, otherwise the name box UI.
+ *
+ * Both waits are bounded well below EDITOR_LOAD_TIMEOUT. They are sequential, so the
+ * previous 45s + 45s could consume 90s of a 150s test budget on a worker whose cell editor
+ * was never going to become ready — the failure then surfaced as a teardown error instead
+ * of naming the real problem. Failing fast here leaves budget for the save steps that
+ * follow and produces an actionable error.
+ */
 async function selectCell(frame: FrameLocator, ref: string): Promise<void> {
   const cellName = frame.locator(CELL_NAME_INPUT).first();
-  await expect(cellName).toBeEnabled({ timeout: EDITOR_LOAD_TIMEOUT });
+  const selectTimeout = CELL_SELECT_TIMEOUT;
+  try {
+    await expect(cellName).toBeEnabled({ timeout: selectTimeout });
+  } catch {
+    throw new Error(
+      `cell editor not ready: name box #ce-cell-name did not become enabled within ${selectTimeout}ms ` +
+        `(loadMask=${await isLoadMaskBlocking(frame).catch(() => "?")})`,
+    );
+  }
   await expect
     .poll(
       async () => {
@@ -677,7 +709,7 @@ async function selectCell(frame: FrameLocator, ref: string): Promise<void> {
         }
         return selectCellViaUi(frame, ref);
       },
-      { timeout: EDITOR_LOAD_TIMEOUT, intervals: [200, 500, 1000] },
+      { timeout: selectTimeout, intervals: [200, 500, 1000] },
     )
     .toBe(true);
 }
@@ -887,7 +919,7 @@ export async function setCellContent(
   // the interactive gate is advisory: the edit is still attempted, because a UI/API
   // readback being unavailable does not mean the editor cannot accept input.
   const interactive = await waitForEditorInteractive(page, editor, {
-    timeoutMs: Number(process.env.PLAYWRIGHT_CELL_INTERACTIVE_TIMEOUT ?? 20_000),
+    timeoutMs: CELL_INTERACTIVE_TIMEOUT,
     required: false,
   });
   const frame = getEditorFrame(page, editor);
@@ -912,8 +944,8 @@ export async function setCellContent(
         },
         {
           timeout: interactive
-            ? Number(process.env.PLAYWRIGHT_CELL_SDK_TIMEOUT ?? 20_000)
-            : Number(process.env.PLAYWRIGHT_CELL_SDK_TIMEOUT_FALLBACK ?? 8_000),
+            ? CELL_SDK_TIMEOUT
+            : CELL_SDK_TIMEOUT_FALLBACK,
           intervals: [200, 500, 1000],
         },
       )
@@ -971,7 +1003,7 @@ export async function editCellForSave(
       .poll(async () => cellShowsValue(page, frame, editor, ref, value), {
         // Bounded and short: this is a convenience check, not the test contract. Waiting
         // EDITOR_LOAD_TIMEOUT here burned most of the test budget on slow workers.
-        timeout: Number(process.env.PLAYWRIGHT_CELL_ACK_TIMEOUT ?? 10_000),
+        timeout: CELL_ACK_TIMEOUT,
         intervals: [200, 500, 1000],
       })
       .toBe(true);
@@ -985,7 +1017,7 @@ export async function editCellForSave(
     // Diagnostics are best-effort and must not stall the test: on a slow or wedged worker
     // these locators can themselves block, which is the very condition they report. Bound
     // each one so a failure stays a fast, informative failure.
-    const diag = { timeout: Number(process.env.PLAYWRIGHT_CELL_DIAG_TIMEOUT ?? 3_000) };
+    const diag = { timeout: CELL_DIAG_TIMEOUT };
     outcome.nameBox = await frame
       .locator(CELL_NAME_INPUT)
       .first()
@@ -1814,7 +1846,17 @@ export type PersistOptions = {
   label?: string;
 };
 
-/** Poll demo file bytes until a caller-supplied postcondition is true. */
+/**
+ * Poll demo file bytes until a caller-supplied postcondition is true.
+ *
+ * The baseline fingerprint fetch is best-effort. It used to run unprotected before the
+ * poll, so if the test budget expired at that moment Playwright had already torn down the
+ * browser and APIRequestContext; the request then rejected with
+ * "Target page, context or browser has been closed" and REPLACED the real failure. A
+ * successful save could therefore be reported as a context-teardown error, which is
+ * exactly what happened to the csv round-trip test (the server had persisted the marker
+ * 1.5s after the edit; the test never got to observe it).
+ */
 export async function waitForPersistedContent(
   request: APIRequestContext,
   filePath: string,
@@ -1822,8 +1864,13 @@ export async function waitForPersistedContent(
   opts?: PersistOptions,
 ): Promise<void> {
   const timeoutMs = opts?.timeoutMs ?? SAVE_DONE_TIMEOUT;
-  const beforeFp = fileFingerprint(await fetchDemoFileBody(request, filePath));
   const label = opts?.label ?? "persisted content postcondition";
+  let beforeFp = "<unavailable>";
+  try {
+    beforeFp = fileFingerprint(await fetchDemoFileBody(request, filePath));
+  } catch {
+    // Teardown or a transient network error; the poll below reports the real problem.
+  }
   try {
     await expect
       .poll(
@@ -1845,7 +1892,14 @@ export async function waitForPersistedContent(
       )
       .toBe(true);
   } catch (err) {
-    const afterFp = fileFingerprint(await fetchDemoFileBody(request, filePath));
+    // Also best-effort: if the failure IS a teardown, this fetch fails the same way and
+    // would otherwise mask the original error a second time.
+    let afterFp = "<unavailable>";
+    try {
+      afterFp = fileFingerprint(await fetchDemoFileBody(request, filePath));
+    } catch {
+      // keep "<unavailable>"
+    }
     throw new Error(
       `${String(err)}\n${label} not met within ${timeoutMs}ms\nfingerprint before=${beforeFp}\nfingerprint after=${afterFp}`,
     );

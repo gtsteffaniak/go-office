@@ -169,6 +169,11 @@ check-sample-matrix: check-samples
 	@chmod +x scripts/check-sample-matrix.sh
 	@scripts/check-sample-matrix.sh "$(SAMPLES_DIR)"
 
+# Specs are transpiled without full type checking by `playwright test`, so an undefined
+# helper reference only fails at runtime. Catch it before running the suite.
+check-test-imports:
+	@node scripts/check-test-imports.mjs
+
 extract-sample-manifest:
 	@echo "==> Playwright sample manifest"
 	$(GO) run ./scripts/extract-sample-expectations.go
@@ -354,12 +359,12 @@ playwright-npm:
 	@echo "==> Playwright npm dependencies"
 	cd frontend && npm install
 
-test-playwright: ensure-assets check-sample-matrix check-docker
+test-playwright: ensure-assets check-sample-matrix check-test-imports check-docker
 	@echo "==> Playwright E2E (Docker, all projects)"
 	GOOS=linux $(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
 	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_IMAGE)" --target test -f "$(PLAYWRIGHT_DOCKERFILE)" .
 
-test-playwright-project: ensure-assets check-sample-matrix check-docker
+test-playwright-project: ensure-assets check-sample-matrix check-test-imports check-docker
 	@if [ -z "$(PLAYWRIGHT_PROJECT)" ]; then \
 		echo "error: PLAYWRIGHT_PROJECT is required (e.g. chromium, chromium-save, chromium-post-save)"; \
 		exit 1; \

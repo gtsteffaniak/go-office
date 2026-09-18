@@ -25,7 +25,12 @@ const DOCUMENT_READY_TIMEOUT = Number(process.env.PLAYWRIGHT_DOCUMENT_READY_TIME
 const DEMO_WARM_TIMEOUT = Number(process.env.PLAYWRIGHT_WARM_TIMEOUT ?? 60_000);
 const WARM_REQUEST_TIMEOUT = Number(process.env.PLAYWRIGHT_WARM_REQUEST_MS ?? 30_000);
 const CONTENT_FIND_TIMEOUT = Number(process.env.PLAYWRIGHT_CONTENT_FIND_TIMEOUT ?? 15_000);
-const SAVE_DONE_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_DONE_TIMEOUT ?? 120_000);
+// Budget for the persisted-marker wait. This must fit inside the per-test timeout together
+// with the readiness gates that run before it (see setCellContent/editCellForSave), otherwise
+// a slow test exhausts the test budget and reports a confusing locator error instead of the
+// real failure. A healthy flush lands in ~6s and the marker is visible ~2s later, so the
+// previous 120s was ~20x the real need and dominated the budget.
+const SAVE_DONE_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_DONE_TIMEOUT ?? 45_000);
 const INTERACTIVE_SETTLE_MS = 400;
 
 /** Spreadsheet name box (e.g. B2) and formula bar (cell value). */

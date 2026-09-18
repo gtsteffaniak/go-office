@@ -48,11 +48,23 @@ test("post-save rapid double save: sample.docx", async ({ page, request }, testI
   await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
 
-  await applyMinimalSaveEdit(page, "word", markerA);
-  await waitForPersistedMarker(request, file, markerA, { page });
+  const editA = await applyMinimalSaveEdit(page, "word", markerA);
+  await expectPersistedMarker(
+    request,
+    file,
+    markerA,
+    page,
+    editA ? `cell edit: ${describeCellEdit(editA)}` : "edit: word append (A)",
+  );
 
-  await applyMinimalSaveEdit(page, "word", markerB);
-  await waitForPersistedMarker(request, file, markerB, { page });
+  const editB = await applyMinimalSaveEdit(page, "word", markerB);
+  await expectPersistedMarker(
+    request,
+    file,
+    markerB,
+    page,
+    editB ? `cell edit: ${describeCellEdit(editB)}` : "edit: word append (B)",
+  );
 
   await assertEditorStable(page, STABLE_MS);
 });

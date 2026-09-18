@@ -2,7 +2,12 @@ import { defineConfig, devices } from "@playwright/test";
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:8080";
 const workers = Number(process.env.PLAYWRIGHT_WORKERS ?? 8);
-const saveTestTimeout = Number(process.env.PLAYWRIGHT_SAVE_TEST_TIMEOUT ?? 240_000);
+// Save-project budget. A healthy cell/word save test completes in roughly 60-90s (the
+// server-side flush is ~6s; the rest is editor boot and readiness polling). 240s allowed
+// ~3x slack, so a hang burned the full budget and, with 8 parallel workers draining, a
+// failing project took ~400s to report. 150s keeps headroom over the slowest observed
+// pass while halving the cost of a hang.
+const saveTestTimeout = Number(process.env.PLAYWRIGHT_SAVE_TEST_TIMEOUT ?? 150_000);
 
 const sharedUse = {
   baseURL,

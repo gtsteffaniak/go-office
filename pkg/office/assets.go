@@ -37,11 +37,22 @@ func ValidAssetDir(dir string) bool {
 }
 
 // DiscoverAssets scans candidate directories for a complete asset tree.
-// No network I/O. Returns (bundle, true, nil) when found, (zero, false, nil) when not.
+// It performs no network I/O: the returned tree is patched in place but nothing is
+// downloaded. Returns (bundle, true, nil) when found, (zero, false, nil) when not.
+//
+// The discovered tree is patched before being returned. go-office ships hotfixes to sdkjs
+// that the pinned upstream release does not contain, and those patches must be present in
+// whatever tree is actually served. Patching here — rather than only on the fetch path —
+// makes an already-present tree behave identically to a freshly downloaded one, so a
+// developer or CI job reusing a cached assets/ directory cannot silently run unpatched
+// bundles. ApplyPatches is idempotent, so repeated calls are harmless.
 func DiscoverAssets(opts AssetOptions) (AssetBundle, bool, error) {
 	for _, dir := range assetCandidateDirs(opts.Dir) {
 		if !assetfetch.ValidAssetDir(dir) {
 			continue
+		}
+		if err := assetfetch.ApplyPatches(dir); err != nil {
+			return AssetBundle{}, false, fmt.Errorf("office: patch assets in %s: %w", dir, err)
 		}
 		bundle := AssetBundle{
 			Dir:     dir,

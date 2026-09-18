@@ -165,8 +165,11 @@ func TestPatchSDKJSForwardsRealCoauthoringToken(t *testing.T) {
 			if !bytes.Contains(got, coauthoringTokenFix) {
 				t.Fatalf("%s: token patch not applied; _token does not prefer the config token", editor)
 			}
-			if !bytes.Contains(got, []byte("this._token=this.jwtOpen||this._token")) {
-				t.Fatalf("%s: unexpected patch result: %s", editor, got)
+			// The guard must test presence, not truthiness: document.token is legitimately
+			// "" when the server runs without JWT verification, and a falsy fallback would
+			// keep sdkjs's hardcoded placeholder on the wire.
+			if bytes.Contains(got, []byte("this._token=this.jwtOpen||this._token")) {
+				t.Fatalf("%s: token patch uses a falsy guard and would keep the placeholder: %s", editor, got)
 			}
 
 			// Idempotent: a second pass must not double-apply or error.
@@ -181,6 +184,44 @@ func TestPatchSDKJSForwardsRealCoauthoringToken(t *testing.T) {
 				t.Fatal("patch is not idempotent")
 			}
 		})
+	}
+}
+
+// TestPatchSDKJSUpgradesSupersededTokenFix covers an asset tree patched by an earlier build
+// whose token patch used a falsy guard. That text replaces the buggy anchor, so without an
+// explicit upgrade path the required patch would be reported as an unsupported bundle and
+// every build would fail until the assets were deleted.
+func TestPatchSDKJSUpgradesSupersededTokenFix(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "sdkjs", "word")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var b bytes.Buffer
+	b.WriteString("prefix,")
+	for _, anchor := range requiredAnchorsFor("word") {
+		b.Write(anchor)
+		b.WriteByte(',')
+	}
+	b.Write(coauthoringTokenFixSuperseded)
+	b.WriteString(",suffix")
+	path := filepath.Join(dir, "sdk-all-min.js")
+	if err := os.WriteFile(path, b.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := patchSDKJS(root); err != nil {
+		t.Fatalf("patchSDKJS must upgrade a superseded revision, got: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(got, coauthoringTokenFix) {
+		t.Fatalf("superseded token fix was not upgraded: %s", got)
+	}
+	if bytes.Contains(got, coauthoringTokenFixSuperseded) {
+		t.Fatalf("superseded token fix still present: %s", got)
 	}
 }
 

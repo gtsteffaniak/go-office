@@ -2,6 +2,7 @@ package office
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"net/http"
@@ -35,6 +36,11 @@ type Server struct {
 
 	finishOnce sync.Once
 	closeOnce  sync.Once
+
+	// ephemeralKey signs editor config tokens when no JWT secret is configured, so the
+	// editor always receives a real token instead of falling back to its hardcoded one.
+	ephemeralKeyOnce sync.Once
+	ephemeralKey     []byte
 }
 
 // New creates a document server. AssetDir may be empty for protocol-only testing.
@@ -132,17 +138,45 @@ func (s *Server) BuildEditorConfig(ctx context.Context, req config.EditorRequest
 		CallbackURL: req.CallbackURL,
 	})
 
-	token := ""
-	if len(s.opts.JWTSecret) > 0 {
-		cfg := config.Build(req, "")
-		t := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims(cfg))
-		sig, err := t.SignedString(s.opts.JWTSecret)
-		if err != nil {
-			return nil, fmt.Errorf("office: sign config: %w", err)
-		}
-		token = sig
+	// The signed token is emitted even when JWT verification is disabled.
+	//
+	// sdkjs takes the top-level config `token` and unconditionally assigns it over the
+	// document token (api.js: `_config.document.token = _config.token`). Omitting it
+	// therefore does not mean "no token" — it means the document token becomes undefined,
+	// docInfo.get_Token() returns undefined, and the editor substitutes its own hardcoded
+	// placeholder ("fghhfgsjdgfjs") into the coauthoring auth packet. A server with
+	// verification off happens to accept that, so the defect is invisible until a secret is
+	// configured and every session is then rejected. Signing unconditionally keeps the
+	// placeholder unreachable in both modes; verification remains governed by JWTSecret.
+	cfg := config.Build(req, "")
+	t := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims(cfg))
+	sig, err := t.SignedString(s.signingKey())
+	if err != nil {
+		return nil, fmt.Errorf("office: sign config: %w", err)
 	}
-	return config.Build(req, token), nil
+	return config.Build(req, sig), nil
+}
+
+// signingKey returns the key used to sign editor config tokens. It is the configured JWT
+// secret when set. Without one the token is not verified, but it must still be a well-formed
+// JWT so the editor forwards it verbatim instead of falling back to its built-in
+// placeholder; a per-process random key keeps the value unguessable and stable for the
+// lifetime of the server.
+func (s *Server) signingKey() []byte {
+	if len(s.opts.JWTSecret) > 0 {
+		return s.opts.JWTSecret
+	}
+	s.ephemeralKeyOnce.Do(func() {
+		buf := make([]byte, 32)
+		if _, err := rand.Read(buf); err != nil {
+			// Fall back to a fixed marker rather than panicking: the token is not verified
+			// in this mode, so predictability has no security consequence here.
+			s.ephemeralKey = []byte("go-office-unverified-config-token")
+			return
+		}
+		s.ephemeralKey = buf
+	})
+	return s.ephemeralKey
 }
 
 // Close releases in-memory session state and stops background workers.

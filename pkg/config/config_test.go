@@ -86,3 +86,25 @@ func TestViewModeDisablesEditPermission(t *testing.T) {
 		t.Fatalf("view mode permissions.edit = %v", perms["edit"])
 	}
 }
+
+// sdkjs reads document.token as docInfo.get_Token() and sends it as the coauthoring auth
+// `token`. When the field is absent get_Token() is undefined and sdkjs quietly substitutes
+// its hardcoded placeholder ("fghhfgsjdgfjs"), which a server with JWT verification disabled
+// accepts — so the bug stays hidden until a secret is configured, and then every session is
+// rejected. The field must therefore always be present, including with JWT disabled.
+func TestDocumentTokenAlwaysPresent(t *testing.T) {
+	for _, token := range []string{"", "signed.jwt.value"} {
+		cfg := config.Build(config.EditorRequest{FileType: "docx", DocumentKey: "k"}, token)
+		doc, ok := cfg["document"].(map[string]any)
+		if !ok {
+			t.Fatalf("document type = %T", cfg["document"])
+		}
+		got, present := doc["token"]
+		if !present {
+			t.Fatalf("document.token missing for token=%q; sdkjs would use its hardcoded placeholder", token)
+		}
+		if got != token {
+			t.Fatalf("document.token = %v, want %q", got, token)
+		}
+	}
+}

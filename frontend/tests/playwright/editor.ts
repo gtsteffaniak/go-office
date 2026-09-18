@@ -48,6 +48,9 @@ const CELL_SDK_TIMEOUT_FALLBACK = Number(
 );
 const CELL_ACK_TIMEOUT = Number(process.env.PLAYWRIGHT_CELL_ACK_TIMEOUT ?? 10_000);
 const CELL_DIAG_TIMEOUT = Number(process.env.PLAYWRIGHT_CELL_DIAG_TIMEOUT ?? 3_000);
+// Word/slide save edits treat readiness as advisory. This bounds that advisory wait so the
+// edit is still attempted while there is budget left for the save and the marker poll.
+const WORD_READY_TIMEOUT = Number(process.env.PLAYWRIGHT_WORD_READY_TIMEOUT ?? 20_000);
 
 /** Spreadsheet name box (e.g. B2) and formula bar (cell value). */
 const CELL_NAME_INPUT = "#ce-cell-name";
@@ -497,11 +500,19 @@ export async function warmDemoFile(
   }
 }
 
-/** Editor iframe mounted and document is ready to use (open-format tests). */
+/**
+ * Editor iframe mounted and document is ready to use (open-format tests).
+ *
+ * `required: false` makes the gate advisory so save specs, which assert against the stored
+ * file rather than the UI, are not failed by a worker that is merely slow to boot.
+ */
 export async function waitForEditorReady(
   page: Page,
   editor: SampleFile["editor"],
-): Promise<void> {
+  opts?: { timeoutMs?: number; required?: boolean },
+): Promise<boolean> {
+  const timeoutMs = opts?.timeoutMs ?? DOCUMENT_READY_TIMEOUT;
+  const required = opts?.required ?? true;
   try {
     await waitForDemoWarm(page);
     await page.waitForFunction(
@@ -515,7 +526,7 @@ export async function waitForEditorReady(
           status === "Document ready"
         );
       },
-      { timeout: DOCUMENT_READY_TIMEOUT },
+      { timeout: timeoutMs },
     );
     const app = EDITOR_APP[editor];
     await expect
@@ -526,11 +537,15 @@ export async function waitForEditorReady(
           }
           return isEditorShellReady(getEditorFrame(page, editor), editor);
         },
-        { timeout: DOCUMENT_READY_TIMEOUT },
+        { timeout: timeoutMs },
       )
       .toBe(true);
+    return true;
   } catch (err) {
-    throw new Error(`${String(err)}\nwitness:\n${await editorWitness(page, editor)}`);
+    if (required) {
+      throw new Error(`${String(err)}\nwitness:\n${await editorWitness(page, editor)}`);
+    }
+    return false;
   }
 }
 
@@ -602,14 +617,24 @@ export async function waitForEditorInteractive(
   return interactive;
 }
 
-/** Document is ready to accept a single save-test edit (UI controls or public insertPlainText). */
+/**
+ * Document is ready to accept a single save-test edit (UI controls or public insertPlainText).
+ *
+ * `required: false` makes the whole gate advisory and returns whether the editor reached an
+ * editable state. Save specs assert persistence against the stored file, and a slow worker
+ * that has not finished booting is not evidence that the save is broken — so they call this
+ * best-effort and let the insert itself report a genuine failure.
+ */
 export async function waitForEditorEditable(
   page: Page,
   editor: SampleFile["editor"],
-  timeoutMs = DOCUMENT_READY_TIMEOUT,
-): Promise<void> {
+  opts?: number | { timeoutMs?: number; required?: boolean },
+): Promise<boolean> {
+  const options = typeof opts === "number" ? { timeoutMs: opts } : (opts ?? {});
+  const timeoutMs = options.timeoutMs ?? DOCUMENT_READY_TIMEOUT;
+  const required = options.required ?? true;
   try {
-    await waitForEditorReady(page, editor);
+    await waitForEditorReady(page, editor, { timeoutMs, required });
     const frame = getEditorFrame(page, editor);
     await expect
       .poll(async () => isEditorEditable(page, frame, editor), { timeout: timeoutMs })
@@ -618,8 +643,12 @@ export async function waitForEditorEditable(
     if (editor === "cell") {
       await dismissEditorOverlays(frame);
     }
+    return true;
   } catch (err) {
-    throw new Error(`${String(err)}\nwitness:\n${await editorWitness(page, editor)}`);
+    if (required) {
+      throw new Error(`${String(err)}\nwitness:\n${await editorWitness(page, editor)}`);
+    }
+    return false;
   }
 }
 
@@ -687,31 +716,38 @@ async function selectCellViaUi(frame: FrameLocator, ref: string): Promise<boolea
  * of naming the real problem. Failing fast here leaves budget for the save steps that
  * follow and produces an actionable error.
  */
-async function selectCell(frame: FrameLocator, ref: string): Promise<void> {
-  const cellName = frame.locator(CELL_NAME_INPUT).first();
-  const selectTimeout = CELL_SELECT_TIMEOUT;
-  try {
-    await expect(cellName).toBeEnabled({ timeout: selectTimeout });
-  } catch {
-    throw new Error(
-      `cell editor not ready: name box #ce-cell-name did not become enabled within ${selectTimeout}ms ` +
-        `(loadMask=${await isLoadMaskBlocking(frame).catch(() => "?")})`,
-    );
+async function selectCell(frame: FrameLocator, ref: string): Promise<boolean> {
+  const nameBoxEnabled = await frame
+    .locator(CELL_NAME_INPUT)
+    .first()
+    .isEnabled()
+    .catch(() => false);
+  if (!nameBoxEnabled) {
+    // The document may still be booting: under combined load onDocumentContentReady has
+    // been observed at 15s+, which is inside any reasonable gate but means the name box is
+    // genuinely not usable yet. Return the fact instead of throwing so a caller that
+    // already wrote the value through the SDK is not killed by a slow UI.
+    return false;
   }
-  await expect
-    .poll(
-      async () => {
-        if (await isLoadMaskBlocking(frame)) {
-          return false;
-        }
-        if (await selectCellViaSdk(frame, ref)) {
-          return true;
-        }
-        return selectCellViaUi(frame, ref);
-      },
-      { timeout: selectTimeout, intervals: [200, 500, 1000] },
-    )
-    .toBe(true);
+  try {
+    await expect
+      .poll(
+        async () => {
+          if (await isLoadMaskBlocking(frame)) {
+            return false;
+          }
+          if (await selectCellViaSdk(frame, ref)) {
+            return true;
+          }
+          return selectCellViaUi(frame, ref);
+        },
+        { timeout: CELL_SELECT_TIMEOUT, intervals: [200, 500, 1000] },
+      )
+      .toBe(true);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function readFormulaBarValue(frame: FrameLocator): Promise<string> {
@@ -802,7 +838,9 @@ async function readCellValue(frame: FrameLocator, ref: string): Promise<string> 
     return viaSdk;
   }
 
-  await selectCell(frame, ref);
+  if (!(await selectCell(frame, ref))) {
+    return "";
+  }
   return readFormulaBarValue(frame);
 }
 
@@ -956,15 +994,20 @@ export async function setCellContent(
   }
 
   if (!viaSdk) {
-    await selectCell(frame, ref);
-    await writeFormulaBarValue(frame, value);
+    if (await selectCell(frame, ref)) {
+      await writeFormulaBarValue(frame, value);
+    }
   }
 
   await commitCellEdit(frame);
   if (!(await cellShowsValue(page, frame, editor, ref, value))) {
-    await selectCell(frame, ref);
-    await writeFormulaBarValue(frame, value);
-    await commitCellEdit(frame);
+    // Best-effort retry. The caller (editCellForSave) treats editor-side acknowledgement as
+    // advisory because the persisted file is the contract, so a UI that never becomes usable
+    // must not fail the test here — that only converts a slow worker into a false negative.
+    if (await selectCell(frame, ref)) {
+      await writeFormulaBarValue(frame, value);
+      await commitCellEdit(frame);
+    }
   }
   await settleFrame(frame, 500);
 }
@@ -1283,7 +1326,16 @@ export async function editWordForSave(
   editor: SampleFile["editor"],
   marker: string,
 ): Promise<WordEditOutcome> {
-  await waitForEditorEditable(page, editor);
+  // Advisory, like the cell path: readiness is a UI signal, but the contract these specs
+  // assert is that the edit persists to the stored file. Under combined load the editor has
+  // been observed taking 15s+ to reach document-ready, and hard-failing here meant the edit
+  // was never attempted at all — the marker then never landed and the file fingerprint was
+  // unchanged, which is exactly the "identical before/after fingerprint" failure. insert
+  // below is the real gate; if it is unavailable the editor is genuinely unusable.
+  await waitForEditorEditable(page, editor, {
+    timeoutMs: WORD_READY_TIMEOUT,
+    required: false,
+  });
   const chunk = ` ${marker}`;
   const inserted = await page.evaluate((text: string) => {
     const ed = (window as {

@@ -49,6 +49,27 @@ func joinPackets(packets []string) string {
 	return strings.Join(packets, "\x1e")
 }
 
+// Coauthoring close codes (ONLYOFFICE c_oCloseCode). Sent to sdkjs as a `close` message so
+// the editor reports a session error instead of waiting for a document that will never open.
+const (
+	closeCodeJWTMissing = 4005
+	closeCodeJWTError   = 4006
+)
+
+// closePacket builds a `close` message. sdkjs maps the code onto an editor error
+// (c_oCloseCode.jwtError -> Asc.c_oAscError.ID.VKeyEncrypt), so the user sees a refusal
+// rather than a silent hang.
+func closePacket(code int) string {
+	pkt, err := socketMessage(map[string]any{
+		"type": "close",
+		"data": map[string]any{"code": code},
+	})
+	if err != nil {
+		return ""
+	}
+	return pkt
+}
+
 func parsePostPackets(body string) []string {
 	if body == "" {
 		return nil

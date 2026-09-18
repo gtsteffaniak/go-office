@@ -123,3 +123,97 @@ func TestPatchSDKJSRejectsUnknownBundle(t *testing.T) {
 		t.Fatal("expected unsupported bundle error")
 	}
 }
+
+// TestPatchSDKJSForwardsRealCoauthoringToken guards the fix for the hardcoded
+// "fghhfgsjdgfjs" placeholder. Without it the coauthoring auth packet carries a non-JWT
+// string and any document server verifying JWTs rejects every session with
+// "token contains an invalid number of segments".
+func TestPatchSDKJSForwardsRealCoauthoringToken(t *testing.T) {
+	for _, editor := range []string{"cell", "word", "slide"} {
+		t.Run(editor, func(t *testing.T) {
+			root := t.TempDir()
+			dir := filepath.Join(root, "sdkjs", editor)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, "sdk-all-min.js")
+			// The other required anchors for this editor must be present too, or
+			// patchSDKJS correctly rejects the bundle as unrecognised.
+			var b bytes.Buffer
+			b.WriteString("prefix,")
+			for _, anchor := range requiredAnchorsFor(editor) {
+				b.Write(anchor)
+				b.WriteByte(',')
+			}
+			b.Write(coauthoringTokenBug)
+			b.WriteString(",suffix")
+			if err := os.WriteFile(path, b.Bytes(), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := patchSDKJS(root); err != nil {
+				t.Fatalf("patchSDKJS: %v", err)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Contains(got, coauthoringTokenFix) {
+				t.Fatalf("%s: token patch not applied; _token does not prefer the config token", editor)
+			}
+			if !bytes.Contains(got, []byte("this._token=this.jwtOpen||this._token")) {
+				t.Fatalf("%s: unexpected patch result: %s", editor, got)
+			}
+
+			// Idempotent: a second pass must not double-apply or error.
+			if secondErr := patchSDKJS(root); secondErr != nil {
+				t.Fatalf("second patchSDKJS: %v", secondErr)
+			}
+			again, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, again) {
+				t.Fatal("patch is not idempotent")
+			}
+		})
+	}
+}
+
+// TestPatchSDKJSRejectsMissingTokenAnchor ensures an unrecognised sdkjs bundle fails loudly
+// rather than silently shipping a server that cannot verify JWTs.
+func TestPatchSDKJSRejectsMissingTokenAnchor(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "sdkjs", "word")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// All other required patches present, but the token anchor removed.
+	var b bytes.Buffer
+	for _, p := range []struct{ bug []byte }{
+		{wordInitEditorBug}, {wordBeforeOpenBug}, {wordOpenFromBinBug}, {wordOpenFromZipBug},
+	} {
+		b.Write(p.bug)
+		b.WriteByte(',')
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sdk-all-min.js"), b.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := patchSDKJS(root); err == nil {
+		t.Fatal("expected an error when the coauthoring token anchor is missing")
+	}
+}
+
+// requiredAnchorsFor returns the non-optional patch anchors patchSDKJS expects for an editor.
+func requiredAnchorsFor(editor string) [][]byte {
+	switch editor {
+	case "cell":
+		return [][]byte{cellOpenFromBinNoInitBug}
+	case "word":
+		return [][]byte{wordInitEditorBug, wordBeforeOpenBug, wordOpenFromBinBug, wordOpenFromZipBug}
+	case "slide":
+		return [][]byte{slideInitEditorBug, slideOpenFromBinBug}
+	default:
+		return nil
+	}
+}

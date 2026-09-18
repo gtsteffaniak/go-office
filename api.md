@@ -173,7 +173,32 @@ sdkjs clears its 60-second save-retry timer (`errorTimeOutSave`) when it receive
 | `editorConfig.coEditing` | ✅ | ⚠️ | Accepted; no multi-user semantics |
 | `editorConfig.plugins`, `templates`, `embedded`, … | ✅ | ⚠️ | Passed if host supplies; not validated server-side |
 | Config JWT (`token` top-level field) | ✅ | ✅ | Signed when `OFFICE_JWT_SECRET` or `JWT_SECRET` is set |
-| Server-side JWT verify on coauthoring `auth` | ✅ | ✅ | When `JWTSecret` is set, `auth` packets must include a valid HS256 JWT |
+| Server-side JWT verify on coauthoring `auth` | ✅ | ✅ | When `JWTSecret` is set, `auth` packets must carry a valid HS256 JWT whose `document.key` matches the URL. A rejected token **fails closed**: the server replies `{"type":"close","data":{"code":4006}}` and does not open the document. With no secret configured, verification is skipped. See the sdkjs note below. |
+
+**Note — bundled sdkjs token bug (patched by go-office).** The Euro-Office sdkjs bundles in
+this repo hardcode the coauthoring token to the literal string `fghhfgsjdgfjs` and never
+forward `config.token`:
+
+```js
+this.CoAuthoringApi.init(this.User, this.documentId, this.documentCallbackUrl,
+                         "fghhfgsjdgfjs", ...)
+```
+
+DocsCoApi sends that value as the `token` field of every `auth` packet, so with a JWT secret
+configured the server rejected every session with *"token contains an invalid number of
+segments"*. Upstream ONLYOFFICE builds do not have this bug; it is specific to these bundles.
+
+`EnsureAssets` patches every bundle (`cell`, `word`, `slide`, both `sdk-all.js` and
+`sdk-all-min.js` variants where present) so `_token` prefers the real config token:
+
+```js
+this.openCmd=openCmd,this.jwtOpen=docInfo.get_Token(),this._token=this.jwtOpen||this._token
+```
+
+Verified end-to-end: with a secret set, the editor's `auth` packet carries a real 3-segment
+JWT and the server accepts it. A client that still sends the placeholder is refused with
+`code 4006` rather than being served an unverified document.
+
 
 ### 3.2 Callback — integrator receives POSTs (Document Server → your app)
 

@@ -31,6 +31,25 @@ var (
 
 	slideOpenFromBinBug = []byte("asc_docs_api.prototype.OpenDocumentFromBin=function(url,gObject){this.InitEditor(),this.DocumentType=2;var _loader=new AscCommon.BinaryPPTYLoader;_loader.Api=this,g_oIdCounter.Set_Load(!0),AscFonts.IsCheckSymbols=!0,_loader.Load(gObject,this.WordControl.m_oLogicDocument),this.WordControl.m_oLogicDocument.Set_FastCollaborativeEditing(!0)")
 	slideOpenFromBinFix = []byte("asc_docs_api.prototype.OpenDocumentFromBin=function(url,gObject){this.InitEditor(),this.DocumentType=2;var _loader=new AscCommon.BinaryPPTYLoader;_loader.Api=this,g_oIdCounter.Set_Load(!0),AscFonts.IsCheckSymbols=!0,AscFormat.ExecuteNoHistory(function(){_loader.Load(gObject,this.WordControl.m_oLogicDocument)},this,[],!0),this.WordControl.m_oLogicDocument.Set_FastCollaborativeEditing(!0)")
+
+	// Vanilla sdkjs hardcodes the coauthoring JWT to the literal "fghhfgsjdgfjs" and never
+	// forwards the real `config.token`:
+	//
+	//   this.CoAuthoringApi.init(this.User,this.documentId,this.documentCallbackUrl,
+	//                            "fghhfgsjdgfjs", ...)
+	//
+	// DocsCoApi._token is then sent as the `token` field of every coauthoring `auth`
+	// packet, so a document server that verifies JWTs rejects every session with
+	// "token contains an invalid number of segments" (15 plain characters, not a JWT).
+	// The real token is already available: init() reads it from docInfo into
+	// this.jwtOpen a few statements later. Prefer it over the passed placeholder.
+	//
+	// Upstream ONLYOFFICE builds do not have this bug; it is specific to this bundle.
+	//
+	// The fix replaces the tail of the statement rather than appending to it, so the
+	// original anchor no longer matches and patchSDKJSBundle stays idempotent.
+	coauthoringTokenBug = []byte("this.jwtOpen=docInfo.get_Token()")
+	coauthoringTokenFix = []byte("this.jwtOpen=docInfo.get_Token(),this._token=this.jwtOpen||this._token")
 )
 
 // patchSDKJS applies vendor hotfixes to Euro-Office sdkjs load paths. Vanilla 9.3.4
@@ -46,14 +65,19 @@ func patchSDKJS(outDir string) error {
 		{filepath.Join(outDir, "sdkjs", "cell", "sdk-all.js"), cellCustomXMLHistoryBug, cellCustomXMLHistoryFix, true},
 		{filepath.Join(outDir, "sdkjs", "cell", "sdk-all-min.js"), cellCustomXMLHistoryBug, cellCustomXMLHistoryFix, true},
 		{filepath.Join(outDir, "sdkjs", "cell", "sdk-all-min.js"), cellOpenFromBinNoInitBug, cellOpenFromBinNoInitFix, false},
+		// Required: without this the coauthoring auth packet carries a non-JWT placeholder
+		// and any document server verifying JWTs rejects every session.
+		{filepath.Join(outDir, "sdkjs", "cell", "sdk-all-min.js"), coauthoringTokenBug, coauthoringTokenFix, false},
 
 		{filepath.Join(outDir, "sdkjs", "word", "sdk-all-min.js"), wordInitEditorBug, wordInitEditorFix, false},
 		{filepath.Join(outDir, "sdkjs", "word", "sdk-all-min.js"), wordBeforeOpenBug, wordBeforeOpenFix, false},
 		{filepath.Join(outDir, "sdkjs", "word", "sdk-all-min.js"), wordOpenFromBinBug, wordOpenFromBinFix, false},
 		{filepath.Join(outDir, "sdkjs", "word", "sdk-all-min.js"), wordOpenFromZipBug, wordOpenFromZipFix, false},
+		{filepath.Join(outDir, "sdkjs", "word", "sdk-all-min.js"), coauthoringTokenBug, coauthoringTokenFix, false},
 
 		{filepath.Join(outDir, "sdkjs", "slide", "sdk-all-min.js"), slideInitEditorBug, slideInitEditorFix, false},
 		{filepath.Join(outDir, "sdkjs", "slide", "sdk-all-min.js"), slideOpenFromBinBug, slideOpenFromBinFix, false},
+		{filepath.Join(outDir, "sdkjs", "slide", "sdk-all-min.js"), coauthoringTokenBug, coauthoringTokenFix, false},
 	}
 	for _, patch := range patches {
 		if err := patchSDKJSBundle(patch.path, patch.buggy, patch.fixed, patch.optional); err != nil {
@@ -71,7 +95,12 @@ func patchSDKJSBundle(path string, buggy, fixed []byte, optional bool) error {
 		}
 		return fmt.Errorf("assetfetch: read sdkjs patch target: %w", err)
 	}
-	if bytes.Contains(data, fixed) && !bytes.Contains(data, buggy) {
+	// Already applied? Two shapes are possible:
+	//   - replacement patches: `fixed` present and `buggy` gone
+	//   - append-style patches (fixed extends buggy): `fixed` present at all
+	// Without the second case an append-style patch is never recognised as applied and
+	// would be applied repeatedly on every run.
+	if bytes.Contains(data, fixed) {
 		return nil
 	}
 	count := bytes.Count(data, buggy)

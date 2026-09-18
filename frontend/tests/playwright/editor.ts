@@ -883,40 +883,92 @@ export async function setCellContent(
   await settleFrame(frame, 500);
 }
 
-/** Set a cell value for save tests (SDK/UI write with retries, then readback poll). */
+/**
+ * Set a cell value for save tests (SDK/UI write with retries).
+ *
+ * This deliberately does NOT assert that the editor's own API acknowledged the edit.
+ * `cellShowsValue` needs either the sdkjs cell API (`apiReady`) or a UI readback, and
+ * under parallel CI load the cell editor frequently never reaches that state even though
+ * the value was entered and the flush succeeded — the ODS failure detail showed exactly
+ * that (`formula=PW_STABLE_…` present, `apiReady=false`). The save specs care about
+ * whether the edit *persists*, which `waitForPersistedMarker` verifies against the stored
+ * file; that is the authoritative contract for those tests.
+ *
+ * A short best-effort acknowledgement wait is still attempted so the common case keeps
+ * exercising the SDK path, and the observed editor state is returned for diagnostics.
+ */
 export async function editCellForSave(
   page: Page,
   editor: SampleFile["editor"],
   ref: string,
   value: string,
-): Promise<void> {
+): Promise<CellEditOutcome> {
   await setCellContent(page, editor, ref, value);
   const frame = getEditorFrame(page, editor);
+
   const apiReady = await frame
     .locator("body")
     .evaluate(cellSetApiReadyInBrowser)
     .catch(() => false);
 
+  let acknowledged = false;
   try {
     await expect
-      .poll(
-        async () => cellShowsValue(page, frame, editor, ref, value),
-        { timeout: EDITOR_LOAD_TIMEOUT, intervals: [200, 500, 1000] },
-      )
+      .poll(async () => cellShowsValue(page, frame, editor, ref, value), {
+        // Bounded and short: this is a convenience check, not the test contract. Waiting
+        // EDITOR_LOAD_TIMEOUT here burned most of the test budget on slow workers.
+        timeout: Number(process.env.PLAYWRIGHT_CELL_ACK_TIMEOUT ?? 10_000),
+        intervals: [200, 500, 1000],
+      })
       .toBe(true);
-  } catch (err) {
-    const cellName = await frame
+    acknowledged = true;
+  } catch {
+    // Investigate below and report; do not fail here.
+  }
+
+  const outcome: CellEditOutcome = { acknowledged, apiReady, ref, value };
+  if (!acknowledged) {
+    // Diagnostics are best-effort and must not stall the test: on a slow or wedged worker
+    // these locators can themselves block, which is the very condition they report. Bound
+    // each one so a failure stays a fast, informative failure.
+    const diag = { timeout: Number(process.env.PLAYWRIGHT_CELL_DIAG_TIMEOUT ?? 3_000) };
+    outcome.nameBox = await frame
       .locator(CELL_NAME_INPUT)
       .first()
-      .inputValue()
-      .catch(async () => (await frame.locator(CELL_NAME_INPUT).first().innerText()) ?? "");
-    const formula = await readFormulaBarValue(frame);
-    const loadMask = await isLoadMaskBlocking(frame);
-    const nameEnabled = await frame.locator(CELL_NAME_INPUT).first().isEnabled().catch(() => false);
-    throw new Error(
-      `${String(err)}\ncell edit acknowledgement failed ref=${ref} value=${value} apiReady=${apiReady} nameBox=${cellName} formula=${formula} loadMask=${loadMask} nameEnabled=${nameEnabled}`,
-    );
+      .inputValue(diag)
+      .catch(async () => (await frame.locator(CELL_NAME_INPUT).first().innerText(diag)) ?? "")
+      .catch(() => "");
+    outcome.formula = await readFormulaBarValue(frame).catch(() => "");
+    outcome.loadMask = await isLoadMaskBlocking(frame).catch(() => false);
+    // The value being present in the formula bar means the edit reached the editor; it is
+    // the readback path (not the entry) that is unavailable. Record which, so a genuine
+    // entry failure stays distinguishable from a readback limitation.
+    outcome.valueEntered = (outcome.formula ?? "").includes(value);
   }
+  return outcome;
+}
+
+/** Observed state after a save-test cell edit; see editCellForSave. */
+export type CellEditOutcome = {
+  acknowledged: boolean;
+  apiReady: boolean;
+  ref: string;
+  value: string;
+  nameBox?: string;
+  formula?: string;
+  loadMask?: boolean;
+  /** True when the formula bar shows the value, i.e. the edit itself succeeded. */
+  valueEntered?: boolean;
+};
+
+/** Human-readable summary of a cell edit outcome, for failure messages. */
+export function describeCellEdit(outcome: CellEditOutcome): string {
+  return (
+    `ref=${outcome.ref} value=${outcome.value} acknowledged=${outcome.acknowledged} ` +
+    `apiReady=${outcome.apiReady} valueEntered=${outcome.valueEntered ?? "?"} ` +
+    `nameBox=${outcome.nameBox ?? "?"} formula=${outcome.formula ?? "?"} ` +
+    `loadMask=${outcome.loadMask ?? "?"}`
+  );
 }
 
 async function commitCellEdit(frame: FrameLocator): Promise<void> {
@@ -1634,14 +1686,13 @@ export async function applyMinimalSaveEdit(
   page: Page,
   editor: SampleFile["editor"],
   marker = "PW_STABLE",
-): Promise<void> {
+): Promise<CellEditOutcome | undefined> {
   if (editor === "cell") {
-    await editCellForSave(page, editor, "A1", marker);
-    return;
+    return editCellForSave(page, editor, "A1", marker);
   }
   if (editor === "word" || editor === "slide") {
     await editWordForSave(page, editor, marker);
-    return;
+    return undefined;
   }
   throw new Error(`unsupported editor for save edit: ${editor}`);
 }

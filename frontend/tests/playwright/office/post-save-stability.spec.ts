@@ -4,6 +4,7 @@ import {
   applyMinimalSaveEdit,
   waitForPersistedMarker,
   assertEditorStable,
+  describeCellEdit,
 } from "../editor";
 import { forkSample } from "../fork-sample";
 import { samplesForTier, sampleExists } from "../samples";
@@ -23,8 +24,18 @@ for (const sample of STABLE_SAMPLES) {
     await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
     await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
 
-    await applyMinimalSaveEdit(page, sample.editor, marker);
-    await waitForPersistedMarker(request, file, marker, { page });
+    // The edit is applied best-effort; what this suite asserts is that the change persists
+    // and the editor stays stable afterwards. Editor-side acknowledgement is unreliable for
+    // the cell editor under parallel CI load (see editCellForSave), so the stored file is
+    // the contract. The outcome is kept for diagnostics if the marker never lands.
+    const edit = await applyMinimalSaveEdit(page, sample.editor, marker);
+    const editDetail = edit ? `cell edit: ${describeCellEdit(edit)}` : "edit: word/slide append";
+
+    try {
+      await waitForPersistedMarker(request, file, marker, { page });
+    } catch (err) {
+      throw new Error(`${String(err)}\n${editDetail}`);
+    }
 
     await assertEditorStable(page, STABLE_MS);
   });

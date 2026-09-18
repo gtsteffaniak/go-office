@@ -203,9 +203,9 @@
         Paths are relative to <code>documentServerUrl</code> (site root by default).
       </p>
       <div class="compat-summary">
-        <div class="yes"><strong>22</strong>Compatible — same contract, verified in E2E</div>
+        <div class="yes"><strong>25</strong>Compatible — same contract, verified in E2E</div>
         <div class="partial"><strong>4</strong>Partial — works with documented limits</div>
-        <div class="no"><strong>6</strong>Not supported — optional / admin APIs</div>
+        <div class="no"><strong>5</strong>Not supported — optional / admin APIs</div>
       </div>
 
       <h3>1. Document Server routes (browser &amp; sdkjs)</h3>
@@ -285,6 +285,18 @@
             <td>Server version info</td>
             <td class="yes">✓</td><td class="yes">✓</td>
             <td class="notes"><code>{"version":"…"}</code> from <code>OFFICE_VERSION</code>.</td>
+          </tr>
+          <tr>
+            <td><code>GET /example/</code> (bundled test apps)</td>
+            <td>Bundled test example</td>
+            <td class="yes">✓</td><td class="yes">✓</td>
+            <td class="notes">Alias of go-office's demo app (same landing page, viewer, warm endpoint); <code>/demo/</code> stays canonical. Not upstream's Node.js example app.</td>
+          </tr>
+          <tr>
+            <td><code>GET /api/office/demo/savestate</code></td>
+            <td>— (go-office extension)</td>
+            <td class="no">—</td><td class="yes">✓</td>
+            <td class="notes">Last settled flush outcome (<code>success</code>, <code>rolledBack</code>, <code>bridge</code>, <code>sequence</code>) for server-driven save verification.</td>
           </tr>
           <tr>
             <td><code>POST /command</code> (command service)</td>
@@ -402,6 +414,12 @@
             <td>Save protocol</td>
             <td class="yes">✓</td><td class="yes">✓</td>
             <td class="notes">Save button when <code>customization.forcesave</code> is true.</td>
+          </tr>
+          <tr>
+            <td><code>saveResult</code> (server → client)</td>
+            <td>— (go-office extension)</td>
+            <td class="no">—</td><td class="yes">✓</td>
+            <td class="notes">Emitted on every flush outcome. sdkjs clears its 60s save-retry timer on <code>unSaveLock</code>, which arrives before the debounced x2t flush, so a failed save would otherwise be silent. Carries <code>success</code>, <code>rolledBack</code>, <code>bridge</code>, <code>sequence</code>.</td>
           </tr>
           <tr>
             <td>Multi-user concurrent editing</td>

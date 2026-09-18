@@ -31,13 +31,13 @@ Rules:
 1. **Never write a save output into `sample-files/`.** Playwright forks samples into
    `sample-files/playwright/` (gitignored) via `forkSample`; keep it that way. If a run
    modifies a tracked sample, `git status sample-files/` will show it — treat that as a bug.
-2. **Legacy binaries must stay binary.** `sample.xls` and `sample.doc` must remain OLE2
-   compound files. Verify with `file sample-files/sample.xls` → "Composite Document File".
-3. **`sample.ppt` is a documented exception.** x2t cannot write binary PowerPoint
-   (verified: `pptx→ppt` exits 88), so no tooling in this repo can author a `.ppt`
-   containing the text the slide tests assert (`My Presentation`). The tracked `sample.ppt`
-   is therefore an OOXML package at a `.ppt` path — the same shape the server's assembly
-   rollback produces. The check script lists this exemption explicitly.
-4. **x2t cannot write any legacy binary format.** Verified against the bundled converter:
-   `xlsx→xls` exit 88, `docx→doc` exit 80, `pptx→ppt` exit 88. Do not "fix" a save failure
-   by regenerating these fixtures with x2t; it will produce OOXML bytes.
+2. **Legacy binaries must stay binary.** `sample.xls`, `sample.doc`, and `sample.ppt` must
+   remain OLE2 compound files. Verify with `file sample-files/sample.ppt` →
+   "Composite Document File V2 Document".
+3. **x2t cannot write any legacy binary format.** Verified against the bundled converter:
+   `xlsx→xls` exit 88, `docx→doc` exit 80, `pptx→ppt` exit 88. Do not try to regenerate these
+   fixtures with x2t; it produces OOXML bytes, which is exactly the corruption rule 2 guards
+   against. Source genuine binaries from a real Office producer instead.
+4. **Keep the asserted test markers.** `check-sample-matrix` verifies the slide/text markers
+   the Playwright specs search for (`sample.ppt` and `sample.pptx` must contain
+   "My Presentation"). Replacing a fixture with a different deck breaks those tests.

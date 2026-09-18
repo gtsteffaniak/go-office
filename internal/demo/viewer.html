@@ -40,6 +40,9 @@
     var DOCUMENT_KEY = {{.DocumentKeyJSON}};
     var officeBase = {{.OfficeBaseJSON}};
     var apiBase = {{.APIBaseJSON}};
+    // UI mount prefix that served this page ("/demo" or "/example"); used for viewer
+    // sub-resource calls so both aliases work identically.
+    var uiBase = {{.UIBaseJSON}};
     var landingURL = {{.LandingURLJSON}};
 
     document.getElementById("sample-path").textContent = SAMPLE_FILE;
@@ -172,7 +175,7 @@
     function warmDocument() {
       document.body.removeAttribute("data-warm-done");
       document.body.removeAttribute("data-warm-error");
-      var warmUrl = joinPath(officeBase, "/demo/warm?file=" + encodeURIComponent(SAMPLE_FILE));
+      var warmUrl = joinPath(officeBase, uiBase + "/warm?file=" + encodeURIComponent(SAMPLE_FILE));
       return fetch(warmUrl, { cache: "no-store" })
         .then(function (res) {
           if (!res.ok) {

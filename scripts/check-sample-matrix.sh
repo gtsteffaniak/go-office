@@ -92,13 +92,9 @@ PY
 }
 
 # OLE2 legacy formats must be genuine compound documents.
-#
-# sample.ppt is deliberately EXEMPT: x2t cannot write binary PowerPoint (verified exit 88),
-# so no tool in this repo can author a .ppt containing the text the slide tests assert
-# ("My Presentation"). The tracked sample.ppt is an OOXML package at a .ppt path, which is
-# the same assemblyFormatAsOrigin rollback shape the server produces. It is listed here so
-# the exception is explicit and reviewable rather than silent.
-for legacy in sample.xls sample.doc; do
+# x2t cannot write any of these (xls exit 88, doc exit 80, ppt exit 88), so a real binary
+# original must be kept in the tree; a save would replace it with an OOXML package.
+for legacy in sample.xls sample.doc sample.ppt; do
 	check_legacy_binary "$legacy"
 done
 
@@ -174,23 +170,24 @@ then
 	exit 1
 fi
 
+# sample.ppt must be a genuine binary deck AND contain the slide text the tests assert.
+# PowerPoint stores slide text in TextBytesAtom (0x0FA8) records, or UTF-16LE
+# (TextCharsAtom, 0x0FA0) for non-Latin text, so check both encodings.
 if ! python3 - "$dir/sample.ppt" "$ppt_marker" <<'PY'
-import sys, zipfile
+import sys
 path, marker = sys.argv[1], sys.argv[2]
 with open(path, "rb") as f:
-    head = f.read(2)
-if head == b"PK":
-    with zipfile.ZipFile(path) as zf:
-        xml = zf.read("ppt/slides/slide1.xml").decode("utf-8", "replace")
-    if marker not in xml:
-        print(f"error: {path} slide1.xml missing marker {marker}", file=sys.stderr)
-        sys.exit(1)
-else:
-    with open(path, "rb") as f:
-        data = f.read()
-    if marker.encode("utf-8") not in data:
-        print(f"error: {path} missing marker {marker}", file=sys.stderr)
-        sys.exit(1)
+    data = f.read()
+if data[:2] == b"PK":
+    print(
+        f"error: {path} is an OOXML package; a genuine binary .ppt is required "
+        "(a save rollback has overwritten the tracked fixture)",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+if marker.encode("latin-1") not in data and marker.encode("utf-16le") not in data:
+    print(f"error: {path} missing decoded marker {marker!r}", file=sys.stderr)
+    sys.exit(1)
 PY
 then
 	echo "error: sample.ppt marker check failed" >&2

@@ -87,8 +87,9 @@ func TestDemoLandingAndConfig(t *testing.T) {
 	if !strings.Contains(body, "/api/office") || !strings.Contains(body, "/demo/config") {
 		t.Fatal("expected relative API config URL in viewer page")
 	}
-	if !strings.Contains(body, "/demo/warm?file=") {
-		t.Fatal("expected warm endpoint hook in viewer page")
+	// The warm hook is built from uiBase so it resolves under /demo/ and /example/ alike.
+	if !strings.Contains(body, `uiBase + "/warm?file="`) {
+		t.Fatal("expected alias-aware warm endpoint hook in viewer page")
 	}
 	if !strings.Contains(body, "data-warm-done") || !strings.Contains(body, "data-warm-error") {
 		t.Fatal("expected warm success/error attributes in viewer page")

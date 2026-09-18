@@ -66,9 +66,12 @@ type viewerData struct {
 	DocumentKeyJSON template.JS
 	OfficeBaseJSON  template.JS
 	APIBaseJSON     template.JS
-	LandingURLJSON  template.JS
-	LandingURL      string
-	APIScriptURL    string
+	// UIBaseJSON is the UI mount prefix ("/demo" or "/example") so the viewer's own
+	// sub-resource calls (e.g. /warm) stay on whichever alias served the page.
+	UIBaseJSON     template.JS
+	LandingURLJSON template.JS
+	LandingURL     string
+	APIScriptURL   string
 }
 
 type sampleDoc struct {
@@ -112,14 +115,23 @@ func New(srv *office.Server, store office.Storage, opts Options) (*Handler, erro
 }
 
 // Attach registers demo UI routes under the office base path and API routes under APIBasePath.
+//
+// The UI is also served at /example/ for ONLYOFFICE compatibility: upstream Document Server
+// ships a bundled test example ("doc management system" for trying the editors before
+// integration) at that path. go-office's demo app fills the same role, so /example/ is an
+// alias onto it rather than a separate application. /demo/ remains canonical and both paths
+// render identically.
 func Attach(srv *office.Server, store office.Storage, opts Options) error {
 	h, err := New(srv, store, opts)
 	if err != nil {
 		return err
 	}
-	uiBase := office.URLPath(srv.BasePath(), "demo")
-	srv.Mount(uiBase, http.RedirectHandler(uiBase+"/", http.StatusPermanentRedirect))
-	srv.Mount(uiBase+"/", http.StripPrefix(uiBase, http.HandlerFunc(h.serveUI)))
+
+	for _, base := range []string{"demo", "example"} {
+		uiBase := office.URLPath(srv.BasePath(), base)
+		srv.Mount(uiBase, http.RedirectHandler(uiBase+"/", http.StatusPermanentRedirect))
+		srv.Mount(uiBase+"/", http.StripPrefix(uiBase, http.HandlerFunc(h.serveUI)))
+	}
 
 	apiBase := normalizePath(opts.APIBasePath) + "/demo"
 	srv.Mount(apiBase, http.RedirectHandler(apiBase+"/", http.StatusPermanentRedirect))
@@ -299,7 +311,8 @@ func (h *Handler) serveViewer(w http.ResponseWriter, r *http.Request) {
 		officeBase = ""
 	}
 	apiBase := normalizePath(h.opts.APIBasePath)
-	landingURL := office.URLPath(h.office.BasePath(), "demo/")
+	uiPrefix := uiPrefixFromRequest(h, r)
+	landingURL := uiPrefix + "/"
 	apiScriptURL := office.URLPath(h.office.BasePath(), "web-apps/apps/api/documents/api.js")
 
 	data := viewerData{
@@ -307,6 +320,7 @@ func (h *Handler) serveViewer(w http.ResponseWriter, r *http.Request) {
 		DocumentKeyJSON: template.JS(jsonString(doc.Key)),
 		OfficeBaseJSON:  template.JS(jsonString(officeBase)),
 		APIBaseJSON:     template.JS(jsonString(apiBase)),
+		UIBaseJSON:      template.JS(jsonString(uiPrefix)),
 		LandingURLJSON:  template.JS(jsonString(landingURL)),
 		LandingURL:      landingURL,
 		APIScriptURL:    apiScriptURL,
@@ -433,8 +447,8 @@ func (h *Handler) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(raw)
 }
 
-func (h *Handler) serveLanding(w http.ResponseWriter, _ *http.Request) {
-	files, err := h.listSampleFiles()
+func (h *Handler) serveLanding(w http.ResponseWriter, r *http.Request) {
+	files, err := h.listSampleFiles(uiPrefixFromRequest(h, r))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -453,7 +467,32 @@ func (h *Handler) serveLanding(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write(buf.Bytes())
 }
 
-func (h *Handler) listSampleFiles() ([]landingFile, error) {
+// uiPrefixFromRequest returns the UI mount prefix ("/demo" or "/example") that served the
+// request, so links rendered from either alias keep the user on that path. Both bases are
+// registered onto the same handler, and StripPrefix removes the alias from r.URL.Path, so the
+// prefix is recovered from the request URI's original form.
+func uiPrefixFromRequest(h *Handler, r *http.Request) string {
+	base := strings.TrimSuffix(h.office.BasePath(), "/")
+	if r != nil {
+		// Use RequestURI (the on-the-wire target) rather than r.URL.Path: the UI handler is
+		// mounted with http.StripPrefix, which rewrites URL.Path and removes the alias.
+		path := r.RequestURI
+		if u, err := url.Parse(path); err == nil {
+			path = u.Path
+		}
+		path = strings.TrimSuffix(path, "/")
+		for _, alias := range []string{"example", "demo"} {
+			candidate := office.URLPath(base, alias)
+			// Match the alias itself or any sub-path of it ("/office/example/view").
+			if path == candidate || strings.HasPrefix(path, candidate+"/") {
+				return candidate
+			}
+		}
+	}
+	return office.URLPath(base, "demo")
+}
+
+func (h *Handler) listSampleFiles(uiPrefix string) ([]landingFile, error) {
 	root := filepath.Join(h.opts.DataRoot, filepath.FromSlash(h.opts.SamplesDir))
 	info, err := os.Stat(root)
 	if err != nil {
@@ -486,7 +525,7 @@ func (h *Handler) listSampleFiles() ([]landingFile, error) {
 		if err != nil {
 			return err
 		}
-		viewPath := office.URLPath(h.office.BasePath(), "demo/view")
+		viewPath := office.URLPath(uiPrefix, "view")
 		thumbURL := h.opts.APIBasePath + "/demo/thumbnail?file=" + url.QueryEscape(rel)
 		files = append(files, landingFile{
 			Name:         rel,

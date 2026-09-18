@@ -2,9 +2,9 @@ import { test, expect } from "../test-setup";
 import {
   warmDemoFile,
   applyMinimalSaveEdit,
-  waitForPersistedMarker,
   assertEditorStable,
   describeCellEdit,
+  expectPersistedMarker,
 } from "../editor";
 import { forkSample } from "../fork-sample";
 import { samplesForTier, sampleExists } from "../samples";
@@ -29,13 +29,11 @@ for (const sample of STABLE_SAMPLES) {
     // the cell editor under parallel CI load (see editCellForSave), so the stored file is
     // the contract. The outcome is kept for diagnostics if the marker never lands.
     const edit = await applyMinimalSaveEdit(page, sample.editor, marker);
-    const editDetail = edit ? `cell edit: ${describeCellEdit(edit)}` : "edit: word/slide append";
+    const editDetail = edit
+      ? `cell edit: ${describeCellEdit(edit)}`
+      : "edit: word/slide append (no editor-side acknowledgement required)";
 
-    try {
-      await waitForPersistedMarker(request, file, marker, { page });
-    } catch (err) {
-      throw new Error(`${String(err)}\n${editDetail}`);
-    }
+    await expectPersistedMarker(request, file, marker, page, editDetail);
 
     await assertEditorStable(page, STABLE_MS);
   });

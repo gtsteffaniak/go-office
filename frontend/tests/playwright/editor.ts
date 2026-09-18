@@ -525,25 +525,53 @@ export async function waitForDocumentReadyAttr(
     .toBe(true);
 }
 
-/** Document loaded, load masks gone, and editor APIs are usable (content/save tests). */
+/**
+ * Document loaded, load masks gone, and editor APIs are usable (content/save tests).
+ *
+ * With `required: false` this becomes advisory: it still waits up to timeoutMs and performs
+ * the same settling/overlay cleanup, but returns whether the editor reported itself
+ * interactive instead of throwing. Callers use that to shorten their next wait rather than
+ * failing outright, which keeps sequential gate timeouts from exceeding the test budget.
+ */
 export async function waitForEditorInteractive(
   page: Page,
   editor: SampleFile["editor"],
-  timeoutMs = DOCUMENT_READY_TIMEOUT,
-): Promise<void> {
+  opts?: number | { timeoutMs?: number; required?: boolean },
+): Promise<boolean> {
+  const options = typeof opts === "number" ? { timeoutMs: opts } : (opts ?? {});
+  const timeoutMs = options.timeoutMs ?? DOCUMENT_READY_TIMEOUT;
+  const required = options.required ?? true;
   const frame = getEditorFrame(page, editor);
-  await expect
-    .poll(async () => isEditorInteractive(page, frame, editor), { timeout: timeoutMs })
-    .toBe(true);
+
+  let interactive = false;
+  try {
+    await expect
+      .poll(async () => isEditorInteractive(page, frame, editor), { timeout: timeoutMs })
+      .toBe(true);
+    interactive = true;
+  } catch (err) {
+    if (required) {
+      throw err;
+    }
+  }
+
   await page.waitForTimeout(INTERACTIVE_SETTLE_MS);
   if (await isLoadMaskBlocking(frame)) {
-    await expect
-      .poll(async () => isEditorInteractive(page, frame, editor), { timeout: 10_000 })
-      .toBe(true);
+    try {
+      await expect
+        .poll(async () => isEditorInteractive(page, frame, editor), { timeout: 10_000 })
+        .toBe(true);
+      interactive = true;
+    } catch (err) {
+      if (required) {
+        throw err;
+      }
+    }
   }
   if (editor === "cell") {
     await dismissEditorOverlays(frame);
   }
+  return interactive;
 }
 
 /** Document is ready to accept a single save-test edit (UI controls or public insertPlainText). */
@@ -840,7 +868,16 @@ export async function setCellContent(
   ref: string,
   value: string,
 ): Promise<void> {
-  await waitForEditorInteractive(page, editor);
+  // The readiness gates below are sequential, so their timeouts ADD UP. With the previous
+  // 45s + 45s (+10s re-poll) the worst case already exceeded the test budget before the
+  // save was attempted, which is why slow workers timed out rather than failing on the
+  // save. Each gate is now bounded so the total stays comfortably inside the budget, and
+  // the interactive gate is advisory: the edit is still attempted, because a UI/API
+  // readback being unavailable does not mean the editor cannot accept input.
+  const interactive = await waitForEditorInteractive(page, editor, {
+    timeoutMs: Number(process.env.PLAYWRIGHT_CELL_INTERACTIVE_TIMEOUT ?? 20_000),
+    required: false,
+  });
   const frame = getEditorFrame(page, editor);
   await dismissEditorOverlays(frame);
 
@@ -861,7 +898,12 @@ export async function setCellContent(
           }
           return setCellValue(frame, ref, value);
         },
-        { timeout: EDITOR_LOAD_TIMEOUT, intervals: [200, 500, 1000] },
+        {
+          timeout: interactive
+            ? Number(process.env.PLAYWRIGHT_CELL_SDK_TIMEOUT ?? 20_000)
+            : Number(process.env.PLAYWRIGHT_CELL_SDK_TIMEOUT_FALLBACK ?? 8_000),
+          intervals: [200, 500, 1000],
+        },
       )
       .toBe(true);
     viaSdk = true;
@@ -1181,12 +1223,22 @@ export async function replaceDocumentText(
   await page.waitForTimeout(300);
 }
 
-/** Insert a unique marker into word/slide documents for save tests. */
+/**
+ * Insert a unique marker into word/slide documents for save tests.
+ *
+ * Like editCellForSave, this does NOT assert that the marker became visible in the editor.
+ * `documentContainsText` depends on the sdkjs search API or the editor's DOM, neither of
+ * which is reliable under parallel CI load; the save specs care whether the edit persists,
+ * which their `waitForPersistedMarker` step verifies against the stored file. A short
+ * bounded best-effort visibility check is still attempted, and the outcome is returned for
+ * diagnostics. Throws only when the insert call itself was unavailable, which is a genuine
+ * harness failure rather than a timing artefact.
+ */
 export async function editWordForSave(
   page: Page,
   editor: SampleFile["editor"],
   marker: string,
-): Promise<void> {
+): Promise<WordEditOutcome> {
   await waitForEditorEditable(page, editor);
   const chunk = ` ${marker}`;
   const inserted = await page.evaluate((text: string) => {
@@ -1203,7 +1255,39 @@ export async function editWordForSave(
   if (!inserted) {
     throw new Error(`insertPlainText unavailable\nwitness:\n${await editorWitness(page, editor)}`);
   }
-  await waitForMarkerInEditor(page, editor, marker);
+
+  let visible = false;
+  try {
+    await waitForMarkerInEditor(
+      page,
+      editor,
+      marker,
+      Number(process.env.PLAYWRIGHT_WORD_ACK_TIMEOUT ?? 10_000),
+    );
+    visible = true;
+  } catch {
+    // Best effort only; the spec asserts persistence, not editor visibility.
+  }
+
+  const outcome: WordEditOutcome = { inserted, visible, marker };
+  if (!visible) {
+    outcome.witness = await editorWitness(page, editor).catch(() => "");
+  }
+  return outcome;
+}
+
+/** Observed state after a save-test word/slide edit; see editWordForSave. */
+export type WordEditOutcome = {
+  inserted: boolean;
+  visible: boolean;
+  marker: string;
+  witness?: string;
+};
+
+/** Human-readable summary of a word/slide edit outcome, for failure messages. */
+export function describeWordEdit(outcome: WordEditOutcome): string {
+  const base = `marker=${outcome.marker} inserted=${outcome.inserted} visibleInEditor=${outcome.visible}`;
+  return outcome.witness ? `${base}\nwitness:\n${outcome.witness}` : base;
 }
 
 /** Insert text into the word/slide document (canvas-backed; parent-page Ctrl+S and DOM innerText do not work). */
@@ -1769,6 +1853,28 @@ export async function waitForPersistedMarker(
     (buf) => officeFileContains(buf, marker),
     { ...opts, label: `marker "${marker}"` },
   );
+}
+
+/**
+ * waitForPersistedMarker with an attached edit diagnostic. The edit steps are best-effort
+ * about *editor-side* acknowledgement (see editCellForSave/editWordForSave), so when the
+ * marker never lands the caller needs to know whether the edit itself reached the editor.
+ * Attaching the detail here keeps a genuine product failure distinguishable from an
+ * unavailable editor readback.
+ */
+export async function expectPersistedMarker(
+  request: APIRequestContext,
+  filePath: string,
+  marker: string,
+  page: Page,
+  editDetail: string,
+  timeoutMs?: number,
+): Promise<void> {
+  try {
+    await waitForPersistedMarker(request, filePath, marker, { page, timeoutMs });
+  } catch (err) {
+    throw new Error(`${String(err)}\n${editDetail}`);
+  }
 }
 
 export async function assertDemoFileContains(

@@ -2,6 +2,8 @@ import { test, expect } from "../test-setup";
 import {
   warmDemoFile,
   editWordForSave,
+  describeWordEdit,
+  expectPersistedMarker,
   formatWordSelection,
   waitForPersistedMarker,
   waitForDemoRtfFormatting,
@@ -22,8 +24,8 @@ test("rtf bold persists", async ({ page, request }, testInfo) => {
   await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
 
-  await editWordForSave(page, "word", marker);
-  await waitForPersistedMarker(request, file, marker, { page });
+  const wordEdit = await editWordForSave(page, "word", marker);
+  await expectPersistedMarker(request, file, marker, page, describeWordEdit(wordEdit));
   await formatWordSelection(page, marker, { bold: true });
   await waitForDemoRtfFormatting(request, file, { marker, bold: true });
 
@@ -38,8 +40,8 @@ test("rtf italic persists", async ({ page, request }, testInfo) => {
   await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
 
-  await editWordForSave(page, "word", marker);
-  await waitForPersistedMarker(request, file, marker, { page });
+  const wordEdit = await editWordForSave(page, "word", marker);
+  await expectPersistedMarker(request, file, marker, page, describeWordEdit(wordEdit));
   await formatWordSelection(page, marker, { italic: true });
   await waitForDemoRtfFormatting(request, file, { marker, italic: true });
 
@@ -54,8 +56,8 @@ test("rtf highlight persists", async ({ page, request }, testInfo) => {
   await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
 
-  await editWordForSave(page, "word", marker);
-  await waitForPersistedMarker(request, file, marker, { page });
+  const wordEdit = await editWordForSave(page, "word", marker);
+  await expectPersistedMarker(request, file, marker, page, describeWordEdit(wordEdit));
   await formatWordSelection(page, marker, { highlight: true });
   await waitForDemoRtfFormatting(request, file, { marker, highlight: true });
 

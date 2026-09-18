@@ -18,6 +18,9 @@ coverage.out
 # Workspace-local Node/Playwright tooling dirs (used when the default caches are read-only)
 /.npmcache/
 /.pw-browsers/
+# System libs (libnspr4/libnss3/libasound) extracted locally so Chromium can launch in
+# environments that lack them and where they cannot be installed system-wide.
+/.pw-libs/
 
 # IDE
 .idea/

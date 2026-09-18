@@ -11,6 +11,33 @@ var (
 	cellCustomXMLHistoryBug = []byte("isMainLogicDocument?this.customXmlManager=new AscWord.CustomXmlManager(this):AscFormat.ExecuteNoHistory(function(){this.customXmlManager=new AscWord.CustomXmlManager(this)},this,[],!0)")
 	cellCustomXMLHistoryFix = []byte("AscFormat.ExecuteNoHistory(function(){this.customXmlManager=new AscWord.CustomXmlManager(this)},this,[],!0)")
 
+	// CustomXmlManager's constructor registers itself in the global object table:
+	//
+	//   function CustomXmlManager(document){...,AscCommon.g_oTableId.Add(this,this.Id)}
+	//
+	// During document load that Add() runs with undo history enabled, so the history tries
+	// to serialise a CustomXmlManager before it is fully constructed and sdkjs throws:
+	//
+	//   TypeError: this.NewClass.Write_ToBinary2 is not a function
+	//     at CChangesTableIdAdd.WriteToBinary (sdk-all-min.js)
+	//     at UndoRedoItemSerializable.SerializeInner (sdk-all.js)
+	//     at Workbook._SerializeHistoryItem2
+	//     at CHistory.Refresh_SpreadsheetChanges
+	//     at CHistory.Add
+	//     at CTableId.Add
+	//     at new CustomXmlManager
+	//
+	// The spreadsheet then never finishes loading: the cell-name box stays disabled and
+	// every cell-editing test times out. Wrapping the registration in ExecuteNoHistory keeps
+	// it out of the undo stack, which is correct because opening a document is not an
+	// undoable user action.
+	//
+	// Note: the older cellCustomXMLHistory fix above wraps the *caller* in sdk-all.js. That
+	// is insufficient — the failing frame is inside the constructor, which is a separate
+	// site in the same bundle.
+	cellCustomXMLCtorBug = []byte("function CustomXmlManager(document){this.Id=AscCommon.g_oIdCounter.Get_NewId(),this.document=document,this.xml=[],this.m_arrXmlById={},AscCommon.g_oTableId.Add(this,this.Id)}")
+	cellCustomXMLCtorFix = []byte("function CustomXmlManager(document){this.Id=AscCommon.g_oIdCounter.Get_NewId(),this.document=document,this.xml=[],this.m_arrXmlById={},AscFormat.ExecuteNoHistory(function(){AscCommon.g_oTableId.Add(this,this.Id)},this,[],!0)}")
+
 	cellOpenFromBinNoInitBug = []byte("OpenDocumentFromBinNoInit=function(gObject){AscFonts.IsCheckSymbols=!0,(new AscCommonExcel.BinaryFileReader).Read(gObject,this.wbModel),AscFonts.IsCheckSymbols=!1}")
 	cellOpenFromBinNoInitFix = []byte("OpenDocumentFromBinNoInit=function(gObject){AscFonts.IsCheckSymbols=!0,AscFormat.ExecuteNoHistory(function(){(new AscCommonExcel.BinaryFileReader).Read(gObject,this.wbModel)},this,[],!0),AscFonts.IsCheckSymbols=!1}")
 
@@ -63,6 +90,9 @@ func patchSDKJS(outDir string) error {
 		optional bool
 	}{
 		{filepath.Join(outDir, "sdkjs", "cell", "sdk-all.js"), cellCustomXMLHistoryBug, cellCustomXMLHistoryFix, true},
+		// Required: this is the site that actually throws. Note sdk-all-min.js has no
+		// CustomXmlManager constructor, so this anchor is only expected in sdk-all.js.
+		{filepath.Join(outDir, "sdkjs", "cell", "sdk-all.js"), cellCustomXMLCtorBug, cellCustomXMLCtorFix, false},
 		{filepath.Join(outDir, "sdkjs", "cell", "sdk-all-min.js"), cellCustomXMLHistoryBug, cellCustomXMLHistoryFix, true},
 		{filepath.Join(outDir, "sdkjs", "cell", "sdk-all-min.js"), cellOpenFromBinNoInitBug, cellOpenFromBinNoInitFix, false},
 		// Required: without this the coauthoring auth packet carries a non-JWT placeholder

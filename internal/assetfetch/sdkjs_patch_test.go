@@ -14,7 +14,11 @@ func TestPatchSDKJSDisablesCustomXMLManagerHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(cellDir, "sdk-all.js")
+	// cell/sdk-all.js now also requires the CustomXmlManager constructor patch, so the
+	// fixture must carry that anchor too or patchSDKJS correctly rejects the bundle.
 	input := append([]byte("before,"), cellCustomXMLHistoryBug...)
+	input = append(input, ',')
+	input = append(input, cellCustomXMLCtorBug...)
 	input = append(input, []byte(",after")...)
 	if err := os.WriteFile(path, input, 0o644); err != nil {
 		t.Fatal(err)
@@ -215,5 +219,60 @@ func requiredAnchorsFor(editor string) [][]byte {
 		return [][]byte{slideInitEditorBug, slideOpenFromBinBug}
 	default:
 		return nil
+	}
+}
+
+// TestPatchSDKJSKeepsCustomXmlManagerOutOfHistory is the regression test for the
+// spreadsheet load crash:
+//
+//	TypeError: this.NewClass.Write_ToBinary2 is not a function
+//	  at CChangesTableIdAdd.WriteToBinary (sdk-all-min.js)
+//	  ... at CHistory.Add ... at new CustomXmlManager
+//
+// CustomXmlManager registered itself in the global object table while undo history was
+// enabled, so the history tried to serialise a half-constructed object. The earlier fix
+// wrapped the *caller*, which was not the failing frame; the constructor must be patched.
+func TestPatchSDKJSKeepsCustomXmlManagerOutOfHistory(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "sdkjs", "cell")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "sdk-all.js")
+	input := append([]byte("prefix,"), cellCustomXMLHistoryBug...)
+	input = append(input, ',')
+	input = append(input, cellCustomXMLCtorBug...)
+	input = append(input, []byte(",suffix")...)
+	if err := os.WriteFile(path, input, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := patchSDKJS(root); err != nil {
+		t.Fatalf("patchSDKJS: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(got, cellCustomXMLCtorFix) {
+		t.Fatalf("CustomXmlManager constructor still registers inside undo history: %s", got)
+	}
+	if bytes.Contains(got, cellCustomXMLCtorBug) {
+		t.Fatal("buggy constructor text still present")
+	}
+	// The registration must survive — only its history recording is suppressed.
+	if !bytes.Contains(got, []byte("AscCommon.g_oTableId.Add(this,this.Id)")) {
+		t.Fatal("table registration was removed entirely; only history suppression is wanted")
+	}
+
+	if secondErr := patchSDKJS(root); secondErr != nil {
+		t.Fatalf("second patchSDKJS: %v", secondErr)
+	}
+	again, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, again) {
+		t.Fatal("patch is not idempotent")
 	}
 }

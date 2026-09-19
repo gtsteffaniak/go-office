@@ -33,16 +33,55 @@ const CONTENT_FIND_TIMEOUT = Number(process.env.PLAYWRIGHT_CONTENT_FIND_TIMEOUT 
 const SAVE_DONE_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_DONE_TIMEOUT ?? 45_000);
 const INTERACTIVE_SETTLE_MS = 400;
 
-// Cell-editing gates are SEQUENTIAL, so their timeouts add up. The per-test timeout is
-// PLAYWRIGHT_SAVE_TEST_TIMEOUT (150s) and it must also cover warm + page.goto + editor boot
-// (~20-35s under parallel load). Keeping each gate modest is what ensures a failure is
-// reported as a named problem (e.g. "cell editor not ready") rather than as a bare
-// "Test timeout exceeded" after the browser has already been torn down.
+// Cell-editing gates are SEQUENTIAL, so their timeouts add up. Individually generous gates
+// are therefore not safe on their own: the worst-case sum below previously reached ~320s
+// against the 150s per-test budget, and under load that surfaced as a bare
+// "Test timeout of 150000ms exceeded" after the browser had already been torn down —
+// indistinguishable from a genuine hang. A blanket increase in the gates makes that worse,
+// not better.
 //
-// Budget: warm/boot ~35s + gates ~45s + marker 45s = ~125s, inside 150s.
-const CELL_SELECT_TIMEOUT = Number(process.env.PLAYWRIGHT_CELL_SELECT_TIMEOUT ?? 20_000);
-const CELL_INTERACTIVE_TIMEOUT = Number(process.env.PLAYWRIGHT_CELL_INTERACTIVE_TIMEOUT ?? 20_000);
-const CELL_SDK_TIMEOUT = Number(process.env.PLAYWRIGHT_CELL_SDK_TIMEOUT ?? 20_000);
+// The helpers below therefore charge every wait against ONE shared per-test deadline
+// (testBudget), so the gates can be individually generous without their sum escaping the
+// budget. The last wait is truncated to whatever remains, which keeps a failure attributed
+// to the step that actually stalled.
+//
+// This matters because the observed cost is load-dependent: under combined load (three
+// Playwright projects against one server, 8 workers) the editor has been seen reaching
+// "document content ready" in 15-21s, versus ~200ms isolated. A fixed 20s gate made the
+// outcome depend on scheduling rather than on the code under test.
+const TEST_BUDGET_MS = Number(process.env.PLAYWRIGHT_SAVE_TEST_TIMEOUT ?? 150_000);
+/** Reserve for teardown/artifacts so a truncated wait still reports a named error. */
+const TEST_BUDGET_RESERVE_MS = 8_000;
+
+/** Wall-clock start of the current test's budget, keyed by the page that owns it. */
+const budgetStart = new WeakMap<object, number>();
+
+/** Mark the start of a test's budget window for `page`. Called by the readiness helpers. */
+export function startTestBudget(page: Page): void {
+  budgetStart.set(page, Date.now());
+}
+
+/**
+ * Clamp a wait to the remaining test budget.
+ *
+ * Returns at least 1s so a wait always makes progress (and fails on its own terms) rather
+ * than being handed a zero/negative timeout by Playwright.
+ */
+function withinBudget(page: Page, requestedMs: number): number {
+  const start = budgetStart.get(page);
+  if (start === undefined) {
+    return requestedMs;
+  }
+  const remaining = TEST_BUDGET_MS - TEST_BUDGET_RESERVE_MS - (Date.now() - start);
+  return Math.max(1_000, Math.min(requestedMs, remaining));
+}
+
+// Interactive-state gates for the cell editor. These run AFTER the document reports itself
+// ready, so they measure how long the spreadsheet UI takes to finish wiring itself up.
+// They are generous because the shared deadline above, not the gate, is what bounds the test.
+const CELL_SELECT_TIMEOUT = Number(process.env.PLAYWRIGHT_CELL_SELECT_TIMEOUT ?? 45_000);
+const CELL_INTERACTIVE_TIMEOUT = Number(process.env.PLAYWRIGHT_CELL_INTERACTIVE_TIMEOUT ?? 45_000);
+const CELL_SDK_TIMEOUT = Number(process.env.PLAYWRIGHT_CELL_SDK_TIMEOUT ?? 45_000);
 const CELL_SDK_TIMEOUT_FALLBACK = Number(
   process.env.PLAYWRIGHT_CELL_SDK_TIMEOUT_FALLBACK ?? 8_000,
 );
@@ -511,7 +550,11 @@ export async function waitForEditorReady(
   editor: SampleFile["editor"],
   opts?: { timeoutMs?: number; required?: boolean },
 ): Promise<boolean> {
-  const timeoutMs = opts?.timeoutMs ?? DOCUMENT_READY_TIMEOUT;
+  // Start (or restart) this page's shared budget window. Every subsequent wait clamps itself
+  // to what remains, which is what keeps individually generous gates from summing past the
+  // per-test timeout.
+  startTestBudget(page);
+  const timeoutMs = withinBudget(page, opts?.timeoutMs ?? DOCUMENT_READY_TIMEOUT);
   const required = opts?.required ?? true;
   try {
     await waitForDemoWarm(page);
@@ -575,7 +618,7 @@ export async function waitForEditorInteractive(
   opts?: number | { timeoutMs?: number; required?: boolean },
 ): Promise<boolean> {
   const options = typeof opts === "number" ? { timeoutMs: opts } : (opts ?? {});
-  const timeoutMs = options.timeoutMs ?? DOCUMENT_READY_TIMEOUT;
+  const timeoutMs = withinBudget(page, options.timeoutMs ?? DOCUMENT_READY_TIMEOUT);
   const required = options.required ?? true;
   const frame = getEditorFrame(page, editor);
 
@@ -631,13 +674,15 @@ export async function waitForEditorEditable(
   opts?: number | { timeoutMs?: number; required?: boolean },
 ): Promise<boolean> {
   const options = typeof opts === "number" ? { timeoutMs: opts } : (opts ?? {});
-  const timeoutMs = options.timeoutMs ?? DOCUMENT_READY_TIMEOUT;
+  const timeoutMs = withinBudget(page, options.timeoutMs ?? DOCUMENT_READY_TIMEOUT);
   const required = options.required ?? true;
   try {
     await waitForEditorReady(page, editor, { timeoutMs, required });
     const frame = getEditorFrame(page, editor);
     await expect
-      .poll(async () => isEditorEditable(page, frame, editor), { timeout: timeoutMs })
+      .poll(async () => isEditorEditable(page, frame, editor), {
+        timeout: withinBudget(page, timeoutMs),
+      })
       .toBe(true);
     await page.waitForTimeout(INTERACTIVE_SETTLE_MS);
     if (editor === "cell") {
@@ -716,7 +761,7 @@ async function selectCellViaUi(frame: FrameLocator, ref: string): Promise<boolea
  * of naming the real problem. Failing fast here leaves budget for the save steps that
  * follow and produces an actionable error.
  */
-async function selectCell(frame: FrameLocator, ref: string): Promise<boolean> {
+async function selectCell(page: Page, frame: FrameLocator, ref: string): Promise<boolean> {
   const nameBoxEnabled = await frame
     .locator(CELL_NAME_INPUT)
     .first()
@@ -741,7 +786,7 @@ async function selectCell(frame: FrameLocator, ref: string): Promise<boolean> {
           }
           return selectCellViaUi(frame, ref);
         },
-        { timeout: CELL_SELECT_TIMEOUT, intervals: [200, 500, 1000] },
+        { timeout: withinBudget(page, CELL_SELECT_TIMEOUT), intervals: [200, 500, 1000] },
       )
       .toBe(true);
     return true;
@@ -832,13 +877,13 @@ export function csvCellValue(csv: string, ref: string): string {
   return cells[col - 1] ?? "";
 }
 
-async function readCellValue(frame: FrameLocator, ref: string): Promise<string> {
+async function readCellValue(page: Page, frame: FrameLocator, ref: string): Promise<string> {
   const viaSdk = await frame.locator("body").evaluate(readCellViaBrowser, ref);
   if (viaSdk) {
     return viaSdk;
   }
 
-  if (!(await selectCell(frame, ref))) {
+  if (!(await selectCell(page, frame, ref))) {
     return "";
   }
   return readFormulaBarValue(frame);
@@ -878,7 +923,7 @@ async function cellShowsValue(
     return false;
   }
   try {
-    const value = await readCellValue(frame, ref);
+    const value = await readCellValue(page, frame, ref);
     return value.includes(expected);
   } catch {
     return false;
@@ -957,7 +1002,7 @@ export async function setCellContent(
   // the interactive gate is advisory: the edit is still attempted, because a UI/API
   // readback being unavailable does not mean the editor cannot accept input.
   const interactive = await waitForEditorInteractive(page, editor, {
-    timeoutMs: CELL_INTERACTIVE_TIMEOUT,
+    timeoutMs: withinBudget(page, CELL_INTERACTIVE_TIMEOUT),
     required: false,
   });
   const frame = getEditorFrame(page, editor);
@@ -982,8 +1027,8 @@ export async function setCellContent(
         },
         {
           timeout: interactive
-            ? CELL_SDK_TIMEOUT
-            : CELL_SDK_TIMEOUT_FALLBACK,
+            ? withinBudget(page, CELL_SDK_TIMEOUT)
+            : withinBudget(page, CELL_SDK_TIMEOUT_FALLBACK),
           intervals: [200, 500, 1000],
         },
       )
@@ -994,7 +1039,7 @@ export async function setCellContent(
   }
 
   if (!viaSdk) {
-    if (await selectCell(frame, ref)) {
+    if (await selectCell(page, frame, ref)) {
       await writeFormulaBarValue(frame, value);
     }
   }
@@ -1004,7 +1049,7 @@ export async function setCellContent(
     // Best-effort retry. The caller (editCellForSave) treats editor-side acknowledgement as
     // advisory because the persisted file is the contract, so a UI that never becomes usable
     // must not fail the test here — that only converts a slow worker into a false negative.
-    if (await selectCell(frame, ref)) {
+    if (await selectCell(page, frame, ref)) {
       await writeFormulaBarValue(frame, value);
       await commitCellEdit(frame);
     }
@@ -1046,7 +1091,7 @@ export async function editCellForSave(
       .poll(async () => cellShowsValue(page, frame, editor, ref, value), {
         // Bounded and short: this is a convenience check, not the test contract. Waiting
         // EDITOR_LOAD_TIMEOUT here burned most of the test budget on slow workers.
-        timeout: CELL_ACK_TIMEOUT,
+        timeout: withinBudget(page, CELL_ACK_TIMEOUT),
         intervals: [200, 500, 1000],
       })
       .toBe(true);
@@ -1915,7 +1960,13 @@ export async function waitForPersistedContent(
   postcondition: (buf: Buffer) => boolean,
   opts?: PersistOptions,
 ): Promise<void> {
-  const timeoutMs = opts?.timeoutMs ?? SAVE_DONE_TIMEOUT;
+  // Charge this wait against the shared per-test budget too. Under combined load the
+  // readiness gates ahead of it can legitimately consume most of the window, and letting the
+  // marker poll run a full SAVE_DONE_TIMEOUT regardless produced "Test timeout of 150000ms
+  // exceeded" with the real error replaced by a teardown message. Truncating keeps whatever
+  // budget is left and reports the marker failure on its own terms.
+  const requested = opts?.timeoutMs ?? SAVE_DONE_TIMEOUT;
+  const timeoutMs = opts?.page ? withinBudget(opts.page, requested) : requested;
   const label = opts?.label ?? "persisted content postcondition";
   let beforeFp = "<unavailable>";
   try {

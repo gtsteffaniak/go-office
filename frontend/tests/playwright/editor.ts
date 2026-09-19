@@ -26,11 +26,12 @@ const DEMO_WARM_TIMEOUT = Number(process.env.PLAYWRIGHT_WARM_TIMEOUT ?? 60_000);
 const WARM_REQUEST_TIMEOUT = Number(process.env.PLAYWRIGHT_WARM_REQUEST_MS ?? 30_000);
 const CONTENT_FIND_TIMEOUT = Number(process.env.PLAYWRIGHT_CONTENT_FIND_TIMEOUT ?? 15_000);
 // Budget for the persisted-marker wait. A healthy flush lands in ~6s and the marker is
-// visible ~2s later, so this is generous. It must fit inside the per-test timeout together
-// with the readiness gates that run before it (see setCellContent/editCellForSave); the
-// worst-case sum of those gates is what actually determines whether a failure is reported
-// as a save problem or as a bare test timeout.
-const SAVE_DONE_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_DONE_TIMEOUT ?? 45_000);
+// visible ~2s later, so 30s is ample. It must fit inside the per-test timeout together with
+// the readiness gates that run before it (see setCellContent/editCellForSave); the worst-case
+// sum of those gates is what actually determines whether a failure is reported as a save
+// problem or as a bare test timeout. The Dockerfile pins this via
+// PLAYWRIGHT_SAVE_DONE_TIMEOUT — keep both in step.
+const SAVE_DONE_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_DONE_TIMEOUT ?? 30_000);
 const INTERACTIVE_SETTLE_MS = 400;
 
 // Cell-editing gates are SEQUENTIAL, so their timeouts ADD UP. That sum — not any single
@@ -48,24 +49,37 @@ const INTERACTIVE_SETTLE_MS = 400;
 // per-test budget, and never let any helper extend the window it was given.
 //
 // Budget for a cell save test (PLAYWRIGHT_SAVE_TEST_TIMEOUT, 150s):
-//   warm + goto + editor boot      ~21s   (observed under combined load)
-//   readiness gate                 20s
-//   interactive + sdk + ack        46s    (20 + 20 + 6, worst case)
-//   persisted-marker poll          45s    (SAVE_DONE_TIMEOUT; healthy path ~8s)
+//   warm + goto + editor boot      ~25s   (observed under combined load)
+//   #status gate                    8s
+//   interactive + sdk              40s    (20 + 20)
+//   select + write                 15s
+//   read-back + retry (one cap)    12s
+//   commit/settle                   1s
+//   persisted-marker poll          30s    (SAVE_DONE_TIMEOUT; healthy path ~8s)
 //   ------------------------------------
-//   worst case                   ~132s    inside 150s, leaving teardown margin
+//   worst case                   ~131s    inside 150s, leaving ~19s teardown margin
 //
 // SAVE_DONE_TIMEOUT is the largest single item and is only ever reached when a save has
 // genuinely failed, so the healthy path is far shorter (~70s). Keep this sum under the
 // per-test timeout when changing any gate: a sum that exceeds it is reported as a bare
 // "Test timeout ... exceeded" rather than as the step that stalled.
-const CELL_SELECT_TIMEOUT = Number(process.env.PLAYWRIGHT_CELL_SELECT_TIMEOUT ?? 20_000);
+//
+// The read-back/retry block is capped by ONE deadline (CELL_EDIT_RETRY_BUDGET) rather than
+// by summing nested gate timeouts. An earlier shape allowed 20s + 20s there, which pushed the
+// worst case to ~179s — past the budget, and exactly the failure this budget guards against.
+const CELL_SELECT_TIMEOUT = Number(process.env.PLAYWRIGHT_CELL_SELECT_TIMEOUT ?? 15_000);
 const CELL_INTERACTIVE_TIMEOUT = Number(process.env.PLAYWRIGHT_CELL_INTERACTIVE_TIMEOUT ?? 20_000);
 const CELL_SDK_TIMEOUT = Number(process.env.PLAYWRIGHT_CELL_SDK_TIMEOUT ?? 20_000);
 const CELL_SDK_TIMEOUT_FALLBACK = Number(
   process.env.PLAYWRIGHT_CELL_SDK_TIMEOUT_FALLBACK ?? 8_000,
 );
 const CELL_ACK_TIMEOUT = Number(process.env.PLAYWRIGHT_CELL_ACK_TIMEOUT ?? 6_000);
+/**
+ * Wall-clock cap for the whole "did my edit take?" read-back + retry block in
+ * setCellContent. It is a deadline rather than a sum of nested timeouts so the block cannot
+ * silently grow past the test budget as more retries are added.
+ */
+const CELL_EDIT_RETRY_BUDGET = Number(process.env.PLAYWRIGHT_CELL_RETRY_BUDGET ?? 12_000);
 const CELL_DIAG_TIMEOUT = Number(process.env.PLAYWRIGHT_CELL_DIAG_TIMEOUT ?? 3_000);
 // Word/slide save edits treat readiness as advisory. This bounds that advisory wait so the
 // edit is still attempted while there is budget left for the save and the marker poll.
@@ -906,6 +920,40 @@ async function cellShowsValue(
   }
 }
 
+/**
+ * `cellShowsValue` bounded by a deadline.
+ *
+ * `cellShowsValue` can itself call `readCellValue` -> `selectCell`, which waits up to
+ * CELL_SELECT_TIMEOUT. Callers that treat the read-back as advisory (see
+ * setCellContent/editCellForSave) must not hand it a blank cheque, or a single unproductive
+ * check consumes the budget the save and marker poll need. Returns false on timeout rather
+ * than throwing, since the caller only uses this to decide whether a retry is worth trying.
+ */
+async function cellShowsValueWithin(
+  page: Page,
+  frame: FrameLocator,
+  editor: SampleFile["editor"],
+  ref: string,
+  expected: string,
+  budgetMs: number,
+): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      cellShowsValue(page, frame, editor, ref, expected),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), budgetMs);
+      }),
+    ]);
+  } catch {
+    return false;
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
 /** Poll until a spreadsheet cell shows expected text in the editor (or CSV on disk). */
 export async function waitForCellContent(
   page: Page,
@@ -1019,11 +1067,21 @@ export async function setCellContent(
   }
 
   await commitCellEdit(frame);
-  if (!(await cellShowsValue(page, frame, editor, ref, value))) {
-    // Best-effort retry. The caller (editCellForSave) treats editor-side acknowledgement as
-    // advisory because the persisted file is the contract, so a UI that never becomes usable
-    // must not fail the test here — that only converts a slow worker into a false negative.
-    if (await selectCell(frame, ref)) {
+  // Best-effort retry, bounded as a whole.
+  //
+  // This block used to be the single largest sink in a save test: `cellShowsValue` reads the
+  // cell back via `selectCell` (CELL_SELECT_TIMEOUT) and the retry then called `selectCell`
+  // AGAIN (another full gate), so a worker that never reached `apiReady` could spend two
+  // gate-lengths here doing nothing useful. Together with the gates above that pushed the
+  // worst case past the per-test budget, which is what turned a slow worker into a bare
+  // "Test timeout of 150000ms exceeded" instead of a usable failure.
+  //
+  // The caller treats editor-side acknowledgement as advisory (the persisted file is the
+  // contract), so this is capped by a single deadline shared between the read-back and the
+  // retry: the retry only runs if time is actually left for it to mean something.
+  const ackDeadline = Date.now() + CELL_EDIT_RETRY_BUDGET;
+  if (!(await cellShowsValueWithin(page, frame, editor, ref, value, 6_000))) {
+    if (Date.now() < ackDeadline && (await selectCell(frame, ref))) {
       await writeFormulaBarValue(frame, value);
       await commitCellEdit(frame);
     }
@@ -1448,17 +1506,56 @@ export async function typeInDocument(
   await overlay.pressSequentially(text, { delay: 20 });
 }
 
-const SAVE_BUTTON =
-  "#slot-btn-dt-save, #id-toolbar-btn-save, #box-document-title .btn-save, button.btn-save, a.btn-save, .icon-save";
+// The Save control must be the BUTTON, not the slot that contains it.
+//
+// The editor header template deliberately emits an empty container
+// (`<div class="btn-slot" id="slot-btn-dt-save" data-layout-name="header-save">`) and only
+// later injects the real control into it via createTitleButton(...).render(slot), which does
+// `$(slot).html('<...><button type="button" class="btn ...">')`.
+//
+// Targeting the slot directly was a latent race: `.btn-slot` carries no width/height of its
+// own (app.css puts --header-component-width/height on the CHILD `.btn-header`/`.btn-group`),
+// so an empty slot has no box for Playwright to aim at. On a fast machine the child is
+// already present and the click lands; on a slow/loaded CI worker the slot renders first and
+// the click burns its full timeout on a zero-size container:
+//
+//   TimeoutError: locator.click: Timeout 5000ms exceeded.
+//     - locator resolved to <div class="btn-slot" id="slot-btn-dt-save" ...>
+//     - attempting click action
+//
+// So the child selectors come FIRST, and the slot is kept only as a last-resort fallback.
+const SAVE_BUTTON = [
+  "#slot-btn-dt-save > button",
+  "#slot-btn-dt-save .btn-header",
+  "#slot-btn-dt-save .btn-group > button",
+  "#id-toolbar-btn-save",
+  "#box-document-title .btn-save",
+  "button.btn-save",
+  "a.btn-save",
+  ".icon-save",
+].join(", ");
 
-/** Click Save once inside the editor iframe (Ctrl+S only when no button exists). */
+/**
+ * Click Save once inside the editor iframe, falling back to Ctrl+S.
+ *
+ * The fallback is reachable on purpose: previously `count() > 0` was satisfied by the empty
+ * slot div, so the click branch was ALWAYS taken and Ctrl+S was dead code. On a slow worker
+ * that turned "the button is not painted yet" into a hard failure instead of a fallback.
+ * Look for a *visible* control, and fall back when there is none.
+ */
 export async function triggerManualSave(page: Page, editor: SampleFile["editor"]): Promise<void> {
   const frame = getEditorFrame(page, editor);
   await frame.locator("body").click({ position: { x: 12, y: 12 }, force: true });
 
   const saveBtn = frame.locator(SAVE_BUTTON).first();
-  if ((await saveBtn.count()) > 0) {
-    await saveBtn.click({ force: true, timeout: 5_000, noWaitAfter: true });
+  // The control is injected after the header renders, so give it a bounded moment to appear
+  // rather than sampling once. Visible-first keeps a hidden placeholder from winning.
+  const appeared = await saveBtn
+    .waitFor({ state: "visible", timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (appeared) {
+    await saveBtn.click({ force: true, timeout: 5_000, noWaitAfter: true }).catch(() => {});
     return;
   }
   await frame.locator("body").press("Control+s");

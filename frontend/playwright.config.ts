@@ -15,6 +15,13 @@ const workers = Number(process.env.PLAYWRIGHT_WORKERS ?? 8);
 // the test died in teardown before it could report why it was waiting.
 const saveTestTimeout = Number(process.env.PLAYWRIGHT_SAVE_TEST_TIMEOUT ?? 150_000);
 const defaultTestTimeout = Number(process.env.PLAYWRIGHT_TEST_TIMEOUT ?? 120_000);
+// The rtf-formatting specs run TWO full edit→save→verify cycles inside one test (the marker
+// is persisted first, then formatting is applied to it and that must persist too), so their
+// worst case is roughly double a plain save test. Sharing the 150s save budget meant the
+// second cycle could never finish on a loaded worker, and every one of these tests failed
+// with a bare "Test timeout ... exceeded" at the final format-verify poll. Give the project
+// that actually does two cycles its own, larger budget. Workers stay at 8 (see `workers`).
+const rtfTestTimeout = Number(process.env.PLAYWRIGHT_RTF_TEST_TIMEOUT ?? 240_000);
 
 const sharedUse = {
   baseURL,
@@ -48,9 +55,17 @@ export default defineConfig({
     },
     {
       name: "chromium-save",
-      testMatch: /(save|rtf-formatting)\.spec\.ts$/,
+      testMatch: /save\.spec\.ts$/,
       dependencies: ["chromium"],
       timeout: saveTestTimeout,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      // Two edit→save cycles per test; see rtfTestTimeout.
+      name: "chromium-rtf",
+      testMatch: /rtf-formatting\.spec\.ts$/,
+      dependencies: ["chromium"],
+      timeout: rtfTestTimeout,
       use: { ...devices["Desktop Chrome"] },
     },
     {

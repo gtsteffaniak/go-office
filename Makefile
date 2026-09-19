@@ -366,7 +366,7 @@ test-playwright: ensure-assets check-sample-matrix check-test-imports check-dock
 
 test-playwright-project: ensure-assets check-sample-matrix check-test-imports check-docker
 	@if [ -z "$(PLAYWRIGHT_PROJECT)" ]; then \
-		echo "error: PLAYWRIGHT_PROJECT is required (e.g. chromium, chromium-save, chromium-post-save)"; \
+		echo "error: PLAYWRIGHT_PROJECT is required (e.g. chromium, chromium-save, chromium-rtf, chromium-post-save)"; \
 		exit 1; \
 	fi
 	@echo "==> Playwright E2E (Docker, project=$(PLAYWRIGHT_PROJECT))"

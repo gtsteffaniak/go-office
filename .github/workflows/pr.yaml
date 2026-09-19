@@ -103,6 +103,8 @@ jobs:
             project: chromium
           - name: save
             project: chromium-save
+          - name: rtf
+            project: chromium-rtf
           - name: post-save
             project: chromium-post-save
     steps:

@@ -84,6 +84,17 @@ const CELL_DIAG_TIMEOUT = Number(process.env.PLAYWRIGHT_CELL_DIAG_TIMEOUT ?? 3_0
 // Word/slide save edits treat readiness as advisory. This bounds that advisory wait so the
 // edit is still attempted while there is budget left for the save and the marker poll.
 const WORD_READY_TIMEOUT = Number(process.env.PLAYWRIGHT_WORD_READY_TIMEOUT ?? 20_000);
+/** Confirmation that an edit/format landed in the editor, and that a marker is findable. */
+const WORD_ACK_TIMEOUT = Number(process.env.PLAYWRIGHT_WORD_ACK_TIMEOUT ?? 10_000);
+/**
+ * Post-format verification poll in formatWordSelection.
+ *
+ * This is the LAST wait in the rtf specs, and those specs run two full edit→save cycles in
+ * one test budget (see the budget note at the top). A full DOCUMENT_READY_TIMEOUT (45s) here
+ * made the worst case unfittable; the caller has already proven the editor can save, so this
+ * only needs to cover the format round-trip.
+ */
+const FORMAT_VERIFY_TIMEOUT = Number(process.env.PLAYWRIGHT_FORMAT_VERIFY_TIMEOUT ?? 20_000);
 
 /** Spreadsheet name box (e.g. B2) and formula bar (cell value). */
 const CELL_NAME_INPUT = "#ce-cell-name";
@@ -1440,12 +1451,7 @@ export async function editWordForSave(
 
   let visible = false;
   try {
-    await waitForMarkerInEditor(
-      page,
-      editor,
-      marker,
-      Number(process.env.PLAYWRIGHT_WORD_ACK_TIMEOUT ?? 10_000),
-    );
+    await waitForMarkerInEditor(page, editor, marker, WORD_ACK_TIMEOUT);
     visible = true;
   } catch {
     // Best effort only; the spec asserts persistence, not editor visibility.
@@ -1889,9 +1895,21 @@ export async function formatWordSelection(
   marker: string,
   format: WordFormatOptions,
 ): Promise<void> {
-  await waitForEditorEditable(page, "word");
+  // Readiness is ADVISORY here, exactly as it is on the save path: the rtf-formatting specs
+  // already performed a successful edit+save before calling this, so the editor is
+  // demonstrably usable. A hard 45s gate on a signal that is merely a UI convenience is what
+  // made these tests unfittable in the budget — worst case was
+  //   edit+save (20+10+30) + editable (45) + marker (45) + format poll (45) + rtf poll (30)
+  // = ~225s against a 150s per-test timeout. The advisory call still waits, but returns
+  // instead of throwing, so the work below always runs and can report its own result.
+  await waitForEditorEditable(page, "word", {
+    timeoutMs: WORD_READY_TIMEOUT,
+    required: false,
+  });
   const frame = getEditorFrame(page, "word");
-  await waitForMarkerInEditor(page, "word", marker);
+  // The marker was just persisted by the caller, so a short confirmation is enough; a full
+  // DOCUMENT_READY_TIMEOUT (45s) here duplicates the wait the caller already did.
+  await waitForMarkerInEditor(page, "word", marker, WORD_ACK_TIMEOUT);
 
   const sdkApplied = await frame
     .locator("body")
@@ -1902,7 +1920,7 @@ export async function formatWordSelection(
 
   await expect
     .poll(async () => documentContainsText(frame, marker, "word"), {
-      timeout: DOCUMENT_READY_TIMEOUT,
+      timeout: FORMAT_VERIFY_TIMEOUT,
       intervals: [300, 500, 1000],
     })
     .toBe(true);

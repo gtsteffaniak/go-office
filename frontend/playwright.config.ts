@@ -7,7 +7,14 @@ const workers = Number(process.env.PLAYWRIGHT_WORKERS ?? 8);
 // ~3x slack, so a hang burned the full budget and, with 8 parallel workers draining, a
 // failing project took ~400s to report. 150s keeps headroom over the slowest observed
 // pass while halving the cost of a hang.
+//
+// The save project carves an explicit teardown reserve out of its own budget (see the gate
+// sizes in tests/playwright/editor.ts), so the in-test gates always finish first and any
+// failure is reported on its own terms. The default project timeout stays separate: setting
+// both to the same 150s is what made an expiry indistinguishable from a genuine hang, since
+// the test died in teardown before it could report why it was waiting.
 const saveTestTimeout = Number(process.env.PLAYWRIGHT_SAVE_TEST_TIMEOUT ?? 150_000);
+const defaultTestTimeout = Number(process.env.PLAYWRIGHT_TEST_TIMEOUT ?? 120_000);
 
 const sharedUse = {
   baseURL,
@@ -19,7 +26,7 @@ const sharedUse = {
 };
 
 export default defineConfig({
-  timeout: Number(process.env.PLAYWRIGHT_TEST_TIMEOUT ?? 120_000),
+  timeout: defaultTestTimeout,
   expect: {
     timeout: Number(process.env.PLAYWRIGHT_EXPECT_TIMEOUT ?? 6_000),
   },

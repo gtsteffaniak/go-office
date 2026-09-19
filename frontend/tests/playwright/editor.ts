@@ -1555,8 +1555,17 @@ export async function triggerManualSave(page: Page, editor: SampleFile["editor"]
     .then(() => true)
     .catch(() => false);
   if (appeared) {
-    await saveBtn.click({ force: true, timeout: 5_000, noWaitAfter: true }).catch(() => {});
-    return;
+    // Do NOT swallow a click failure: a click that never landed leaves the document dirty with
+    // no save in flight, and the caller then waits out the whole marker budget for a save that
+    // was never triggered (observed as saveDone=null, status="Document ready"). Report the
+    // outcome so Ctrl+S still gets a chance to trigger the save.
+    const clicked = await saveBtn
+      .click({ force: true, timeout: 5_000, noWaitAfter: true })
+      .then(() => true)
+      .catch(() => false);
+    if (clicked) {
+      return;
+    }
   }
   await frame.locator("body").press("Control+s");
 }

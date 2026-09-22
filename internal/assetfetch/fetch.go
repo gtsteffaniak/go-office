@@ -60,7 +60,7 @@ func fetchLocked(ctx context.Context, opts Options, version string) error {
 		if err := ensureConverterExecutables(filepath.Join(opts.OutDir, "converter", "bin")); err != nil {
 			return err
 		}
-		if err := patchSDKJS(opts.OutDir); err != nil {
+		if err := ApplyPatches(opts.OutDir); err != nil {
 			return err
 		}
 		if err := ensureSlideThemesJS(opts.OutDir); err != nil {
@@ -149,7 +149,7 @@ func fetchLocked(ctx context.Context, opts Options, version string) error {
 	if err := GenerateAllFonts(opts.OutDir); err != nil {
 		return err
 	}
-	if err := patchSDKJS(opts.OutDir); err != nil {
+	if err := ApplyPatches(opts.OutDir); err != nil {
 		return err
 	}
 	if err := ensureSlideThemesJS(opts.OutDir); err != nil {

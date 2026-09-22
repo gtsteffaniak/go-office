@@ -249,6 +249,60 @@ func TestPatchSDKJSRejectsMissingTokenAnchor(t *testing.T) {
 	}
 }
 
+// TestPatchEditorHTMLVersionsRequireModules guards the cache-busting fix: hot-patched sdkjs
+// bundles are served immutable under a stable URL, so the editor bootstrap page must carry a
+// RequireJS urlArgs revision or a warm browser cache keeps running the pre-patch bundle.
+func TestPatchEditorHTMLVersionsRequireModules(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "web-apps", "apps", "spreadsheeteditor", "main")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "index.html")
+	page := []byte("<script>var require = {\n            waitSeconds: 30,\n            paths: {}\n};\n</script>")
+	if err := os.WriteFile(path, page, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := patchEditorHTML(root, "abc123"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(got, []byte(`urlArgs: "v=abc123"`)) {
+		t.Fatalf("urlArgs revision not injected: %s", got)
+	}
+
+	// Idempotent for the same revision.
+	if err := patchEditorHTML(root, "abc123"); err != nil {
+		t.Fatal(err)
+	}
+	again, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, again) {
+		t.Fatal("patch is not idempotent")
+	}
+
+	// A new revision upgrades the stale one in place rather than appending a second urlArgs.
+	if err := patchEditorHTML(root, "def456"); err != nil {
+		t.Fatal(err)
+	}
+	upgraded, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(upgraded, []byte("abc123")) || !bytes.Contains(upgraded, []byte(`urlArgs: "v=def456"`)) {
+		t.Fatalf("stale revision not upgraded: %s", upgraded)
+	}
+	if bytes.Count(upgraded, []byte("urlArgs:")) != 1 {
+		t.Fatalf("urlArgs duplicated: %s", upgraded)
+	}
+}
+
 // requiredAnchorsFor returns the non-optional patch anchors patchSDKJS expects for an editor.
 func requiredAnchorsFor(editor string) [][]byte {
 	switch editor {

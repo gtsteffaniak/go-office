@@ -34,7 +34,14 @@ func DirWithPolicy(root, subdir string, immutableExtless bool) http.Handler {
 	fs := http.FileServer(http.Dir(dir))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		setContentType(w, r.URL.Path)
-		if cacheControlImmutable(r.URL.Path, immutableExtless) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, ".html") || strings.HasSuffix(r.URL.Path, "/"):
+			// Editor bootstrap pages embed the sdkjs patch revision in their RequireJS
+			// config, so they must be revalidated on every load. A request for
+			// `/…/index.html` is redirected by FileServer to the directory URL, which is
+			// what actually serves the document, so both shapes must revalidate.
+			w.Header().Set("Cache-Control", "no-cache")
+		case cacheControlImmutable(r.URL.Path, immutableExtless):
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		}
 		fs.ServeHTTP(w, r)

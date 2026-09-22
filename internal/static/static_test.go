@@ -51,3 +51,30 @@ func TestDirDoesNotCacheExtensionlessByDefault(t *testing.T) {
 		t.Fatalf("unexpected Cache-Control = %q", rec.Header().Get("Cache-Control"))
 	}
 }
+
+// TestDirRevalidatesEditorHTML guards the cache-busting path: the editor bootstrap page must
+// never be served from a heuristic/immutable cache, because it carries the sdkjs RequireJS
+// urlArgs revision that forces a refetch of patched bundles.
+func TestDirRevalidatesEditorHTML(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "web-apps")
+	main := filepath.Join(root, "apps", "spreadsheeteditor", "main")
+	if err := os.MkdirAll(main, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(main, "index.html"), []byte("<html></html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h := Dir(dir, "web-apps")
+	// `/index.html` is redirected to the directory URL, which is the response that actually
+	// carries the document, so assert on the directory form.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/apps/spreadsheeteditor/main/", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Fatalf("Cache-Control = %q, want no-cache", cc)
+	}
+}

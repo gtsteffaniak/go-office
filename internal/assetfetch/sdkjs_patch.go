@@ -2,6 +2,8 @@ package assetfetch
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -100,7 +102,109 @@ var (
 // (spreadsheet load crash, hardcoded coauthoring token) while a fresh fetch of the same
 // version was fine. ApplyPatches is idempotent and cheap, so callers may invoke it freely.
 func ApplyPatches(outDir string) error {
-	return patchSDKJS(outDir)
+	if err := patchSDKJS(outDir); err != nil {
+		return err
+	}
+	// Version the editor's RequireJS module URLs with a digest of the patched bundles.
+	// The pre-patch bundles are served with a one-year `immutable` cache and their URL is
+	// unchanged by an in-place patch, so a browser that loaded the editor before an upgrade
+	// keeps executing the old bundle — which still sends sdkjs's hardcoded coauthoring
+	// placeholder instead of the integrator's JWT. Appending a content-derived query forces
+	// a refetch without any user-visible cache clear.
+	return patchEditorHTML(outDir, sdkjsPatchRevision(outDir))
+}
+
+// editorHTMLGlobs match the editor bootstrap pages that define the inline RequireJS config.
+var editorHTMLGlobs = []string{
+	filepath.Join("web-apps", "apps", "*", "main", "index*.html"),
+	filepath.Join("web-apps", "apps", "*", "forms", "index.html"),
+}
+
+// sdkjsPatchRevision returns a short digest of the patched coauthoring bundles. It is stable
+// for a given patched asset tree and changes whenever a bundle's bytes change, so it is safe
+// to use as a cache key.
+func sdkjsPatchRevision(outDir string) string {
+	h := sha256.New()
+	for _, rel := range []string{
+		"sdkjs/cell/sdk-all.js",
+		"sdkjs/cell/sdk-all-min.js",
+		"sdkjs/word/sdk-all-min.js",
+		"sdkjs/slide/sdk-all-min.js",
+	} {
+		b, err := os.ReadFile(filepath.Join(outDir, filepath.FromSlash(rel)))
+		if err != nil {
+			continue
+		}
+		_, _ = h.Write([]byte(rel))
+		_, _ = h.Write(b)
+	}
+	sum := hex.EncodeToString(h.Sum(nil))
+	return sum[:12]
+}
+
+// patchEditorHTML inserts (or refreshes) the RequireJS `urlArgs` cache key in every editor
+// bootstrap page. Idempotent: a page already carrying the current revision is left alone.
+func patchEditorHTML(outDir, rev string) error {
+	if rev == "" {
+		return nil
+	}
+	for _, glob := range editorHTMLGlobs {
+		matches, err := filepath.Glob(filepath.Join(outDir, glob))
+		if err != nil {
+			return fmt.Errorf("assetfetch: patch editor html: %w", err)
+		}
+		for _, path := range matches {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("assetfetch: read editor html %s: %w", path, err)
+			}
+			updated, changed := setRequireURLArgs(data, rev)
+			if !changed {
+				continue
+			}
+			if err := os.WriteFile(path, updated, 0o644); err != nil {
+				return fmt.Errorf("assetfetch: write editor html %s: %w", path, err)
+			}
+		}
+	}
+	return nil
+}
+
+// setRequireURLArgs returns data with `urlArgs: "v=<rev>"` present in the RequireJS config.
+// It upgrades a stale revision in place when one is already present.
+func setRequireURLArgs(data []byte, rev string) ([]byte, bool) {
+	want := []byte(`urlArgs: "v=` + rev + `"`)
+	if bytes.Contains(data, want) {
+		return data, false
+	}
+	if idx := bytes.Index(data, []byte("urlArgs:")); idx >= 0 {
+		open := bytes.IndexByte(data[idx:], '"')
+		if open >= 0 {
+			valueStart := idx + open
+			closeRel := bytes.IndexByte(data[valueStart+1:], '"')
+			if closeRel >= 0 {
+				valueEnd := valueStart + 1 + closeRel + 1
+				out := make([]byte, 0, len(data))
+				out = append(out, data[:idx]...)
+				out = append(out, want...)
+				out = append(out, data[valueEnd:]...)
+				return out, true
+			}
+		}
+	}
+	anchor := []byte("waitSeconds: 30,")
+	i := bytes.Index(data, anchor)
+	if i < 0 {
+		return data, false
+	}
+	end := i + len(anchor)
+	out := make([]byte, 0, len(data)+len(want)+2)
+	out = append(out, data[:end]...)
+	out = append(out, ' ')
+	out = append(out, want...)
+	out = append(out, ',')
+	out = append(out, data[end:]...)
+	return out, true
 }
 
 // patchSDKJS applies vendor hotfixes to Euro-Office sdkjs load paths. Vanilla 9.3.4

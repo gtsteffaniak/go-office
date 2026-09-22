@@ -134,7 +134,7 @@ func (o *Opener) openFromCache(cmd openCmd, origin, basePath, docKey, ext, outDi
 			return nil, true, err
 		}
 		if o.Logger != nil {
-			o.Logger.Info("document open ok (cached origin)", "key", docKey, "format", ext)
+			o.Logger.Info("document open ok (cached origin)", "key", docKey, "format", ext, "origin", origin, "fileURL", files[cacheName])
 		}
 		return []string{pkt}, true, nil
 	}
@@ -170,10 +170,11 @@ func (o *Opener) editorBinOpenPackets(cmdType, origin, basePath, docKey, outDir,
 		if logSuffix != "" {
 			msg += " (" + logSuffix + ")"
 		}
+		editorURL := files["Editor.bin"]
 		if st, err := os.Stat(filepath.Join(outDir, "Editor.bin")); err == nil {
-			o.Logger.Info(msg, "key", docKey, "editorBinBytes", st.Size())
+			o.Logger.Info(msg, "key", docKey, "origin", origin, "fileURL", editorURL, "editorBinBytes", st.Size())
 		} else if logSuffix == "cached editor bin" {
-			o.Logger.Info(msg, "key", docKey)
+			o.Logger.Info(msg, "key", docKey, "origin", origin, "fileURL", editorURL)
 		}
 	}
 	return []string{pkt}, nil
@@ -197,7 +198,7 @@ func (o *Opener) openBrowserDocument(cmd openCmd, origin, basePath, docKey, ext,
 	}
 	if o.Logger != nil {
 		if st, err := os.Stat(destPath); err == nil {
-			o.Logger.Info("document open ok", "key", docKey, "originBytes", st.Size(), "format", ext)
+			o.Logger.Info("document open ok", "key", docKey, "origin", origin, "fileURL", files[cacheName], "originBytes", st.Size(), "format", ext)
 		}
 	}
 	return []string{pkt}, nil

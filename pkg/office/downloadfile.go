@@ -41,9 +41,16 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 		docURL = bodyURL
 	}
 	if len(s.opts.JWTSecret) > 0 && bodyToken != "" {
-		if _, err := callback.VerifyBody(s.opts.JWTSecret, bodyToken); err != nil {
+		claims, err := callback.VerifySignature(s.opts.JWTSecret, bodyToken)
+		if err != nil {
 			http.Error(w, "invalid token", http.StatusUnauthorized)
 			return
+		}
+		if bodyURL != "" {
+			if u, ok := claims["url"].(string); ok && strings.TrimSpace(u) != "" && strings.TrimSpace(u) != bodyURL {
+				http.Error(w, "invalid token", http.StatusUnauthorized)
+				return
+			}
 		}
 	}
 	if err := s.serveDocumentBytes(r.Context(), w, r, docURL); err != nil {

@@ -3,6 +3,7 @@ package callback
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -20,11 +21,13 @@ func SignBody(secret []byte, body []byte) (string, error) {
 	return t.SignedString(secret)
 }
 
-// VerifyBody validates a JWT token and returns the callback payload.
-func VerifyBody(secret []byte, token string) (Payload, error) {
+// VerifySignature validates an HS256 JWT and returns its claims without requiring
+// callback-shaped fields (e.g. editor config tokens with document.* claims).
+func VerifySignature(secret []byte, token string) (jwt.MapClaims, error) {
 	if len(secret) == 0 || token == "" {
-		return Payload{}, fmt.Errorf("callback: missing token")
+		return nil, fmt.Errorf("callback: missing token")
 	}
+	token = strings.TrimSpace(token)
 	parsed, err := jwt.Parse(token, func(t *jwt.Token) (any, error) {
 		if t.Method != jwt.SigningMethodHS256 {
 			return nil, fmt.Errorf("callback: unexpected signing method")
@@ -32,11 +35,20 @@ func VerifyBody(secret []byte, token string) (Payload, error) {
 		return secret, nil
 	})
 	if err != nil || !parsed.Valid {
-		return Payload{}, fmt.Errorf("callback: invalid token: %w", err)
+		return nil, fmt.Errorf("callback: invalid token: %w", err)
 	}
 	claims, ok := parsed.Claims.(jwt.MapClaims)
 	if !ok {
-		return Payload{}, fmt.Errorf("callback: invalid claims")
+		return nil, fmt.Errorf("callback: invalid claims")
+	}
+	return claims, nil
+}
+
+// VerifyBody validates a JWT token and returns the callback payload.
+func VerifyBody(secret []byte, token string) (Payload, error) {
+	claims, err := VerifySignature(secret, token)
+	if err != nil {
+		return Payload{}, err
 	}
 	raw, err := json.Marshal(claims)
 	if err != nil {

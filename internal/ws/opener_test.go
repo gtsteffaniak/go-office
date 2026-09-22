@@ -127,6 +127,16 @@ func TestCoauthoringOriginPrefersPublicOrigin(t *testing.T) {
 	}
 }
 
+func TestCoauthoringOriginFromForwardedHeaders(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://onlyoffice-1/doc/key/c/", nil)
+	req.Host = "onlyoffice-1"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("X-Forwarded-Host", "gportal.link")
+	if got := CoauthoringOrigin("", req); got != "https://gportal.link" {
+		t.Fatalf("forwarded origin = %q, want https://gportal.link", got)
+	}
+}
+
 func TestOpenerOpenBlocksUntilPendingChangesFlushed(t *testing.T) {
 	cacheDir := t.TempDir()
 	key := "fast-open"

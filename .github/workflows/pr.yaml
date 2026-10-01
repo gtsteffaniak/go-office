@@ -11,8 +11,7 @@ on:
 permissions:
   contents: read
 
-env:
-  ASSET_CACHE_KEY: euro-office-assets-v7-arm64-${{ hashFiles('scripts/euro-office.version', 'internal/assetfetch/**', 'cmd/fetch-assets/**') }}
+# hashFiles() is only valid in job/step expressions (after checkout), not workflow-level env.
 
 jobs:
   integration:
@@ -29,7 +28,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: assets
-          key: ${{ env.ASSET_CACHE_KEY }}
+          key: euro-office-assets-v7-arm64-${{ hashFiles('scripts/euro-office.version', 'internal/assetfetch/**', 'cmd/fetch-assets/**') }}
       - name: Prepare assets
         run: make ensure-assets
       - name: Integration tests
@@ -51,7 +50,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: assets
-          key: ${{ env.ASSET_CACHE_KEY }}
+          key: euro-office-assets-v7-arm64-${{ hashFiles('scripts/euro-office.version', 'internal/assetfetch/**', 'cmd/fetch-assets/**') }}
       - name: Prepare assets
         run: make ensure-assets
       - name: Convert tests
@@ -85,7 +84,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: assets
-          key: ${{ env.ASSET_CACHE_KEY }}
+          key: euro-office-assets-v7-arm64-${{ hashFiles('scripts/euro-office.version', 'internal/assetfetch/**', 'cmd/fetch-assets/**') }}
       - name: Prepare assets
         run: make ensure-assets
       - name: Verify sample matrix

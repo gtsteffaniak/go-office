@@ -11,33 +11,9 @@ on:
 permissions:
   contents: read
 
-# hashFiles() is only valid in job/step expressions (after checkout), not workflow-level env.
-
 jobs:
-  integration:
-    name: Integration (Euro-Office assets)
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Cache Euro-Office assets
-        uses: actions/cache@v4
-        with:
-          path: assets
-          key: euro-office-assets-v7-arm64-${{ hashFiles('scripts/euro-office.version', 'internal/assetfetch/**', 'cmd/fetch-assets/**') }}
-      - name: Prepare assets
-        run: make ensure-assets
-      - name: Integration tests
-        env:
-          OFFICE_ASSETS: ${{ github.workspace }}/assets
-        run: make test-integration
-
-  convert-linux:
-    name: Convert / x2t (Linux)
+  prepare_assets:
+    name: Prepare Euro-Office assets
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
     steps:
@@ -51,8 +27,53 @@ jobs:
         with:
           path: assets
           key: euro-office-assets-v7-arm64-${{ hashFiles('scripts/euro-office.version', 'internal/assetfetch/**', 'cmd/fetch-assets/**') }}
-      - name: Prepare assets
+      - name: Fetch assets
         run: make ensure-assets
+      - name: Upload assets artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: euro-office-assets
+          path: assets/
+          retention-days: 1
+          if-no-files-found: error
+
+  integration:
+    name: Integration (Euro-Office assets)
+    needs: prepare_assets
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Download Euro-Office assets
+        uses: actions/download-artifact@v4
+        with:
+          name: euro-office-assets
+          path: assets
+      - name: Integration tests
+        env:
+          OFFICE_ASSETS: ${{ github.workspace }}/assets
+        run: make test-integration
+
+  convert-linux:
+    name: Convert / x2t (Linux)
+    needs: prepare_assets
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Download Euro-Office assets
+        uses: actions/download-artifact@v4
+        with:
+          name: euro-office-assets
+          path: assets
       - name: Convert tests
         env:
           OFFICE_ASSETS: ${{ github.workspace }}/assets
@@ -60,6 +81,7 @@ jobs:
 
   test_playwright:
     name: Playwright - ${{ matrix.name }}
+    needs: prepare_assets
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
     strategy:
@@ -76,17 +98,15 @@ jobs:
             project: chromium-post-save
     steps:
       - uses: actions/checkout@v4
+      - name: Download Euro-Office assets
+        uses: actions/download-artifact@v4
+        with:
+          name: euro-office-assets
+          path: assets
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-      - name: Cache Euro-Office assets
-        uses: actions/cache@v4
-        with:
-          path: assets
-          key: euro-office-assets-v7-arm64-${{ hashFiles('scripts/euro-office.version', 'internal/assetfetch/**', 'cmd/fetch-assets/**') }}
-      - name: Prepare assets
-        run: make ensure-assets
       - name: Verify sample matrix
         run: make check-sample-matrix
       - name: Build go-office binary
@@ -101,7 +121,7 @@ jobs:
         run: npm ci
       - name: Install Chromium
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
       - name: Playwright E2E
         env:
           CI: true

@@ -1,12 +1,13 @@
-# Playwright demo server image (tests run via scripts/run-playwright.sh on host or in CI).
+# Playwright E2E for go-office (multi-stage).
 #
-#   make test-playwright-ui    → server in Docker, tests on host
-#   make test-playwright       → full E2E via docker run + scripts/run-playwright.sh
+#   make test-playwright                          → all projects
+#   make test-playwright PLAYWRIGHT_PROJECT=chromium-post-save  → one project
+#   make test-playwright-ui                       → long-running server target
 #
-# Browser/tooling base (pin digest in Makefile; arm64 shown here for CI).
+# Tests run during image build (Linux FS inside the image). Do not bind-mount the repo on
+# macOS and run npm ci there — virtiofs is slow enough to look like a hang.
 
-ARG PLAYWRIGHT_BASE_IMAGE=ghcr.io/gtsteffaniak/playwright-base:chromium
-FROM ${PLAYWRIGHT_BASE_IMAGE} AS base
+FROM ghcr.io/gtsteffaniak/playwright-base:chromium AS base
 WORKDIR /app
 
 LABEL org.opencontainers.image.source="https://github.com/quantumx-apps/go-office" \
@@ -34,3 +35,45 @@ ENTRYPOINT ["./go-office", \
   "-data", "/app", \
   "-samples", "sample-files", \
   "-public", "http://127.0.0.1:8080"]
+
+FROM ghcr.io/gtsteffaniak/playwright-base:chromium AS npm-deps
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci
+
+FROM npm-deps AS test
+ARG PLAYWRIGHT_PROJECT=
+ENV PLAYWRIGHT_PROJECT=${PLAYWRIGHT_PROJECT}
+
+WORKDIR /app
+COPY bin/go-office ./go-office
+COPY assets/ ./assets/
+COPY sample-files/ ./sample-files/
+RUN chmod +x /app/go-office /app/assets/converter/bin/* 2>/dev/null || true
+
+WORKDIR /app/frontend
+COPY frontend/playwright.config.ts ./
+COPY frontend/tests/ ./tests/
+COPY _docker/run-playwright-tests.sh /usr/local/bin/run-playwright-tests.sh
+COPY _docker/warm-playwright-samples.mjs /app/_docker/warm-playwright-samples.mjs
+RUN chmod +x /usr/local/bin/run-playwright-tests.sh
+
+ENV OFFICE_ASSETS=/app/assets \
+    OFFICE_DEBUG_LOGGING=1 \
+    OFFICE_POLL_HOLD=0 \
+    OFFICE_SAVE_DELAY=500ms \
+    PLAYWRIGHT_BASE_URL=http://127.0.0.1:8080 \
+    PLAYWRIGHT_SAVE_DONE_TIMEOUT=30000 \
+    PLAYWRIGHT_SAVE_TEST_TIMEOUT=150000 \
+    PLAYWRIGHT_RTF_TEST_TIMEOUT=240000 \
+    PLAYWRIGHT_WARM_TIMEOUT=60000 \
+    PLAYWRIGHT_WARM_REQUEST_MS=30000 \
+    PLAYWRIGHT_PREWARM_DEADLINE_MS=60000 \
+    PLAYWRIGHT_PREWARM_REQUEST_MS=20000 \
+    PLAYWRIGHT_ACTION_TIMEOUT=45000 \
+    PLAYWRIGHT_EDITOR_TIMEOUT=45000 \
+    PLAYWRIGHT_STRICT=1 \
+    PLAYWRIGHT_FAIL_FAST_SAVE=1 \
+    CI=1
+
+RUN timeout 20m run-playwright-tests.sh

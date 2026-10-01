@@ -8,13 +8,26 @@ cd "$ROOT"
 SERVER_LOG="${PLAYWRIGHT_SERVER_LOG:-$ROOT/server.log}"
 PID=""
 
-cleanup() {
-  if [[ -n "$PID" ]] && kill -0 "$PID" 2>/dev/null; then
-    kill "$PID" 2>/dev/null || true
-    wait "$PID" 2>/dev/null || true
+stop_server() {
+  if [[ -z "${PID:-}" ]]; then
+    return 0
   fi
+  if kill -0 "$PID" 2>/dev/null; then
+    kill -TERM "$PID" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      kill -0 "$PID" 2>/dev/null || break
+      sleep 0.2
+    done
+    kill -KILL "$PID" 2>/dev/null || true
+  fi
+  wait "$PID" 2>/dev/null || true
+  PID=""
 }
-trap cleanup EXIT
+
+cleanup() {
+  stop_server
+}
+trap cleanup EXIT INT TERM
 
 healthcheck() {
   node -e "
@@ -79,6 +92,8 @@ fi
 } >&2
 
 : >"$SERVER_LOG"
+# Do not pipe through tee in the background: $! would be tee, go-office stays a job, and bash
+# can hang on exit waiting for the server after Playwright has already finished.
 if command -v stdbuf >/dev/null 2>&1; then
   stdbuf -oL -eL "${ROOT}/bin/go-office" \
     -debug \
@@ -87,7 +102,7 @@ if command -v stdbuf >/dev/null 2>&1; then
     -data "$ROOT" \
     -samples sample-files \
     -public "$PLAYWRIGHT_BASE_URL" \
-    2>&1 | tee -a "$SERVER_LOG" &
+    >>"$SERVER_LOG" 2>&1 &
 else
   "${ROOT}/bin/go-office" \
     -debug \
@@ -152,4 +167,6 @@ if [[ "$rc" -ne 0 ]]; then
   echo "=== tail of server.log (last 200 lines) ===" >&2
   tail -200 "$SERVER_LOG" >&2 || true
 fi
+echo "playwright exited rc=$rc, stopping go-office" >&2
+stop_server
 exit "$rc"

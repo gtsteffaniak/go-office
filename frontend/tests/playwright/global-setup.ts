@@ -13,6 +13,8 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
     const elapsed = Math.round((Date.now() - startedAt) / 1000);
     process.stderr.write(`playwright: heartbeat elapsed=${elapsed}s\n`);
   }, HEARTBEAT_MS);
+  // Do not pin the Node event loop if teardown is skipped on an abnormal exit path.
+  heartbeat.unref();
 }
 
 export async function globalTeardown(): Promise<void> {

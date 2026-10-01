@@ -50,12 +50,10 @@ cpu_count() {
 }
 
 NCORES="$(cpu_count)"
-PARALLEL=$((NCORES / 2))
-if [[ "$PARALLEL" -lt 2 ]]; then
-  PARALLEL=2
-fi
-: "${PLAYWRIGHT_WORKERS:=${PARALLEL}}"
-: "${OFFICE_CONVERT_LIMIT:=${PARALLEL}}"
+# Default parallelism for Playwright + x2t (override via PLAYWRIGHT_WORKERS / OFFICE_CONVERT_LIMIT).
+DEFAULT_PARALLEL=6
+: "${PLAYWRIGHT_WORKERS:=${DEFAULT_PARALLEL}}"
+: "${OFFICE_CONVERT_LIMIT:=${DEFAULT_PARALLEL}}"
 : "${PLAYWRIGHT_PREWARM_DEADLINE_SEC:=60}"
 : "${OFFICE_ASSETS:=${ROOT}/assets}"
 : "${PLAYWRIGHT_BASE_URL:=http://127.0.0.1:8080}"
@@ -156,9 +154,9 @@ echo "starting playwright project=${PLAYWRIGHT_PROJECT:-all} workers=${PLAYWRIGH
 
 set +e
 if [[ -n "${PLAYWRIGHT_PROJECT:-}" ]]; then
-  npx playwright test --project="$PLAYWRIGHT_PROJECT" --no-deps
+  npx playwright test --project="$PLAYWRIGHT_PROJECT" --no-deps --workers="$PLAYWRIGHT_WORKERS"
 else
-  npx playwright test
+  npx playwright test --workers="$PLAYWRIGHT_WORKERS"
 fi
 rc=$?
 set -e

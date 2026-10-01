@@ -39,12 +39,9 @@ if command -v nproc >/dev/null 2>&1; then
 else
   NCORES=4
 fi
-PARALLEL=$((NCORES / 2))
-if [ "$PARALLEL" -lt 2 ]; then
-  PARALLEL=2
-fi
-: "${PLAYWRIGHT_WORKERS:=${PARALLEL}}"
-: "${OFFICE_CONVERT_LIMIT:=${PARALLEL}}"
+DEFAULT_PARALLEL=6
+: "${PLAYWRIGHT_WORKERS:=${DEFAULT_PARALLEL}}"
+: "${OFFICE_CONVERT_LIMIT:=${DEFAULT_PARALLEL}}"
 : "${PLAYWRIGHT_PREWARM_DEADLINE_SEC:=60}"
 export PLAYWRIGHT_WORKERS OFFICE_CONVERT_LIMIT
 
@@ -104,7 +101,7 @@ fi
 cd /app/frontend
 if [ -n "${PLAYWRIGHT_PROJECT:-}" ]; then
   echo "starting playwright project=${PLAYWRIGHT_PROJECT} workers=${PLAYWRIGHT_WORKERS}" >&2
-  exec npx playwright test --project="$PLAYWRIGHT_PROJECT" --no-deps
+  exec npx playwright test --project="$PLAYWRIGHT_PROJECT" --no-deps --workers="$PLAYWRIGHT_WORKERS"
 fi
 echo "starting playwright all projects workers=${PLAYWRIGHT_WORKERS}" >&2
-exec npx playwright test
+exec npx playwright test --workers="$PLAYWRIGHT_WORKERS"

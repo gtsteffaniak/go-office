@@ -12,6 +12,11 @@ permissions:
   contents: read
 
 jobs:
+  # Runners do not share disk. For this workflow run:
+  #   - prepare_assets restores/warms the Actions cache (or fetches once on miss)
+  #   - other jobs only restore that cache (no artifact upload, no re-fetch)
+  # Cache entries are reused across workflow runs until the key changes or GitHub
+  # evicts them — that is intentional (avoid re-downloading the .deb every PR).
   prepare_assets:
     name: Prepare Euro-Office assets
     runs-on: ubuntu-24.04-arm
@@ -22,20 +27,24 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Cache Euro-Office assets
-        uses: actions/cache@v4
+      - name: Restore Euro-Office assets
+        id: assets-cache
+        uses: actions/cache/restore@v4
         with:
           path: assets
           key: euro-office-assets-v7-arm64-${{ hashFiles('scripts/euro-office.version', 'internal/assetfetch/**', 'cmd/fetch-assets/**') }}
       - name: Fetch assets
+        if: steps.assets-cache.outputs.cache-hit != 'true'
         run: make ensure-assets
-      - name: Upload assets artifact
-        uses: actions/upload-artifact@v4
+      - name: Verify cached assets
+        if: steps.assets-cache.outputs.cache-hit == 'true'
+        run: make check-assets
+      - name: Save Euro-Office assets
+        if: steps.assets-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
         with:
-          name: euro-office-assets
-          path: assets/
-          retention-days: 1
-          if-no-files-found: error
+          path: assets
+          key: euro-office-assets-v7-arm64-${{ hashFiles('scripts/euro-office.version', 'internal/assetfetch/**', 'cmd/fetch-assets/**') }}
 
   integration:
     name: Integration (Euro-Office assets)
@@ -48,11 +57,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Download Euro-Office assets
-        uses: actions/download-artifact@v4
+      - name: Restore Euro-Office assets
+        uses: actions/cache/restore@v4
         with:
-          name: euro-office-assets
           path: assets
+          key: euro-office-assets-v7-arm64-${{ hashFiles('scripts/euro-office.version', 'internal/assetfetch/**', 'cmd/fetch-assets/**') }}
       - name: Integration tests
         env:
           OFFICE_ASSETS: ${{ github.workspace }}/assets
@@ -69,11 +78,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Download Euro-Office assets
-        uses: actions/download-artifact@v4
+      - name: Restore Euro-Office assets
+        uses: actions/cache/restore@v4
         with:
-          name: euro-office-assets
           path: assets
+          key: euro-office-assets-v7-arm64-${{ hashFiles('scripts/euro-office.version', 'internal/assetfetch/**', 'cmd/fetch-assets/**') }}
       - name: Convert tests
         env:
           OFFICE_ASSETS: ${{ github.workspace }}/assets
@@ -98,11 +107,11 @@ jobs:
             project: chromium-post-save
     steps:
       - uses: actions/checkout@v4
-      - name: Download Euro-Office assets
-        uses: actions/download-artifact@v4
+      - name: Restore Euro-Office assets
+        uses: actions/cache/restore@v4
         with:
-          name: euro-office-assets
           path: assets
+          key: euro-office-assets-v7-arm64-${{ hashFiles('scripts/euro-office.version', 'internal/assetfetch/**', 'cmd/fetch-assets/**') }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -131,6 +140,8 @@ jobs:
           OFFICE_DEBUG_LOGGING: "1"
           OFFICE_POLL_HOLD: "0"
           OFFICE_SAVE_DELAY: 500ms
+          PLAYWRIGHT_WORKERS: "6"
+          OFFICE_CONVERT_LIMIT: "6"
           PLAYWRIGHT_SAVE_DONE_TIMEOUT: "30000"
           PLAYWRIGHT_SAVE_TEST_TIMEOUT: "150000"
           PLAYWRIGHT_RTF_TEST_TIMEOUT: "240000"

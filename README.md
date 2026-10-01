@@ -153,7 +153,7 @@ make check-sample-matrix
 make test-playwright
 ```
 
-Playwright Docker defaults: `PLAYWRIGHT_WORKERS=10`, `OFFICE_CONVERT_LIMIT=4`. Override via environment when running locally or in CI.
+Playwright defaults: `PLAYWRIGHT_WORKERS=6`, `OFFICE_CONVERT_LIMIT=6` (set in `scripts/run-playwright.sh` and the Playwright Docker test image). Override via environment when running locally or in CI.
 
 ## Layout
 

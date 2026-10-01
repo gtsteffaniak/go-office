@@ -1,10 +1,10 @@
-import os from "node:os";
 import { defineConfig, devices } from "@playwright/test";
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:8080";
+const defaultWorkers = 6;
 const workers = process.env.PLAYWRIGHT_WORKERS
   ? Number(process.env.PLAYWRIGHT_WORKERS)
-  : Math.max(2, Math.floor(os.cpus().length / 2));
+  : defaultWorkers;
 // Save-project budget. A healthy cell/word save test completes in roughly 60-90s (the
 // server-side flush is ~6s; the rest is editor boot and readiness polling). 240s allowed
 // ~3x slack, so a hang burned the full budget and, with 8 parallel workers draining, a

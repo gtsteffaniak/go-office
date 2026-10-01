@@ -3,7 +3,7 @@ import {
   warmDemoFile,
   applyMinimalSaveEdit,
   assertEditorStable,
-  describeCellEdit,
+  describeSaveEdit,
   expectPersistedMarker,
 } from "../editor";
 import { forkSample } from "../fork-sample";
@@ -29,9 +29,7 @@ for (const sample of STABLE_SAMPLES) {
     // the cell editor under parallel CI load (see editCellForSave), so the stored file is
     // the contract. The outcome is kept for diagnostics if the marker never lands.
     const edit = await applyMinimalSaveEdit(page, sample.editor, marker);
-    const editDetail = edit
-      ? `cell edit: ${describeCellEdit(edit)}`
-      : "edit: word/slide append (no editor-side acknowledgement required)";
+    const editDetail = describeSaveEdit(sample.editor, edit);
 
     await expectPersistedMarker(request, file, marker, page, editDetail);
 
@@ -54,7 +52,7 @@ test("post-save rapid double save: sample.docx", async ({ page, request }, testI
     file,
     markerA,
     page,
-    editA ? `cell edit: ${describeCellEdit(editA)}` : "edit: word append (A)",
+    describeSaveEdit("word", editA),
   );
 
   const editB = await applyMinimalSaveEdit(page, "word", markerB);
@@ -63,7 +61,7 @@ test("post-save rapid double save: sample.docx", async ({ page, request }, testI
     file,
     markerB,
     page,
-    editB ? `cell edit: ${describeCellEdit(editB)}` : "edit: word append (B)",
+    describeSaveEdit("word", editB),
   );
 
   await assertEditorStable(page, STABLE_MS);

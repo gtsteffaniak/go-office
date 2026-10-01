@@ -1,5 +1,0 @@
-# Prime GHA cache for Playwright npm deps (see .github/workflows/pr.yaml).
-FROM ghcr.io/gtsteffaniak/playwright-base:chromium
-WORKDIR /app/frontend
-COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm install

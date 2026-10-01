@@ -47,7 +47,7 @@ DOCKER_DEV_RUN = docker run --rm $(DOCKER_DEV_MOUNTS) -w /src
 
 .PHONY: help setup build serve doctor fonts test test-integration clean \
         check-docker docker-dev-image check-go mod-download fetch-assets compile check-assets check-samples test-x2t test-x2t-concurrent \
-        playwright-npm test-playwright test-playwright-project test-playwright-ui check-sample-matrix extract-sample-manifest \
+        playwright-npm test-playwright test-playwright-project test-playwright-native test-playwright-ui check-sample-matrix extract-sample-manifest \
         build-docker build-docker-image build-docker-builder run-docker stop-docker ensure-assets \
         build-native serve-native fetch-assets-native compile-native fonts-native \
         test-integration-native test-convert-linux-native test-x2t-native test-x2t-concurrent-native doctor-native
@@ -68,8 +68,9 @@ help:
 	@echo "  make test-convert-linux x2t convert tests in ./internal/convert/ (runs build first)"
 	@echo "  make check-sample-matrix  Verify all Playwright sample files exist (git-tracked under sample-files/)"
 	@echo "  make extract-sample-manifest  Regenerate Playwright content expectations from sample-files/"
-	@echo "  make test-playwright    E2E Playwright tests in Docker (all projects)"
-	@echo "  make test-playwright-project  Single Playwright project (PLAYWRIGHT_PROJECT=…)"
+	@echo "  make test-playwright    E2E Playwright in Docker (CI-like 4 CPU cap, all projects)"
+	@echo "  make test-playwright-project  Single project (PLAYWRIGHT_PROJECT=…)"
+	@echo "  make test-playwright-native   E2E on Linux host (scripts/run-playwright.sh)"
 	@echo "  make test-playwright-ui Local Playwright UI (server in Docker, tests on host)"
 	@echo "  make build-docker       Build Docker image (office-server)"
 	@echo "  make build-docker-image Build Docker image only (debian-slim runtime for x2t)"
@@ -302,6 +303,46 @@ lint:
 PLAYWRIGHT_IMAGE ?= go-office-playwright
 PLAYWRIGHT_DOCKERFILE := _docker/Dockerfile.playwright
 PLAYWRIGHT_LOCAL_CONTAINER ?= go-office-playwright-server
+# Pinned playwright-base per arch (see scripts/run-playwright.sh banner).
+PLAYWRIGHT_BASE_IMAGE_ARM64 ?= ghcr.io/gtsteffaniak/playwright-base:chromium@sha256:beaa4077dc072a06b6c6c3099c333782a335e876a5754a14792137f2215fca91
+PLAYWRIGHT_BASE_IMAGE_AMD64 ?= ghcr.io/gtsteffaniak/playwright-base:chromium@sha256:a6081834f0b9d35552b5db38ebb3b2bea8552304a518fda934c35f9db3c8b226
+UNAME_M := $(shell uname -m)
+ifeq ($(UNAME_M),arm64)
+PLAYWRIGHT_BASE_IMAGE ?= $(PLAYWRIGHT_BASE_IMAGE_ARM64)
+else
+PLAYWRIGHT_BASE_IMAGE ?= $(PLAYWRIGHT_BASE_IMAGE_AMD64)
+endif
+PLAYWRIGHT_DOCKER_CPUS ?= 4
+PLAYWRIGHT_DOCKER_MEMORY ?= 16g
+PLAYWRIGHT_DOCKER_SHM ?= 1g
+PLAYWRIGHT_RUN_SCRIPT := ./scripts/run-playwright.sh
+PLAYWRIGHT_DOCKER_ENVS = \
+	-e REPO_ROOT=/work \
+	-e PLAYWRIGHT_BASE_IMAGE=$(PLAYWRIGHT_BASE_IMAGE) \
+	-e OFFICE_ASSETS=/work/assets \
+	-e CI=1 \
+	-e OFFICE_DEBUG_LOGGING=1 \
+	-e OFFICE_POLL_HOLD=0 \
+	-e OFFICE_SAVE_DELAY=500ms \
+	-e PLAYWRIGHT_BASE_URL=http://127.0.0.1:8080 \
+	-e PLAYWRIGHT_SAVE_DONE_TIMEOUT=30000 \
+	-e PLAYWRIGHT_SAVE_TEST_TIMEOUT=150000 \
+	-e PLAYWRIGHT_RTF_TEST_TIMEOUT=240000 \
+	-e PLAYWRIGHT_WARM_TIMEOUT=60000 \
+	-e PLAYWRIGHT_WARM_REQUEST_MS=30000 \
+	-e PLAYWRIGHT_PREWARM_DEADLINE_MS=60000 \
+	-e PLAYWRIGHT_PREWARM_REQUEST_MS=20000 \
+	-e PLAYWRIGHT_ACTION_TIMEOUT=45000 \
+	-e PLAYWRIGHT_EDITOR_TIMEOUT=45000 \
+	-e PLAYWRIGHT_STRICT=1
+PLAYWRIGHT_DOCKER_RUN = docker run --rm \
+	--cpus=$(PLAYWRIGHT_DOCKER_CPUS) \
+	--memory=$(PLAYWRIGHT_DOCKER_MEMORY) \
+	--shm-size=$(PLAYWRIGHT_DOCKER_SHM) \
+	--ipc=host \
+	-v "$(CURDIR):/work" \
+	-w /work \
+	$(PLAYWRIGHT_DOCKER_ENVS)
 
 DOCKER_IMAGE ?= ghcr.io/quantumx-apps/office-server:local
 DOCKER_BUILDER_IMAGE ?= go-office:builder
@@ -360,9 +401,9 @@ playwright-npm:
 	cd frontend && npm install
 
 test-playwright: ensure-assets check-sample-matrix check-test-imports check-docker
-	@echo "==> Playwright E2E (Docker, all projects)"
+	@echo "==> Playwright E2E (Docker, CI-like limits, all projects)"
 	GOOS=linux $(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
-	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_IMAGE)" --target test -f "$(PLAYWRIGHT_DOCKERFILE)" .
+	$(PLAYWRIGHT_DOCKER_RUN) $(PLAYWRIGHT_BASE_IMAGE) bash -lc 'set -e; cd /work/frontend && npm ci && npx playwright install --with-deps chromium; /work/scripts/run-playwright.sh'
 
 test-playwright-project: ensure-assets check-sample-matrix check-test-imports check-docker
 	@if [ -z "$(PLAYWRIGHT_PROJECT)" ]; then \
@@ -371,15 +412,21 @@ test-playwright-project: ensure-assets check-sample-matrix check-test-imports ch
 	fi
 	@echo "==> Playwright E2E (Docker, project=$(PLAYWRIGHT_PROJECT))"
 	GOOS=linux $(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
-	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_IMAGE)-$(PLAYWRIGHT_PROJECT)" \
-		--build-arg PLAYWRIGHT_PROJECT="$(PLAYWRIGHT_PROJECT)" \
-		--target test -f "$(PLAYWRIGHT_DOCKERFILE)" .
+	$(PLAYWRIGHT_DOCKER_RUN) -e PLAYWRIGHT_PROJECT="$(PLAYWRIGHT_PROJECT)" \
+		$(PLAYWRIGHT_BASE_IMAGE) bash -lc 'set -e; cd /work/frontend && npm ci && npx playwright install --with-deps chromium; /work/scripts/run-playwright.sh'
+
+test-playwright-native: ensure-assets check-sample-matrix check-test-imports
+	@echo "==> Playwright E2E (native host)"
+	$(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
+	cd frontend && npm ci && npx playwright install --with-deps chromium
+	REPO_ROOT="$(CURDIR)" OFFICE_ASSETS="$(OFFICE_ASSETS)" "$(PLAYWRIGHT_RUN_SCRIPT)"
 
 test-playwright-ui: build check-sample-matrix check-docker
 	@echo "==> Playwright UI (server in Docker, tests on host)"
 	GOOS=linux $(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
 	docker rm -f "$(PLAYWRIGHT_LOCAL_CONTAINER)" 2>/dev/null || true
-	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_IMAGE)" --target server -f "$(PLAYWRIGHT_DOCKERFILE)" .
+	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_IMAGE)" --target server -f "$(PLAYWRIGHT_DOCKERFILE)" \
+		--build-arg PLAYWRIGHT_BASE_IMAGE="$(PLAYWRIGHT_BASE_IMAGE)" .
 	docker run -d -p 8080:8080 --name "$(PLAYWRIGHT_LOCAL_CONTAINER)" "$(PLAYWRIGHT_IMAGE)"
 	cd frontend && npm install && npx playwright install chromium
 	@echo "Open Playwright UI — server at http://127.0.0.1:8080/"

@@ -1,7 +1,10 @@
+import os from "node:os";
 import { defineConfig, devices } from "@playwright/test";
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:8080";
-const workers = Number(process.env.PLAYWRIGHT_WORKERS ?? 8);
+const workers = process.env.PLAYWRIGHT_WORKERS
+  ? Number(process.env.PLAYWRIGHT_WORKERS)
+  : Math.max(2, Math.floor(os.cpus().length / 2));
 // Save-project budget. A healthy cell/word save test completes in roughly 60-90s (the
 // server-side flush is ~6s; the rest is editor boot and readiness polling). 240s allowed
 // ~3x slack, so a hang burned the full budget and, with 8 parallel workers draining, a
@@ -20,7 +23,7 @@ const defaultTestTimeout = Number(process.env.PLAYWRIGHT_TEST_TIMEOUT ?? 120_000
 // worst case is roughly double a plain save test. Sharing the 150s save budget meant the
 // second cycle could never finish on a loaded worker, and every one of these tests failed
 // with a bare "Test timeout ... exceeded" at the final format-verify poll. Give the project
-// that actually does two cycles its own, larger budget. Workers stay at 8 (see `workers`).
+// that actually does two cycles its own, larger budget.
 const rtfTestTimeout = Number(process.env.PLAYWRIGHT_RTF_TEST_TIMEOUT ?? 240_000);
 
 const sharedUse = {
@@ -44,7 +47,13 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: 0,
   workers,
-  reporter: process.env.CI ? [["list"], ["line"]] : "line",
+  reporter: process.env.CI
+    ? [
+        ["list"],
+        ["html", { open: "never", outputFolder: "playwright-report" }],
+        ["json", { outputFile: "test-results/results.json" }],
+      ]
+    : "line",
   grep: process.env.PLAYWRIGHT_GREP ? new RegExp(process.env.PLAYWRIGHT_GREP) : undefined,
   use: sharedUse,
   projects: [

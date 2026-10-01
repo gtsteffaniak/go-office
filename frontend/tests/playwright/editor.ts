@@ -33,6 +33,8 @@ const CONTENT_FIND_TIMEOUT = Number(process.env.PLAYWRIGHT_CONTENT_FIND_TIMEOUT 
 // PLAYWRIGHT_SAVE_DONE_TIMEOUT — keep both in step.
 const SAVE_DONE_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_DONE_TIMEOUT ?? 30_000);
 const INTERACTIVE_SETTLE_MS = 400;
+/** Single wall-clock budget before a save-test edit (replaces stacked ready/interactive gates). */
+const SAVE_EDIT_READY_TIMEOUT = Number(process.env.PLAYWRIGHT_SAVE_EDITOR_READY_TIMEOUT ?? 45_000);
 
 // Cell-editing gates are SEQUENTIAL, so their timeouts ADD UP. That sum — not any single
 // gate — is what decides whether a slow worker produces a named failure or a bare
@@ -51,13 +53,13 @@ const INTERACTIVE_SETTLE_MS = 400;
 // Budget for a cell save test (PLAYWRIGHT_SAVE_TEST_TIMEOUT, 150s):
 //   warm + goto + editor boot      ~25s   (observed under combined load)
 //   #status gate                    8s
-//   interactive + sdk              40s    (20 + 20)
-//   select + write                 15s
+//   save-edit ready (single poll)  45s    (SAVE_EDIT_READY_TIMEOUT)
+//   select + write + sdk fallback  15s
 //   read-back + retry (one cap)    12s
 //   commit/settle                   1s
 //   persisted-marker poll          30s    (SAVE_DONE_TIMEOUT; healthy path ~8s)
 //   ------------------------------------
-//   worst case                   ~131s    inside 150s, leaving ~19s teardown margin
+//   worst case                   ~136s    inside 150s, leaving ~14s teardown margin
 //
 // SAVE_DONE_TIMEOUT is the largest single item and is only ever reached when a save has
 // genuinely failed, so the healthy path is far shorter (~70s). Keep this sum under the
@@ -662,6 +664,73 @@ export async function waitForEditorInteractive(
 }
 
 /**
+ * One deadline for save-test edits: viewer ready, shell up, interactive, and (word/slide) editable.
+ */
+export async function waitForSaveEditReady(
+  page: Page,
+  editor: SampleFile["editor"],
+  opts?: { timeoutMs?: number; required?: boolean },
+): Promise<boolean> {
+  const timeoutMs = opts?.timeoutMs ?? SAVE_EDIT_READY_TIMEOUT;
+  const required = opts?.required ?? true;
+  const app = EDITOR_APP[editor];
+
+  let ok = false;
+  try {
+    await expect
+      .poll(
+        async () => {
+          const status = (await page.locator("#status").textContent()) ?? "";
+          if (status.startsWith("Error:")) {
+            throw new Error(`viewer status: ${status}`);
+          }
+          const docReady =
+            (await page.locator("body").getAttribute("data-document-ready")) === "true" ||
+            status === "Document ready";
+          if (!docReady) {
+            return false;
+          }
+          if ((await page.locator(`iframe[src*="/${app}/"]`).count()) === 0) {
+            return false;
+          }
+          const frame = getEditorFrame(page, editor);
+          if (!(await isEditorShellReady(frame, editor))) {
+            return false;
+          }
+          if (await isLoadMaskBlocking(frame)) {
+            return false;
+          }
+          if (!(await isEditorInteractive(page, frame, editor))) {
+            return false;
+          }
+          if (editor === "word" || editor === "slide") {
+            return await isEditorEditable(page, frame, editor);
+          }
+          return true;
+        },
+        { timeout: timeoutMs, intervals: [500, 1000, 2000] },
+      )
+      .toBe(true);
+    ok = true;
+  } catch (err) {
+    if (required) {
+      throw new Error(
+        `editor not ready for save edit within ${timeoutMs}ms\nwitness:\n${await editorWitness(page, editor)}\n${String(err)}`,
+      );
+    }
+  }
+
+  if (ok) {
+    const frame = getEditorFrame(page, editor);
+    if (editor === "cell") {
+      await dismissEditorOverlays(frame);
+    }
+    await page.waitForTimeout(INTERACTIVE_SETTLE_MS);
+  }
+  return ok;
+}
+
+/**
  * Document is ready to accept a single save-test edit (UI controls or public insertPlainText).
  *
  * `required: false` makes the whole gate advisory and returns whether the editor reached an
@@ -1036,10 +1105,7 @@ export async function setCellContent(
   // save. Each gate is now bounded so the total stays comfortably inside the budget, and
   // the interactive gate is advisory: the edit is still attempted, because a UI/API
   // readback being unavailable does not mean the editor cannot accept input.
-  const interactive = await waitForEditorInteractive(page, editor, {
-    timeoutMs: CELL_INTERACTIVE_TIMEOUT,
-    required: false,
-  });
+  await waitForSaveEditReady(page, editor, { required: false });
   const frame = getEditorFrame(page, editor);
   await dismissEditorOverlays(frame);
 
@@ -1061,7 +1127,7 @@ export async function setCellContent(
           return setCellValue(frame, ref, value);
         },
         {
-          timeout: interactive ? CELL_SDK_TIMEOUT : CELL_SDK_TIMEOUT_FALLBACK,
+          timeout: CELL_SDK_TIMEOUT_FALLBACK,
           intervals: [200, 500, 1000],
         },
       )
@@ -1429,10 +1495,7 @@ export async function editWordForSave(
   // was never attempted at all — the marker then never landed and the file fingerprint was
   // unchanged, which is exactly the "identical before/after fingerprint" failure. insert
   // below is the real gate; if it is unavailable the editor is genuinely unusable.
-  await waitForEditorEditable(page, editor, {
-    timeoutMs: WORD_READY_TIMEOUT,
-    required: false,
-  });
+  await waitForSaveEditReady(page, editor, { required: false });
   const chunk = ` ${marker}`;
   const inserted = await page.evaluate((text: string) => {
     const ed = (window as {
@@ -1476,6 +1539,47 @@ export type WordEditOutcome = {
 export function describeWordEdit(outcome: WordEditOutcome): string {
   const base = `marker=${outcome.marker} inserted=${outcome.inserted} visibleInEditor=${outcome.visible}`;
   return outcome.witness ? `${base}\nwitness:\n${outcome.witness}` : base;
+}
+
+function failFastSaveEnabled(): boolean {
+  return process.env.PLAYWRIGHT_FAIL_FAST_SAVE !== "0";
+}
+
+/** Fail before the marker poll when the editor clearly never accepted the edit. */
+export async function assertSaveEditAttempted(
+  page: Page,
+  editor: SampleFile["editor"],
+  outcome: CellEditOutcome | WordEditOutcome | undefined,
+): Promise<void> {
+  if (!failFastSaveEnabled() || outcome === undefined) {
+    return;
+  }
+  if (editor === "cell") {
+    const cell = outcome as CellEditOutcome;
+    if (cell.acknowledged || cell.valueEntered) {
+      return;
+    }
+    throw new Error(
+      `cell editor did not accept save edit (apiReady=${cell.apiReady})\n${describeCellEdit(cell)}\nwitness:\n${await editorWitness(page, editor)}`,
+    );
+  }
+  const word = outcome as WordEditOutcome;
+  if (!word.inserted) {
+    throw new Error(`word/slide save edit did not run insertPlainText\n${describeWordEdit(word)}`);
+  }
+}
+
+export function describeSaveEdit(
+  editor: SampleFile["editor"],
+  outcome: CellEditOutcome | WordEditOutcome | undefined,
+): string {
+  if (!outcome) {
+    return "edit: (none)";
+  }
+  if (editor === "cell") {
+    return `cell edit: ${describeCellEdit(outcome as CellEditOutcome)}`;
+  }
+  return `word edit: ${describeWordEdit(outcome as WordEditOutcome)}`;
 }
 
 /** Insert text into the word/slide document (canvas-backed; parent-page Ctrl+S and DOM innerText do not work). */
@@ -2018,13 +2122,16 @@ export async function applyMinimalSaveEdit(
   page: Page,
   editor: SampleFile["editor"],
   marker = "PW_STABLE",
-): Promise<CellEditOutcome | undefined> {
+): Promise<CellEditOutcome | WordEditOutcome | undefined> {
   if (editor === "cell") {
-    return editCellForSave(page, editor, "A1", marker);
+    const outcome = await editCellForSave(page, editor, "A1", marker);
+    await assertSaveEditAttempted(page, editor, outcome);
+    return outcome;
   }
   if (editor === "word" || editor === "slide") {
-    await editWordForSave(page, editor, marker);
-    return undefined;
+    const outcome = await editWordForSave(page, editor, marker);
+    await assertSaveEditAttempted(page, editor, outcome);
+    return outcome;
   }
   throw new Error(`unsupported editor for save edit: ${editor}`);
 }

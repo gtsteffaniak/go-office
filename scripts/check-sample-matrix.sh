@@ -58,6 +58,87 @@ check_zip_entry sample.odt content.xml
 check_zip_entry sample.ods content.xml
 check_zip_entry sample.odp content.xml
 
+# Format integrity: each fixture must actually be the format its extension claims.
+#
+# The save path can legitimately persist OOXML bridge bytes at a legacy path
+# (assemblyFormatAsOrigin rollback) for formats x2t cannot write (.xls/.doc/.ppt). A save
+# that writes such bytes into the *tracked* sample tree silently replaces a real binary
+# fixture with an OOXML one, and every later test then "passes" against the wrong format.
+# This check makes that corruption fail the build instead.
+check_legacy_binary() {
+	file="$1"
+	if ! python3 - "$dir/$file" <<'PY'
+import sys
+path = sys.argv[1]
+with open(path, "rb") as f:
+    head = f.read(8)
+ole2 = bytes.fromhex("d0cf11e0a1b11ae1")
+if head.startswith(b"PK"):
+    print(
+        f"error: {path} is a ZIP/OOXML file but has a legacy binary extension. "
+        "A save (assemblyFormatAsOrigin rollback) has overwritten the tracked fixture; "
+        "restore a genuine binary original.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+if not head.startswith(ole2):
+    print(f"error: {path} is not a valid OLE2 compound file (magic={head.hex()})", file=sys.stderr)
+    sys.exit(1)
+PY
+	then
+		echo "error: legacy binary format check failed for $dir/$file" >&2
+		exit 1
+	fi
+}
+
+# OLE2 legacy formats must be genuine compound documents.
+# x2t cannot write any of these (xls exit 88, doc exit 80, ppt exit 88), so a real binary
+# original must be kept in the tree; a save would replace it with an OOXML package.
+for legacy in sample.xls sample.doc sample.ppt; do
+	check_legacy_binary "$legacy"
+done
+
+# OOXML/ODF formats must be ZIP packages (not, say, an OLE2 file).
+check_zip_container() {
+	file="$1"
+	if ! python3 - "$dir/$file" <<'PY'
+import sys
+path = sys.argv[1]
+with open(path, "rb") as f:
+    head = f.read(4)
+if not head.startswith(b"PK"):
+    print(f"error: {path} must be a ZIP package (magic={head.hex()})", file=sys.stderr)
+    sys.exit(1)
+PY
+	then
+		echo "error: zip container check failed for $dir/$file" >&2
+		exit 1
+	fi
+}
+
+for zipped in sample.docx sample.xlsx sample.odt sample.ods sample.pptx sample.xlsm sample.pptm \
+	sample.dotx sample.odp; do
+	check_zip_container "$zipped"
+done
+
+# .xls is a genuine binary workbook, so no OOXML "xl/workbook.xml" entry may be present.
+# This is the check that catches a save writing rollback bytes over the tracked fixture.
+if ! python3 - "$dir/sample.xls" <<'PY'
+import sys, zipfile
+try:
+    with zipfile.ZipFile(sys.argv[1]) as zf:
+        names = zf.namelist()
+except zipfile.BadZipFile:
+    sys.exit(0)  # genuine OLE2: not a zip, which is what we want
+if any(n.endswith("xl/workbook.xml") for n in names):
+    print("error: sample.xls contains OOXML parts (xl/workbook.xml)", file=sys.stderr)
+    sys.exit(1)
+PY
+then
+	echo "error: sample.xls OOXML-leak check failed" >&2
+	exit 1
+fi
+
 # ODS B2 must match CSV row 2 Customer Id (Playwright save.spec.ts).
 if ! python3 - "$dir/sample.ods" <<'PY'
 import sys, zipfile
@@ -89,23 +170,24 @@ then
 	exit 1
 fi
 
+# sample.ppt must be a genuine binary deck AND contain the slide text the tests assert.
+# PowerPoint stores slide text in TextBytesAtom (0x0FA8) records, or UTF-16LE
+# (TextCharsAtom, 0x0FA0) for non-Latin text, so check both encodings.
 if ! python3 - "$dir/sample.ppt" "$ppt_marker" <<'PY'
-import sys, zipfile
+import sys
 path, marker = sys.argv[1], sys.argv[2]
 with open(path, "rb") as f:
-    head = f.read(2)
-if head == b"PK":
-    with zipfile.ZipFile(path) as zf:
-        xml = zf.read("ppt/slides/slide1.xml").decode("utf-8", "replace")
-    if marker not in xml:
-        print(f"error: {path} slide1.xml missing marker {marker}", file=sys.stderr)
-        sys.exit(1)
-else:
-    with open(path, "rb") as f:
-        data = f.read()
-    if marker.encode("utf-8") not in data:
-        print(f"error: {path} missing marker {marker}", file=sys.stderr)
-        sys.exit(1)
+    data = f.read()
+if data[:2] == b"PK":
+    print(
+        f"error: {path} is an OOXML package; a genuine binary .ppt is required "
+        "(a save rollback has overwritten the tracked fixture)",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+if marker.encode("latin-1") not in data and marker.encode("utf-16le") not in data:
+    print(f"error: {path} missing decoded marker {marker!r}", file=sys.stderr)
+    sys.exit(1)
 PY
 then
 	echo "error: sample.ppt marker check failed" >&2

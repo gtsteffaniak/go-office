@@ -47,7 +47,7 @@ DOCKER_DEV_RUN = docker run --rm $(DOCKER_DEV_MOUNTS) -w /src
 
 .PHONY: help setup build serve doctor fonts test test-integration clean \
         check-docker docker-dev-image check-go mod-download fetch-assets compile check-assets check-samples test-x2t test-x2t-concurrent \
-        playwright-npm test-playwright test-playwright-project test-playwright-ui check-sample-matrix extract-sample-manifest \
+        playwright-npm test-playwright test-playwright-native test-playwright-ui check-sample-matrix extract-sample-manifest \
         build-docker build-docker-image build-docker-builder run-docker stop-docker ensure-assets \
         build-native serve-native fetch-assets-native compile-native fonts-native \
         test-integration-native test-convert-linux-native test-x2t-native test-x2t-concurrent-native doctor-native
@@ -68,8 +68,8 @@ help:
 	@echo "  make test-convert-linux x2t convert tests in ./internal/convert/ (runs build first)"
 	@echo "  make check-sample-matrix  Verify all Playwright sample files exist (git-tracked under sample-files/)"
 	@echo "  make extract-sample-manifest  Regenerate Playwright content expectations from sample-files/"
-	@echo "  make test-playwright    E2E Playwright tests in Docker (all projects)"
-	@echo "  make test-playwright-project  Single Playwright project (PLAYWRIGHT_PROJECT=…)"
+	@echo "  make test-playwright    E2E Playwright (docker build; optional PLAYWRIGHT_PROJECT=…)"
+	@echo "  make test-playwright-native   E2E on Linux host (scripts/run-playwright.sh)"
 	@echo "  make test-playwright-ui Local Playwright UI (server in Docker, tests on host)"
 	@echo "  make build-docker       Build Docker image (office-server)"
 	@echo "  make build-docker-image Build Docker image only (debian-slim runtime for x2t)"
@@ -168,6 +168,11 @@ check-samples:
 check-sample-matrix: check-samples
 	@chmod +x scripts/check-sample-matrix.sh
 	@scripts/check-sample-matrix.sh "$(SAMPLES_DIR)"
+
+# Specs are transpiled without full type checking by `playwright test`, so an undefined
+# helper reference only fails at runtime. Catch it before running the suite.
+check-test-imports:
+	@node scripts/check-test-imports.mjs
 
 extract-sample-manifest:
 	@echo "==> Playwright sample manifest"
@@ -297,6 +302,8 @@ lint:
 PLAYWRIGHT_IMAGE ?= go-office-playwright
 PLAYWRIGHT_DOCKERFILE := _docker/Dockerfile.playwright
 PLAYWRIGHT_LOCAL_CONTAINER ?= go-office-playwright-server
+PLAYWRIGHT_BASE_IMAGE ?= ghcr.io/gtsteffaniak/playwright-base:chromium
+PLAYWRIGHT_RUN_SCRIPT := ./scripts/run-playwright.sh
 
 DOCKER_IMAGE ?= ghcr.io/quantumx-apps/office-server:local
 DOCKER_BUILDER_IMAGE ?= go-office:builder
@@ -354,21 +361,37 @@ playwright-npm:
 	@echo "==> Playwright npm dependencies"
 	cd frontend && npm install
 
-test-playwright: ensure-assets check-sample-matrix check-docker
-	@echo "==> Playwright E2E (Docker, all projects)"
-	GOOS=linux $(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
-	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_IMAGE)" --target test -f "$(PLAYWRIGHT_DOCKERFILE)" .
+# Optional PLAYWRIGHT_PROJECT (chromium, chromium-save, chromium-rtf, chromium-post-save).
+# Omit it to run every Playwright project in one docker build.
+PLAYWRIGHT_PROJECT ?=
 
-test-playwright-project: ensure-assets check-sample-matrix check-docker
-	@if [ -z "$(PLAYWRIGHT_PROJECT)" ]; then \
-		echo "error: PLAYWRIGHT_PROJECT is required (e.g. chromium, chromium-save, chromium-post-save)"; \
-		exit 1; \
-	fi
-	@echo "==> Playwright E2E (Docker, project=$(PLAYWRIGHT_PROJECT))"
+test-playwright: ensure-assets check-sample-matrix check-test-imports check-docker
+ifeq ($(PLAYWRIGHT_PROJECT),)
+	@echo "==> Playwright E2E (docker build, all projects)"
+else
+	@echo "==> Playwright E2E (docker build, project=$(PLAYWRIGHT_PROJECT))"
+endif
 	GOOS=linux $(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
+ifeq ($(PLAYWRIGHT_PROJECT),)
+	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_IMAGE)" \
+		--build-arg PLAYWRIGHT_PROJECT= \
+		--target test -f "$(PLAYWRIGHT_DOCKERFILE)" .
+else
 	$(DOCKER_BUILD) -t "$(PLAYWRIGHT_IMAGE)-$(PLAYWRIGHT_PROJECT)" \
 		--build-arg PLAYWRIGHT_PROJECT="$(PLAYWRIGHT_PROJECT)" \
 		--target test -f "$(PLAYWRIGHT_DOCKERFILE)" .
+endif
+
+test-playwright-native: ensure-assets check-sample-matrix check-test-imports
+ifeq ($(PLAYWRIGHT_PROJECT),)
+	@echo "==> Playwright E2E (native host, all projects)"
+else
+	@echo "==> Playwright E2E (native host, project=$(PLAYWRIGHT_PROJECT))"
+endif
+	$(GO) build -o "$(GO_OFFICE_BIN)" ./cmd/go-office
+	cd frontend && npm ci && npx playwright install chromium
+	REPO_ROOT="$(CURDIR)" OFFICE_ASSETS="$(OFFICE_ASSETS)" \
+		PLAYWRIGHT_PROJECT="$(PLAYWRIGHT_PROJECT)" "$(PLAYWRIGHT_RUN_SCRIPT)"
 
 test-playwright-ui: build check-sample-matrix check-docker
 	@echo "==> Playwright UI (server in Docker, tests on host)"

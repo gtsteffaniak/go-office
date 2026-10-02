@@ -37,7 +37,7 @@ func Build(req EditorRequest, token string) map[string]any {
 		mode = req.Permissions.Edit
 	}
 	out := map[string]any{
-		"document":     buildDocument(req),
+		"document":     buildDocument(req, token),
 		"documentType": docType,
 		"editorConfig": map[string]any{
 			"callbackUrl": req.CallbackURL,
@@ -64,7 +64,7 @@ func Build(req EditorRequest, token string) map[string]any {
 	return out
 }
 
-func buildDocument(req EditorRequest) map[string]any {
+func buildDocument(req EditorRequest, token string) map[string]any {
 	doc := map[string]any{
 		"fileType": req.FileType,
 		"key":      req.DocumentKey,
@@ -75,6 +75,14 @@ func buildDocument(req EditorRequest) map[string]any {
 			"download": req.Permissions.Download,
 			"print":    req.Permissions.Print,
 		},
+		// Always present. sdkjs reads this as docInfo.get_Token() and forwards it as the
+		// `token` field of the coauthoring auth packet; when the field is missing entirely
+		// get_Token() returns undefined and the editor silently falls back to a hardcoded
+		// placeholder ("fghhfgsjdgfjs"). That happens to be accepted by a server with JWT
+		// verification disabled, so the bug is invisible until a secret is configured — at
+		// which point every session is rejected. Emitting an explicit value keeps the
+		// placeholder unreachable in both modes.
+		"token": token,
 	}
 	// Skip the common/ bootstrap iframe (it hangs when served as /common/ without index.html).
 	if strings.EqualFold(req.FileType, "pdf") {

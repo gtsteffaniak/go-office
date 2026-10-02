@@ -12,30 +12,13 @@ permissions:
   contents: read
 
 jobs:
-  integration:
-    name: Integration (Euro-Office assets)
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Cache Euro-Office assets
-        uses: actions/cache@v4
-        with:
-          path: assets
-          key: euro-office-assets-v6-arm64-${{ hashFiles('scripts/euro-office.version') }}
-      - name: Prepare assets
-        run: make ensure-assets
-      - name: Integration tests
-        env:
-          OFFICE_ASSETS: ${{ github.workspace }}/assets
-        run: make test-integration
-
-  convert-linux:
-    name: Convert / x2t (Linux)
+  # Runners do not share disk. For this workflow run:
+  #   - prepare_assets restores/warms the Actions cache (or fetches once on miss)
+  #   - other jobs only restore that cache (no artifact upload, no re-fetch)
+  # Cache entries are reused across workflow runs until the key changes or GitHub
+  # evicts them — that is intentional (avoid re-downloading the .deb every PR).
+  prepare_assets:
+    name: Prepare Euro-Office assets
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
     steps:
@@ -44,20 +27,28 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Cache Euro-Office assets
-        uses: actions/cache@v4
+      - name: Restore Euro-Office assets
+        id: assets-cache
+        uses: actions/cache/restore@v4
         with:
           path: assets
-          key: euro-office-assets-v6-arm64-${{ hashFiles('scripts/euro-office.version') }}
-      - name: Prepare assets
+          key: euro-office-assets-v7-arm64-${{ hashFiles('scripts/euro-office.version', 'internal/assetfetch/**', 'cmd/fetch-assets/**') }}
+      - name: Fetch assets
+        if: steps.assets-cache.outputs.cache-hit != 'true'
         run: make ensure-assets
-      - name: Convert tests
-        env:
-          OFFICE_ASSETS: ${{ github.workspace }}/assets
-        run: make test-convert-linux
+      - name: Verify cached assets
+        if: steps.assets-cache.outputs.cache-hit == 'true'
+        run: make check-assets
+      - name: Save Euro-Office assets
+        if: steps.assets-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: assets
+          key: euro-office-assets-v7-arm64-${{ hashFiles('scripts/euro-office.version', 'internal/assetfetch/**', 'cmd/fetch-assets/**') }}
 
-  prepare_playwright_assets:
-    name: Prepare Playwright assets
+  integration:
+    name: Integration (Euro-Office assets)
+    needs: prepare_assets
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     steps:
@@ -66,33 +57,40 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Cache Euro-Office assets
-        uses: actions/cache@v4
+      - name: Restore Euro-Office assets
+        uses: actions/cache/restore@v4
         with:
           path: assets
-          key: euro-office-assets-v6-arm64-${{ hashFiles('scripts/euro-office.version') }}
-      - name: Prepare assets
-        run: make ensure-assets
+          key: euro-office-assets-v7-arm64-${{ hashFiles('scripts/euro-office.version', 'internal/assetfetch/**', 'cmd/fetch-assets/**') }}
+      - name: Integration tests
+        env:
+          OFFICE_ASSETS: ${{ github.workspace }}/assets
+        run: make test-integration
 
-  prime_playwright_cache:
-    name: Prime Playwright docker cache
+  convert-linux:
+    name: Convert / x2t (Linux)
+    needs: prepare_assets
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Prime cache
-        uses: docker/build-push-action@v6
+      - uses: actions/setup-go@v5
         with:
-          context: .
-          file: _docker/Dockerfile.playwright-prime
-          push: false
-          load: false
-          cache-to: type=gha,mode=max,scope=${{ github.ref_name }}-playwright-base
+          go-version-file: go.mod
+          cache: true
+      - name: Restore Euro-Office assets
+        uses: actions/cache/restore@v4
+        with:
+          path: assets
+          key: euro-office-assets-v7-arm64-${{ hashFiles('scripts/euro-office.version', 'internal/assetfetch/**', 'cmd/fetch-assets/**') }}
+      - name: Convert tests
+        env:
+          OFFICE_ASSETS: ${{ github.workspace }}/assets
+        run: make test-convert-linux
 
   test_playwright:
     name: Playwright - ${{ matrix.name }}
-    needs: [prepare_playwright_assets, prime_playwright_cache]
+    needs: prepare_assets
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
     strategy:
@@ -103,40 +101,68 @@ jobs:
             project: chromium
           - name: save
             project: chromium-save
+          - name: rtf
+            project: chromium-rtf
           - name: post-save
             project: chromium-post-save
     steps:
       - uses: actions/checkout@v4
+      - name: Restore Euro-Office assets
+        uses: actions/cache/restore@v4
+        with:
+          path: assets
+          key: euro-office-assets-v7-arm64-${{ hashFiles('scripts/euro-office.version', 'internal/assetfetch/**', 'cmd/fetch-assets/**') }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-      - name: Cache Euro-Office assets
-        uses: actions/cache@v4
-        with:
-          path: assets
-          key: euro-office-assets-v6-arm64-${{ hashFiles('scripts/euro-office.version') }}
-      - name: Prepare assets
-        run: make ensure-assets
       - name: Verify sample matrix
         run: make check-sample-matrix
       - name: Build go-office binary
         run: GOOS=linux go build -o bin/go-office ./cmd/go-office
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Build and test
-        uses: docker/build-push-action@v6
+      - uses: actions/setup-node@v4
         with:
-          context: .
-          file: _docker/Dockerfile.playwright
-          target: test
-          push: false
-          load: false
-          build-args: |
-            PLAYWRIGHT_PROJECT=${{ matrix.project }}
-          cache-from: |
-            type=gha,scope=${{ github.ref_name }}-playwright-base
-            type=gha,scope=main-playwright-base
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install Playwright dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install chromium
+      - name: Playwright E2E
+        env:
+          CI: true
+          OFFICE_ASSETS: ${{ github.workspace }}/assets
+          PLAYWRIGHT_PROJECT: ${{ matrix.project }}
+          REPO_ROOT: ${{ github.workspace }}
+          OFFICE_DEBUG_LOGGING: "1"
+          OFFICE_POLL_HOLD: "0"
+          OFFICE_SAVE_DELAY: 500ms
+          PLAYWRIGHT_WORKERS: "6"
+          OFFICE_CONVERT_LIMIT: "6"
+          PLAYWRIGHT_SAVE_DONE_TIMEOUT: "30000"
+          PLAYWRIGHT_SAVE_TEST_TIMEOUT: "150000"
+          PLAYWRIGHT_RTF_TEST_TIMEOUT: "240000"
+          PLAYWRIGHT_WARM_TIMEOUT: "60000"
+          PLAYWRIGHT_WARM_REQUEST_MS: "30000"
+          PLAYWRIGHT_PREWARM_DEADLINE_MS: "60000"
+          PLAYWRIGHT_PREWARM_REQUEST_MS: "20000"
+          PLAYWRIGHT_ACTION_TIMEOUT: "45000"
+          PLAYWRIGHT_EDITOR_TIMEOUT: "45000"
+          PLAYWRIGHT_STRICT: "1"
+          PLAYWRIGHT_FAIL_FAST_SAVE: "1"
+        run: ./scripts/run-playwright.sh
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-${{ matrix.name }}
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+            server.log
+          retention-days: 7
 
   docker-build:
     name: Docker image build

@@ -287,7 +287,7 @@ func TestSaveSchedulerAutosaveEndSaveChangesImmediate(t *testing.T) {
 	}
 }
 
-func TestSaveSchedulerPartialWhileForceArmedNoDebounce(t *testing.T) {
+func TestSaveSchedulerPartialWhileForceArmedStillDebounces(t *testing.T) {
 	ws.ResetSessionsForTest()
 	saver := &recordingSaver{}
 	delay := 30 * time.Millisecond
@@ -300,12 +300,24 @@ func TestSaveSchedulerPartialWhileForceArmedNoDebounce(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		h.ServePath(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?EIO=4&transport=polling&sid=go-office", strings.NewReader(partial)), "/doc/key/c")
 	}
-	deadline := time.Now().Add(delay + 200*time.Millisecond)
+
+	// A partial batch arriving while a force save is armed must still be persisted by the
+	// normal debounce. Returning without scheduling anything deferred the autosave to the
+	// force-save fallback delay (5s by default) even when the save delay was far shorter,
+	// which is what made saves look "lagging" or lost when a force save never completed.
+	deadline := time.Now().Add(delay + 500*time.Millisecond)
 	for time.Now().Before(deadline) {
+		if len(saver.flushCalls()) >= 1 {
+			break
+		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	if len(saver.flushCalls()) != 0 {
-		t.Fatalf("partial saveChanges while force armed should not debounce flush: %+v", saver.flushCalls())
+	calls := saver.flushCalls()
+	if len(calls) == 0 {
+		t.Fatal("partial saveChanges while force armed should still debounce a flush")
+	}
+	if len(calls) > 1 {
+		t.Fatalf("debounce should coalesce partial batches into one flush, got %+v", calls)
 	}
 }
 

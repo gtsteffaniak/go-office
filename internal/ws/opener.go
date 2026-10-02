@@ -272,7 +272,10 @@ func (o *Opener) errorPackets(cmdType string, err error) ([]string, error) {
 func fileURL(origin, basePath, docKey, name string) string {
 	origin = strings.TrimSuffix(origin, "/")
 	basePath = strings.TrimSuffix(basePath, "/")
-	if !strings.HasPrefix(basePath, "/") {
+	// Normalise to either "" or "/prefix". Prepending "/" unconditionally turned an empty
+	// base path into "/", which produced "//cache/files/..." (a doubled slash) and cost an
+	// extra 307 round trip per cached resource in the editor.
+	if basePath != "" && !strings.HasPrefix(basePath, "/") {
 		basePath = "/" + basePath
 	}
 	return origin + basePath + "/cache/files/" + url.PathEscape(docKey) + "/" + escapePathSegments(name)

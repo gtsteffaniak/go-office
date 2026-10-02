@@ -11,6 +11,19 @@ testdata/.work/
 *.test
 coverage.out
 
+# Workspace-local Go build/temp dirs (used when GOCACHE is read-only)
+/.gocache/
+/.gotmp/
+
+# Workspace-local Node/Playwright tooling dirs (used when the default caches are read-only)
+/.npmcache/
+/.pw-browsers/
+/.golangci-cache/
+/.testlogs/
+# System libs (libnspr4/libnss3/libasound) extracted locally so Chromium can launch in
+# environments that lack them and where they cannot be installed system-wide.
+/.pw-libs/
+
 # IDE
 .idea/
 .vscode/
@@ -21,6 +34,7 @@ coverage.out
 !/assets/.gitkeep
 
 # Playwright
+server.log
 frontend/node_modules/
 frontend/test-results/
 frontend/playwright-report/

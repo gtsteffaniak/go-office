@@ -36,14 +36,21 @@ This document compares:
 | Category | ✅ | ⚠️ | ❌ |
 | -------- | - | - | - |
 | Core editor embed (api.js, assets, coauthoring polling, cache, save) | 14 | 3 | 2 |
-| Integrator callback (inbound to your app) | 4 | 2 | 0 |
+| Integrator callback (inbound to your app) | 4 | 4 | 0 |
 | Outbound callbacks (go-office → your `callbackUrl`) | 2 | 1 | 4 |
 | Conversion API | 6 | 1 | 2 |
 | Command service | 0 | 1 | 9 |
 | WOPI | 0 | 0 | 4 |
-| Ancillary services | 1 | 2 | 5 |
+| Ancillary services | 2 | 2 | 4 |
 
 **Bottom line:** Docs API **editing** and **sync conversion/thumbnails** (`POST /converter`, JPG output) are compatible. **Command service**, **WOPI**, **async conversion**, and **rich callback telemetry** are not.
+
+For **legacy binary formats** (`.xls`, `.doc`, `.ppt`) the save path follows upstream's
+`assemblyFormatAsOrigin` behaviour: assemble to native OOXML, attempt conversion back to the
+original format, and on failure persist the OOXML bytes at the original path. The bundled x2t
+cannot write any of these three formats (`xlsx→xls` exit 88, `docx→doc` exit 80, `pptx→ppt`
+exit 88), so the rollback is the normal outcome for them. Rollbacks are **reported**, not
+silent: `saveResult` carries `rolledBack` and `bridge`, and the server logs a warning.
 
 ---
 
@@ -71,6 +78,7 @@ Paths are relative to `documentServerUrl` (default site root). `OFFICE_BASE_PATH
 | `/healthz` | GET | — | ✅ | Alias of `/health` (k8s convention; not ONLYOFFICE-specific) |
 | `/session/reset?key={documentKey}` | POST | — | ✅ | Clears in-memory coauthoring session for a document key before a new editor page load. Integrators that build config outside `BuildEditorConfig` (e.g. FileBrowser) should call this when minting editor config. Returns `204 No Content`. |
 | `/info/info.json` | GET | ✅ | ✅ | `{"version":"…"}` |
+| `/api/office/demo/savestate?file={path}` | GET | — | ✅ | **go-office extension.** Last settled flush outcome for a document, for save verification without polling storage. Returns `{key, known, success, force, rolledBack, bridge, bytes, sequence, time, error}`; `known:false` means no flush has settled yet. Used by the demo viewer. |
 
 ### 1.2 Conversion API (FileBrowser previews, print/export pipelines)
 
@@ -116,7 +124,7 @@ Paths are relative to `documentServerUrl` (default site root). `OFFICE_BASE_PATH
 | Endpoint | Method | ONLYOFFICE | go-office | Notes |
 | -------- | ------ | :--------: | :---------: | ----- |
 | **`/spellchecker/`** | * | ✅ | ❌ | Separate Node service; nginx proxies to port 8080. Editor works; spell-check calls fail silently or error in console |
-| `/example/` (bundled test apps) | GET | ✅ | ❌ | go-office provides `/demo/` instead (not ONLYOFFICE-compatible path) |
+| **`/example/`** (bundled test apps) | GET | ✅ | ✅ | Upstream ships a bundled test example — "a simple doc management system" for trying the editors before integration, disabled by default. go-office serves its demo app at this path as an **alias of `/demo/`**: same landing page, viewer, and warm endpoint. `/demo/` stays canonical; both render identically and generated links keep the prefix of the path you used. This is not upstream's Node.js example app. |
 | Admin panel | GET | ✅ | ❌ | Port 9000 in full install |
 | `/plugins.json` (root) | GET | ✅ | ✅ | Empty plugin list (`[]`) for mobile/desktop editors |
 | `document-formats/onlyoffice-docs-formats.json` | GET | ⚠️ | ⚠️ | Referenced in server config; served only if present in asset tree |
@@ -138,8 +146,15 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 | `isSaveLock` → `saveLock` | ✅ | ✅ | `saveLock:true` = blocked (flush running or lock held); `false` = proceed |
 | `saveChanges` → `unSaveLock` | ✅ | ✅ | Changes appended; debounced flush |
 | `forceSaveStart` → `forceSave` | ✅ | ✅ | `messages.inProgress:true` when a flush is already running; `forceSave` after x2t completes |
+| `saveResult` (server → client) | — | ✅ | **go-office extension.** Broadcast to every session for a key when a flush settles: `{key, success, force, rolledBack, bridge, bytes, sequence, time, error}`. `sequence` increases per key so clients can discard out-of-order events. |
 | Other coauthoring messages (cursor, chat, presence, …) | ✅ | ❌ | Ignored (POST returns `ok`, no reply) |
 | Multi-user on same `key` | ✅ | ❌ | Single session per document key |
+
+### Why `saveResult` exists
+
+sdkjs clears its 60-second save-retry timer (`errorTimeOutSave`) when it receives `unSaveLock`. The server sends that reply as soon as changes are journalled — *before* the debounced x2t flush runs. Upstream clients therefore cannot tell a successful save from a failed or stalled one, and a failed save is silent: the editor shows no error and never retransmits.
+
+`saveResult` closes that gap. It is emitted on **every** flush outcome, success or failure, and carries `rolledBack`/`bridge` so an integrator can distinguish a native save from an `assemblyFormatAsOrigin` rollback (OOXML bytes persisted at a legacy path such as `.xls`, `.doc`, `.ppt`). Clients that ignore unknown message types are unaffected.
 
 ---
 
@@ -158,7 +173,32 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 | `editorConfig.coEditing` | ✅ | ⚠️ | Accepted; no multi-user semantics |
 | `editorConfig.plugins`, `templates`, `embedded`, … | ✅ | ⚠️ | Passed if host supplies; not validated server-side |
 | Config JWT (`token` top-level field) | ✅ | ✅ | Signed when `OFFICE_JWT_SECRET` or `JWT_SECRET` is set |
-| Server-side JWT verify on coauthoring `auth` | ✅ | ✅ | When `JWTSecret` is set, `auth` packets must include a valid HS256 JWT |
+| Server-side JWT verify on coauthoring `auth` | ✅ | ✅ | When `JWTSecret` is set, `auth` packets must carry a valid HS256 JWT whose `document.key` matches the URL. A rejected token **fails closed**: the server replies `{"type":"close","data":{"code":4006}}` and does not open the document. With no secret configured, verification is skipped. See the sdkjs note below. |
+
+**Note — bundled sdkjs token bug (patched by go-office).** The Euro-Office sdkjs bundles in
+this repo hardcode the coauthoring token to the literal string `fghhfgsjdgfjs` and never
+forward `config.token`:
+
+```js
+this.CoAuthoringApi.init(this.User, this.documentId, this.documentCallbackUrl,
+                         "fghhfgsjdgfjs", ...)
+```
+
+DocsCoApi sends that value as the `token` field of every `auth` packet, so with a JWT secret
+configured the server rejected every session with *"token contains an invalid number of
+segments"*. Upstream ONLYOFFICE builds do not have this bug; it is specific to these bundles.
+
+`EnsureAssets` patches every bundle (`cell`, `word`, `slide`, both `sdk-all.js` and
+`sdk-all-min.js` variants where present) so `_token` prefers the real config token:
+
+```js
+this.openCmd=openCmd,this.jwtOpen=docInfo.get_Token(),this._token=this.jwtOpen||this._token
+```
+
+Verified end-to-end: with a secret set, the editor's `auth` packet carries a real 3-segment
+JWT and the server accepts it. A client that still sends the placeholder is refused with
+`code 4006` rather than being served an unverified document.
+
 
 ### 3.2 Callback — integrator receives POSTs (Document Server → your app)
 
@@ -171,9 +211,9 @@ Transport: Engine.IO v4 / Socket.IO. Reference: [Co-editing](https://api.onlyoff
 | Status **2** (must save) | ✅ | ✅ | Outbound via `NotifyCallback`; inbound persist in `HandleCallback` |
 | Status **6** (force saved) | ✅ | ✅ | Same |
 | Status **1** (editing / user join) | ✅ | ❌ | **Not emitted** by go-office |
-| Status **3** (save error) | ✅ | ❌ | Not emitted |
+| Status **3** (save error) | ✅ | ⚠️ | Not sent to `callbackUrl`. Save failures are reported to the **editor** instead, via a `saveResult` coauthoring event (see §2) and `GET /api/office/demo/savestate`. Outbound callback failures do return an error to `HandleCallback`, which answers `{"error":1}`. |
 | Status **4** (closed, no changes) | ✅ | ❌ | Not emitted |
-| Status **7** (force save error) | ✅ | ❌ | Not emitted |
+| Status **7** (force save error) | ✅ | ⚠️ | Not sent to `callbackUrl`; surfaced to the editor as `saveResult` with `success:false` plus a `forceSave` packet with `success:false` |
 | Payload fields: `users`, `actions` | ✅ | ⚠️ | Outbound includes `users` (document opener user id); `actions` not emitted |
 | Payload fields: `changesurl`, `history`, `filetype` | ✅ | ⚠️ | Outbound includes `filetype`; `changesurl` / `history` not emitted |
 | Payload fields: `forcesavetype`, `userdata` | ✅ | ⚠️ | Outbound includes `forcesavetype` on force save; `userdata` not emitted |
@@ -243,6 +283,7 @@ See [migration.md](migration.md) for the full matrix. Summary:
 | `POST /command` | Use editor forcesave; accept no `info`/`drop` |
 | WOPI integrators | Use Docs API instead |
 | Spell checker service | Disable server spell-check; or proxy `/spellchecker/` elsewhere |
+| Upstream Node.js test example app | `/example/` serves go-office's demo app (same as `/demo/`), not upstream's example |
 | Multi-user co-editing | Single editor per `key` only |
 | Callback status 1 / 4 telemetry | Track sessions in host app, not document server |
 | WebSocket coauthoring | Polling only (usually automatic) |
@@ -254,9 +295,15 @@ See [migration.md](migration.md) for the full matrix. Summary:
 | Area | Tests / proof |
 | ---- | ------------- |
 | Coauthoring handshake, auth, save | `go test ./internal/ws/...`, `fixtures/coauthoring.json` |
+| `saveResult` event (success, failure, sequencing) | `go test ./internal/ws/...` (`TestSaveOutcome*`) |
 | Callback JWT | `go test ./pkg/callback/...`, `./pkg/office/save_test.go` |
-| Editor open + content + save E2E | Playwright `open-formats`, `content`, `save` |
+| Editor open + content + save E2E | Playwright `open-formats`, `content`, `save`, `post-save-stability` |
 | Conversion API | `go test ./pkg/office/...` (`TestHandleConverterJSON`), Playwright `thumbnails` |
+| assemblyFormatAsOrigin rollback (xls/doc/ppt) | `go test ./internal/convert/...` (`TestSaveChangesXlsRollsBackToOOXML`) |
+| ODS genuine conversion (no rollback) | `go test ./internal/convert/...` (`TestSaveChangesODSWithPendingChanges`) |
+| No lost / duplicated saves under load | `go test ./pkg/office/...` (`TestPersistDoesNotLoseEditsUnderConcurrentAppends`, `TestPersistTwiceDoesNotDropSecondEdit`) |
+| `/example/` alias | `go test ./internal/demo/...` (`TestExampleAliasServesDemoUI`, `TestExampleViewerUsesAliasBase`) |
+| Fixture format integrity | `make check-sample-matrix` (OLE2 vs ZIP magic checks) |
 | Command service | **No tests** — endpoint absent |
 | WOPI / spellchecker | **No tests** — endpoints absent |
 
@@ -282,3 +329,4 @@ See [migration.md](migration.md) for the full matrix. Summary:
 | Follow-up audit | Added: legacy `.ashx` paths, WOPI, spellchecker, command subcommands, callback outbound field gaps, JWT matrix, `shardkey`, `downloadfile` partial, healthcheck semantics, coauthoring message gaps, integrator vs document-server callback direction |
 | v0.2.0 | `/converter` + `/ConvertService.ashx` implemented (sync JPG); JWT on converter; demo thumbnails; library `DiscoverAssets` / `FetchAssets` / `EnsureAssets` |
 | 2026-09 | `POST /session/reset`; `BuildEditorConfig` clears coauthoring session; demo warm; `JWT_SECRET` env fallback; reload/session tests |
+| 2026-09 | `/example/` alias of the demo app; `saveResult` coauthoring event + `/api/office/demo/savestate` for server-driven save verification (replaces client disk polling); unified `assemblyFormatAsOrigin` rollback incl. reporting; save-error rows moved ❌ → ⚠️; fixture format-integrity checks |

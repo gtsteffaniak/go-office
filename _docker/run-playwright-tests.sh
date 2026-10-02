@@ -1,18 +1,28 @@
 #!/bin/sh
+# Self-contained Playwright runner for the Dockerfile.playwright test image (/app layout).
 set -eu
 
 PID=""
 
-cleanup() {
-  if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
-    kill "$PID" 2>/dev/null || true
-    wait "$PID" 2>/dev/null || true
+stop_server() {
+  if [ -z "${PID:-}" ]; then
+    return 0
   fi
+  if kill -0 "$PID" 2>/dev/null; then
+    kill -TERM "$PID" 2>/dev/null || true
+    sleep 1
+    kill -KILL "$PID" 2>/dev/null || true
+  fi
+  wait "$PID" 2>/dev/null || true
+  PID=""
 }
-trap cleanup EXIT
+
+cleanup() {
+  stop_server
+}
+trap cleanup EXIT INT TERM
 
 healthcheck() {
-  # playwright-base has Node but not curl/wget.
   node -e "
     fetch('http://127.0.0.1:8080/healthcheck')
       .then((res) => res.text().then((body) => {
@@ -23,12 +33,20 @@ healthcheck() {
 }
 
 cd /app
-: "${PLAYWRIGHT_WORKERS:=8}"
-: "${OFFICE_CONVERT_LIMIT:=8}"
+
+if command -v nproc >/dev/null 2>&1; then
+  NCORES="$(nproc)"
+else
+  NCORES=4
+fi
+DEFAULT_PARALLEL=6
+: "${PLAYWRIGHT_WORKERS:=${DEFAULT_PARALLEL}}"
+: "${OFFICE_CONVERT_LIMIT:=${DEFAULT_PARALLEL}}"
 : "${PLAYWRIGHT_PREWARM_DEADLINE_SEC:=60}"
 export PLAYWRIGHT_WORKERS OFFICE_CONVERT_LIMIT
 
-# Stream go-office logs to CI output as they happen (line-buffered when stdbuf exists).
+echo "playwright env: nproc=${NCORES} workers=${PLAYWRIGHT_WORKERS} convert_limit=${OFFICE_CONVERT_LIMIT}" >&2
+
 if command -v stdbuf >/dev/null 2>&1; then
   GO_STDERR=stdbuf
   GO_STDERR_ARGS="-oL -eL"
@@ -81,9 +99,9 @@ if [ -f /app/_docker/warm-playwright-samples.mjs ]; then
 fi
 
 cd /app/frontend
-echo "starting playwright project=${PLAYWRIGHT_PROJECT:-all} workers=${PLAYWRIGHT_WORKERS}" >&2
 if [ -n "${PLAYWRIGHT_PROJECT:-}" ]; then
-  exec npx playwright test --project="$PLAYWRIGHT_PROJECT" --no-deps
-else
-  exec npx playwright test
+  echo "starting playwright project=${PLAYWRIGHT_PROJECT} workers=${PLAYWRIGHT_WORKERS}" >&2
+  exec npx playwright test --project="$PLAYWRIGHT_PROJECT" --no-deps --workers="$PLAYWRIGHT_WORKERS"
 fi
+echo "starting playwright all projects workers=${PLAYWRIGHT_WORKERS}" >&2
+exec npx playwright test --workers="$PLAYWRIGHT_WORKERS"

@@ -186,7 +186,12 @@ func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey st
 						if h.Logger != nil {
 							h.Logger.Warn("coauthoring auth jwt rejected", "key", docKey, "err", err)
 						}
-						sess.onConnect(nil, false)
+						// Reject the connection rather than completing the handshake.
+						// Previously this called onConnect and continued, which opened the
+						// document WITHOUT JWT verification while still logging a warning:
+						// the check looked enforced but was not. `close` with the
+						// jwtError code (4006) tells sdkjs the session was refused.
+						sess.enqueue(closePacket(closeCodeJWTError))
 						continue
 					}
 				}
@@ -214,6 +219,9 @@ func (h *Handler) servePolling(w http.ResponseWriter, r *http.Request, docKey st
 						if h.Logger != nil {
 							h.Logger.Warn("coauthoring auth jwt rejected", "key", docKey, "err", err)
 						}
+						// Same reasoning as the 40 case: refuse the session instead of
+						// continuing to serve an unverified document.
+						sess.enqueue(closePacket(closeCodeJWTError))
 						continue
 					}
 					h.registerDocumentSession(docKey, req)

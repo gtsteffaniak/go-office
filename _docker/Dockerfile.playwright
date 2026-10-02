@@ -1,10 +1,11 @@
 # Playwright E2E for go-office (multi-stage).
 #
-#   make test-playwright                          → all projects in one run
-#   make test-playwright-project PLAYWRIGHT_PROJECT=chromium  → single project (CI matrix)
+#   make test-playwright                          → all projects
+#   make test-playwright PLAYWRIGHT_PROJECT=chromium-post-save  → one project
 #   make test-playwright-ui                       → long-running server target
 #
-# Browser/tooling base: ghcr.io/gtsteffaniak/playwright-base:chromium
+# Tests run during image build (Linux FS inside the image). Do not bind-mount the repo on
+# macOS and run npm ci there — virtiofs is slow enough to look like a hang.
 
 FROM ghcr.io/gtsteffaniak/playwright-base:chromium AS base
 WORKDIR /app
@@ -21,12 +22,12 @@ RUN chmod +x /app/go-office /app/assets/converter/bin/* 2>/dev/null || true
 ENV OFFICE_ASSETS=/app/assets \
     OFFICE_DEBUG_LOGGING=1 \
     OFFICE_POLL_HOLD=0 \
-    OFFICE_CONVERT_LIMIT=4 \
+    OFFICE_CONVERT_LIMIT=6 \
+    PLAYWRIGHT_WORKERS=6 \
     OFFICE_SAVE_DELAY=500ms \
     PLAYWRIGHT_BASE_URL=http://127.0.0.1:8080 \
     PLAYWRIGHT_STRICT=1
 
-# Long-running demo server (tests run on host via make test-playwright-ui).
 FROM base AS server
 EXPOSE 8080
 ENTRYPOINT ["./go-office", \
@@ -36,13 +37,11 @@ ENTRYPOINT ["./go-office", \
   "-samples", "sample-files", \
   "-public", "http://127.0.0.1:8080"]
 
-# npm deps (shared layer for CI cache priming and test target).
 FROM ghcr.io/gtsteffaniak/playwright-base:chromium AS npm-deps
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm install
+RUN npm ci
 
-# Self-contained test image. Set PLAYWRIGHT_PROJECT for a single project (--no-deps); omit to run all.
 FROM npm-deps AS test
 ARG PLAYWRIGHT_PROJECT=
 ENV PLAYWRIGHT_PROJECT=${PLAYWRIGHT_PROJECT}
@@ -63,19 +62,19 @@ RUN chmod +x /usr/local/bin/run-playwright-tests.sh
 ENV OFFICE_ASSETS=/app/assets \
     OFFICE_DEBUG_LOGGING=1 \
     OFFICE_POLL_HOLD=0 \
-    OFFICE_CONVERT_LIMIT=8 \
     OFFICE_SAVE_DELAY=500ms \
     PLAYWRIGHT_BASE_URL=http://127.0.0.1:8080 \
-    PLAYWRIGHT_SAVE_DONE_TIMEOUT=120000 \
-    PLAYWRIGHT_SAVE_TEST_TIMEOUT=240000 \
-    PLAYWRIGHT_WORKERS=8 \
+    PLAYWRIGHT_SAVE_DONE_TIMEOUT=30000 \
+    PLAYWRIGHT_SAVE_TEST_TIMEOUT=150000 \
+    PLAYWRIGHT_RTF_TEST_TIMEOUT=240000 \
     PLAYWRIGHT_WARM_TIMEOUT=60000 \
     PLAYWRIGHT_WARM_REQUEST_MS=30000 \
     PLAYWRIGHT_PREWARM_DEADLINE_MS=60000 \
     PLAYWRIGHT_PREWARM_REQUEST_MS=20000 \
     PLAYWRIGHT_ACTION_TIMEOUT=45000 \
     PLAYWRIGHT_EDITOR_TIMEOUT=45000 \
-    PLAYWRIGHT_STRICT=1
+    PLAYWRIGHT_STRICT=1 \
+    PLAYWRIGHT_FAIL_FAST_SAVE=1 \
+    CI=1
 
-# Pre-warm deadline is 60s; per-matrix jobs target 3–8 min after warm.
-RUN timeout 15m run-playwright-tests.sh
+RUN timeout 20m run-playwright-tests.sh

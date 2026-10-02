@@ -3,6 +3,8 @@ import {
   warmDemoFile,
   editCellForSave,
   editWordForSave,
+  describeWordEdit,
+  expectPersistedMarker,
   waitForPersistedMarker,
   triggerManualSave,
   assertDemoFileContains,
@@ -56,9 +58,9 @@ test("docx save round-trip via Save button", async ({ page, request }, testInfo)
     timeout: STATUS_OK_TIMEOUT,
   });
 
-  await editWordForSave(page, "word", DOCX_MARKER);
+  const wordEdit = await editWordForSave(page, "word", DOCX_MARKER);
   await triggerManualSave(page, "word");
-  await waitForPersistedMarker(request, file, DOCX_MARKER, { page });
+  await expectPersistedMarker(request, file, DOCX_MARKER, page, describeWordEdit(wordEdit));
 
   await assertDemoFileContains(request, file, DOCX_MARKER);
 });
@@ -88,8 +90,8 @@ test("txt save round-trip via demo file API", async ({ page, request }, testInfo
     timeout: STATUS_OK_TIMEOUT,
   });
 
-  await editWordForSave(page, "word", TXT_MARKER);
-  await waitForPersistedMarker(request, file, TXT_MARKER, { page });
+  const wordEdit = await editWordForSave(page, "word", TXT_MARKER);
+  await expectPersistedMarker(request, file, TXT_MARKER, page, describeWordEdit(wordEdit));
 
   await assertDemoFileContains(request, file, TXT_MARKER);
 });
@@ -105,8 +107,8 @@ test("rtf save round-trip via demo file API", async ({ page, request }, testInfo
     timeout: STATUS_OK_TIMEOUT,
   });
 
-  await editWordForSave(page, "word", "PW_RTF_SAVE_ROUNDTRIP");
-  await waitForPersistedMarker(request, file, "PW_RTF_SAVE_ROUNDTRIP", { page });
+  const wordEdit = await editWordForSave(page, "word", "PW_RTF_SAVE_ROUNDTRIP");
+  await expectPersistedMarker(request, file, "PW_RTF_SAVE_ROUNDTRIP", page, describeWordEdit(wordEdit));
 
   await assertDemoFileContains(request, file, "PW_RTF_SAVE_ROUNDTRIP");
   await assertDemoFileContains(request, file, RTF_ORIGINAL);
@@ -140,8 +142,8 @@ test("ppt save round-trip via demo file API", async ({ page, request }, testInfo
     timeout: STATUS_OK_TIMEOUT,
   });
 
-  await editWordForSave(page, "slide", PPT_MARKER);
-  await waitForPersistedMarker(request, file, PPT_MARKER, { page });
+  const wordEdit = await editWordForSave(page, "slide", PPT_MARKER);
+  await expectPersistedMarker(request, file, PPT_MARKER, page, describeWordEdit(wordEdit));
 
   await assertDemoFileContains(request, file, PPT_MARKER);
 });

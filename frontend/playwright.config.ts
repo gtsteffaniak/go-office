@@ -1,8 +1,30 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:8080";
-const workers = Number(process.env.PLAYWRIGHT_WORKERS ?? 8);
-const saveTestTimeout = Number(process.env.PLAYWRIGHT_SAVE_TEST_TIMEOUT ?? 240_000);
+const defaultWorkers = 6;
+const workers = process.env.PLAYWRIGHT_WORKERS
+  ? Number(process.env.PLAYWRIGHT_WORKERS)
+  : defaultWorkers;
+// Save-project budget. A healthy cell/word save test completes in roughly 60-90s (the
+// server-side flush is ~6s; the rest is editor boot and readiness polling). 240s allowed
+// ~3x slack, so a hang burned the full budget and, with 8 parallel workers draining, a
+// failing project took ~400s to report. 150s keeps headroom over the slowest observed
+// pass while halving the cost of a hang.
+//
+// The save project carves an explicit teardown reserve out of its own budget (see the gate
+// sizes in tests/playwright/editor.ts), so the in-test gates always finish first and any
+// failure is reported on its own terms. The default project timeout stays separate: setting
+// both to the same 150s is what made an expiry indistinguishable from a genuine hang, since
+// the test died in teardown before it could report why it was waiting.
+const saveTestTimeout = Number(process.env.PLAYWRIGHT_SAVE_TEST_TIMEOUT ?? 150_000);
+const defaultTestTimeout = Number(process.env.PLAYWRIGHT_TEST_TIMEOUT ?? 120_000);
+// The rtf-formatting specs run TWO full edit→save→verify cycles inside one test (the marker
+// is persisted first, then formatting is applied to it and that must persist too), so their
+// worst case is roughly double a plain save test. Sharing the 150s save budget meant the
+// second cycle could never finish on a loaded worker, and every one of these tests failed
+// with a bare "Test timeout ... exceeded" at the final format-verify poll. Give the project
+// that actually does two cycles its own, larger budget.
+const rtfTestTimeout = Number(process.env.PLAYWRIGHT_RTF_TEST_TIMEOUT ?? 240_000);
 
 const sharedUse = {
   baseURL,
@@ -14,7 +36,7 @@ const sharedUse = {
 };
 
 export default defineConfig({
-  timeout: Number(process.env.PLAYWRIGHT_TEST_TIMEOUT ?? 120_000),
+  timeout: defaultTestTimeout,
   expect: {
     timeout: Number(process.env.PLAYWRIGHT_EXPECT_TIMEOUT ?? 6_000),
   },
@@ -25,7 +47,13 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: 0,
   workers,
-  reporter: process.env.CI ? [["list"], ["line"]] : "line",
+  reporter: process.env.CI
+    ? [
+        ["list"],
+        ["html", { open: "never", outputFolder: "playwright-report" }],
+        ["json", { outputFile: "test-results/results.json" }],
+      ]
+    : "line",
   grep: process.env.PLAYWRIGHT_GREP ? new RegExp(process.env.PLAYWRIGHT_GREP) : undefined,
   use: sharedUse,
   projects: [
@@ -36,9 +64,17 @@ export default defineConfig({
     },
     {
       name: "chromium-save",
-      testMatch: /(save|rtf-formatting)\.spec\.ts$/,
+      testMatch: /save\.spec\.ts$/,
       dependencies: ["chromium"],
       timeout: saveTestTimeout,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      // Two edit→save cycles per test; see rtfTestTimeout.
+      name: "chromium-rtf",
+      testMatch: /rtf-formatting\.spec\.ts$/,
+      dependencies: ["chromium"],
+      timeout: rtfTestTimeout,
       use: { ...devices["Desktop Chrome"] },
     },
     {

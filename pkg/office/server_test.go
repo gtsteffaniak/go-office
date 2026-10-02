@@ -285,3 +285,59 @@ func TestBuildEditorConfigClearsCoauthoringSession(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Without a JWT secret the editor config must still carry a signed token. sdkjs assigns the
+// top-level config token over the document token, so omitting it makes docInfo.get_Token()
+// undefined and the editor substitutes its hardcoded placeholder ("fghhfgsjdgfjs") in the
+// coauthoring auth packet. A server with verification disabled accepts that, which is why
+// the defect only shows up once a secret is configured — as every session being rejected.
+func TestBuildEditorConfigAlwaysSignsToken(t *testing.T) {
+	srv, err := office.New(nopStorage{}, office.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := srv.BuildEditorConfig(context.Background(), config.EditorRequest{
+		DocumentKey: "k",
+		Title:       "t.docx",
+		FileType:    "docx",
+		DocumentURL: "http://example/doc",
+		CallbackURL: "http://example/cb",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, _ := cfg["token"].(string)
+	if token == "" {
+		t.Fatal("top-level token missing; sdkjs would use its hardcoded placeholder")
+	}
+	if strings.Count(token, ".") != 2 {
+		t.Fatalf("token %q is not a JWT; sdkjs forwards it verbatim into the auth packet", token)
+	}
+	doc, _ := cfg["document"].(map[string]any)
+	if doc == nil {
+		t.Fatalf("document = %T", cfg["document"])
+	}
+	if got, _ := doc["token"].(string); got != token {
+		t.Fatalf("document.token = %q, want the signed token %q", got, token)
+	}
+
+	// The unverified token must not be stable across processes in a way that suggests it is
+	// a usable credential: two independent servers sign with different keys.
+	other, err := office.New(nopStorage{}, office.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg2, err := other.BuildEditorConfig(context.Background(), config.EditorRequest{
+		DocumentKey: "k",
+		Title:       "t.docx",
+		FileType:    "docx",
+		DocumentURL: "http://example/doc",
+		CallbackURL: "http://example/cb",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token2, _ := cfg2["token"].(string); token2 == token {
+		t.Fatal("independent servers produced the same unverified token; signing key is not per-process")
+	}
+}

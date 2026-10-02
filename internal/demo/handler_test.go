@@ -87,8 +87,9 @@ func TestDemoLandingAndConfig(t *testing.T) {
 	if !strings.Contains(body, "/api/office") || !strings.Contains(body, "/demo/config") {
 		t.Fatal("expected relative API config URL in viewer page")
 	}
-	if !strings.Contains(body, "/demo/warm?file=") {
-		t.Fatal("expected warm endpoint hook in viewer page")
+	// The warm hook is built from uiBase so it resolves under /demo/ and /example/ alike.
+	if !strings.Contains(body, `uiBase + "/warm?file="`) {
+		t.Fatal("expected alias-aware warm endpoint hook in viewer page")
 	}
 	if !strings.Contains(body, "data-warm-done") || !strings.Contains(body, "data-warm-error") {
 		t.Fatal("expected warm success/error attributes in viewer page")
@@ -99,8 +100,14 @@ func TestDemoLandingAndConfig(t *testing.T) {
 	if strings.Contains(body, "data-content-ready") || strings.Contains(body, "beginContentReadyPoll") {
 		t.Fatal("viewer should not use content-ready polling")
 	}
-	if !strings.Contains(body, "fetchDemoFileFingerprint") {
-		t.Fatal("expected fingerprint-based save verification in viewer page")
+	if strings.Contains(body, "fetchDemoFileFingerprint") || strings.Contains(body, "crypto.subtle.digest") {
+		t.Fatal("viewer must not verify saves by hashing the served file; use /demo/savestate")
+	}
+	if !strings.Contains(body, "/demo/savestate") {
+		t.Fatal("expected server-driven save verification via /demo/savestate in viewer page")
+	}
+	if !strings.Contains(body, "data-save-error") || !strings.Contains(body, "data-save-done") {
+		t.Fatal("expected save status attributes in viewer page")
 	}
 	if !strings.Contains(body, "rel=\"preload\"") {
 		t.Fatal("expected api.js preload in viewer page")

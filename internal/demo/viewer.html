@@ -40,6 +40,9 @@
     var DOCUMENT_KEY = {{.DocumentKeyJSON}};
     var officeBase = {{.OfficeBaseJSON}};
     var apiBase = {{.APIBaseJSON}};
+    // UI mount prefix that served this page ("/demo" or "/example"); used for viewer
+    // sub-resource calls so both aliases work identically.
+    var uiBase = {{.UIBaseJSON}};
     var landingURL = {{.LandingURLJSON}};
 
     document.getElementById("sample-path").textContent = SAMPLE_FILE;
@@ -59,33 +62,34 @@
 
     var autosavePollTimer = null;
     var saveWatchdogTimer = null;
-    var lastSavedFileFingerprint = "";
-    var saveBaselineFingerprint = "";
-    // Match Playwright SAVE_DONE_TIMEOUT with margin for queued x2t under parallel CI load.
+    // Highest server save sequence observed; used to tell "a newer flush settled" from
+    // "the same older flush is still the latest".
+    var lastSaveSequence = 0;
+    // Server-driven save verification. The viewer polls the document server's authoritative
+    // last-flush outcome (/demo/savestate) instead of hashing the file on disk. Disk hashing
+    // could not distinguish "persisted but still being served from a stale cache" from
+    // "not persisted", and it only ever surfaced failures after a long timeout.
+    //
+    // SAVE_VERIFY_MS is the backstop for a flush that never settles at all; a real flush
+    // reports success or failure within this window and the client reacts immediately.
     var SAVE_VERIFY_MS = 120000;
-    var SAVE_POLL_INTERVAL_MS = 500;
+    var SAVE_POLL_INTERVAL_MS = 250;
     var SAVE_POLL_MAX_ATTEMPTS = Math.ceil(SAVE_VERIFY_MS / SAVE_POLL_INTERVAL_MS);
 
     function demoFileUrl() {
       return joinPath(apiBase, "/demo/file/" + encodeURIComponent(SAMPLE_FILE));
     }
 
-    function bytesToHex(bytes) {
-      return Array.from(bytes).map(function (b) {
-        return b.toString(16).padStart(2, "0");
-      }).join("");
+    function demoSaveStateUrl() {
+      return joinPath(apiBase, "/demo/savestate?file=" + encodeURIComponent(SAMPLE_FILE));
     }
 
-    function fetchDemoFileFingerprint() {
-      return fetch(demoFileUrl(), { cache: "no-store" }).then(function (res) {
+    function fetchSaveState() {
+      return fetch(demoSaveStateUrl(), { cache: "no-store" }).then(function (res) {
         if (!res.ok) {
-          throw new Error("file " + res.status);
+          throw new Error("savestate " + res.status);
         }
-        return res.arrayBuffer();
-      }).then(function (buf) {
-        return crypto.subtle.digest("SHA-256", buf).then(function (hash) {
-          return bytesToHex(new Uint8Array(hash));
-        });
+        return res.json();
       });
     }
 
@@ -94,6 +98,15 @@
         clearTimeout(saveWatchdogTimer);
         saveWatchdogTimer = null;
       }
+    }
+
+    function markSaveDone() {
+      clearSaveWatchdog();
+      document.body.setAttribute("data-save-done", String(Date.now()));
+      document.body.removeAttribute("data-dirty");
+      document.body.removeAttribute("data-saving");
+      document.body.removeAttribute("data-save-error");
+      setStatus("Saved", "ok");
     }
 
     function beginSaveWatchdog() {
@@ -111,54 +124,41 @@
       setStatus("Error: " + msg, "error");
     }
 
-    function pollSaveComplete() {
+    // Poll the server's save outcome until a flush settles after the given baseline
+    // sequence. A reported failure is surfaced immediately rather than waiting out the
+    // watchdog, so tests fail fast instead of hanging.
+    function pollSaveComplete(requireNewerSequence) {
       if (autosavePollTimer) {
         clearTimeout(autosavePollTimer);
       }
       document.body.setAttribute("data-saving", "true");
       document.body.removeAttribute("data-save-error");
       var attempts = 0;
-      var baseline = saveBaselineFingerprint;
-      var pendingFingerprint = null;
-      var stableCount = 0;
+      var baseline = lastSaveSequence;
+      var needNewer = requireNewerSequence !== false;
       function tick() {
         attempts += 1;
-        fetchDemoFileFingerprint()
-          .then(function (fingerprint) {
-            if (fingerprint !== baseline) {
-              if (pendingFingerprint === fingerprint) {
-                stableCount += 1;
-              } else {
-                pendingFingerprint = fingerprint;
-                stableCount = 1;
-              }
-              if (stableCount >= 2) {
-                lastSavedFileFingerprint = fingerprint;
-                saveBaselineFingerprint = fingerprint;
-                clearSaveWatchdog();
-                document.body.setAttribute("data-save-done", String(Date.now()));
-                document.body.removeAttribute("data-dirty");
-                document.body.removeAttribute("data-saving");
-                document.body.removeAttribute("data-save-error");
-                setStatus("Saved", "ok");
+        fetchSaveState()
+          .then(function (state) {
+            if (state && state.known && (!needNewer || state.sequence > baseline)) {
+              lastSaveSequence = state.sequence;
+              clearSaveWatchdog();
+              if (!state.success) {
+                markSaveError(state.error || "server failed to store the document");
                 return;
               }
-              if (attempts < SAVE_POLL_MAX_ATTEMPTS) {
-                autosavePollTimer = setTimeout(tick, SAVE_POLL_INTERVAL_MS);
-              }
+              markSaveDone();
               return;
             }
-            pendingFingerprint = null;
-            stableCount = 0;
             if (attempts < SAVE_POLL_MAX_ATTEMPTS) {
               autosavePollTimer = setTimeout(tick, SAVE_POLL_INTERVAL_MS);
+              return;
+            }
+            clearSaveWatchdog();
+            if (document.body.hasAttribute("data-dirty")) {
+              markSaveError("server did not report a saved document in time");
             } else {
-              clearSaveWatchdog();
-              if (document.body.hasAttribute("data-dirty")) {
-                markSaveError("file on server was not updated");
-              } else {
-                document.body.removeAttribute("data-saving");
-              }
+              document.body.removeAttribute("data-saving");
             }
           })
           .catch(function () {
@@ -166,17 +166,24 @@
               autosavePollTimer = setTimeout(tick, SAVE_POLL_INTERVAL_MS);
             } else {
               clearSaveWatchdog();
-              markSaveError("could not verify saved file");
+              markSaveError("could not read server save state");
             }
           });
       }
-      autosavePollTimer = setTimeout(tick, 400);
+      autosavePollTimer = setTimeout(tick, 100);
+    }
+
+    // reconcileSaveState resolves save status after the editor reports the document clean.
+    // The flush may already have settled, in which case the latest recorded outcome is the
+    // answer, so accept it without requiring a newer sequence.
+    function reconcileSaveState() {
+      pollSaveComplete(false);
     }
 
     function warmDocument() {
       document.body.removeAttribute("data-warm-done");
       document.body.removeAttribute("data-warm-error");
-      var warmUrl = joinPath(officeBase, "/demo/warm?file=" + encodeURIComponent(SAMPLE_FILE));
+      var warmUrl = joinPath(officeBase, uiBase + "/warm?file=" + encodeURIComponent(SAMPLE_FILE));
       return fetch(warmUrl, { cache: "no-store" })
         .then(function (res) {
           if (!res.ok) {
@@ -217,10 +224,13 @@
                 documentReady = true;
                 document.body.setAttribute("data-document-ready", "true");
                 setStatus("Document ready", "ok");
-                fetchDemoFileFingerprint()
-                  .then(function (fingerprint) {
-                    lastSavedFileFingerprint = fingerprint;
-                    saveBaselineFingerprint = fingerprint;
+                // Seed the save sequence baseline so a flush that completed before this
+                // viewer loaded is not mistaken for the current save.
+                fetchSaveState()
+                  .then(function (state) {
+                    if (state && state.known) {
+                      lastSaveSequence = state.sequence;
+                    }
                   })
                   .catch(function () { /* baseline optional */ });
                 if (typeof baseEvents.onDocumentReady === "function") {
@@ -239,16 +249,15 @@
                     clearTimeout(autosavePollTimer);
                     autosavePollTimer = null;
                   }
-                  if (!document.body.hasAttribute("data-dirty")) {
-                    setStatus("Saved", "ok");
-                    return;
-                  }
-                  saveBaselineFingerprint = lastSavedFileFingerprint;
+                  // The editor reports the document is clean, i.e. it has flushed its changes
+                  // to the server. Reconcile against the authoritative save state instead of
+                  // requiring a strictly *newer* sequence: the flush can settle before this
+                  // handler runs, and demanding a greater sequence would then never resolve.
                   document.body.removeAttribute("data-save-done");
                   document.body.removeAttribute("data-save-error");
                   setStatus("Saving…");
                   beginSaveWatchdog();
-                  pollSaveComplete();
+                  reconcileSaveState();
                 }
                 if (typeof baseEvents.onDocumentStateChange === "function") {
                   baseEvents.onDocumentStateChange(event);

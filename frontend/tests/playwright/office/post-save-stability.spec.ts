@@ -2,8 +2,9 @@ import { test, expect } from "../test-setup";
 import {
   warmDemoFile,
   applyMinimalSaveEdit,
-  waitForPersistedMarker,
   assertEditorStable,
+  describeSaveEdit,
+  expectPersistedMarker,
 } from "../editor";
 import { forkSample } from "../fork-sample";
 import { samplesForTier, sampleExists } from "../samples";
@@ -23,8 +24,14 @@ for (const sample of STABLE_SAMPLES) {
     await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
     await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
 
-    await applyMinimalSaveEdit(page, sample.editor, marker);
-    await waitForPersistedMarker(request, file, marker, { page });
+    // The edit is applied best-effort; what this suite asserts is that the change persists
+    // and the editor stays stable afterwards. Editor-side acknowledgement is unreliable for
+    // the cell editor under parallel CI load (see editCellForSave), so the stored file is
+    // the contract. The outcome is kept for diagnostics if the marker never lands.
+    const edit = await applyMinimalSaveEdit(page, sample.editor, marker);
+    const editDetail = describeSaveEdit(sample.editor, edit);
+
+    await expectPersistedMarker(request, file, marker, page, editDetail);
 
     await assertEditorStable(page, STABLE_MS);
   });
@@ -39,11 +46,23 @@ test("post-save rapid double save: sample.docx", async ({ page, request }, testI
   await page.goto(`/demo/view?file=${encodeURIComponent(file)}`);
   await expect(page.locator("#status")).not.toContainText(/^Error:/, { timeout: STATUS_OK_TIMEOUT });
 
-  await applyMinimalSaveEdit(page, "word", markerA);
-  await waitForPersistedMarker(request, file, markerA, { page });
+  const editA = await applyMinimalSaveEdit(page, "word", markerA);
+  await expectPersistedMarker(
+    request,
+    file,
+    markerA,
+    page,
+    describeSaveEdit("word", editA),
+  );
 
-  await applyMinimalSaveEdit(page, "word", markerB);
-  await waitForPersistedMarker(request, file, markerB, { page });
+  const editB = await applyMinimalSaveEdit(page, "word", markerB);
+  await expectPersistedMarker(
+    request,
+    file,
+    markerB,
+    page,
+    describeSaveEdit("word", editB),
+  );
 
   await assertEditorStable(page, STABLE_MS);
 });

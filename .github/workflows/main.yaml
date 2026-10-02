@@ -44,7 +44,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/quantumx-apps/office-server
+          images: ghcr.io/gtsteffaniak/office-server
           tags: |
             type=raw,value=latest
             type=raw,value=${{ steps.euro.outputs.version }}

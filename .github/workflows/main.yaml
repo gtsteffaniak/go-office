@@ -49,6 +49,30 @@ jobs:
             type=raw,value=latest
             type=raw,value=${{ steps.euro.outputs.version }}
 
+      - name: Resolve incrementing version tag
+        id: versions
+        env:
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/gtsteffaniak/office-server"
+          REPO="gtsteffaniak/office-server"
+          V="${{ steps.euro.outputs.version }}"
+          token=$(curl -fsSL -u "${REGISTRY_USER}:${REGISTRY_TOKEN}" \
+            "https://ghcr.io/token?scope=repository:${REPO}:pull" | jq -r .token)
+          existing=$(curl -fsSL -H "Authorization: Bearer ${token}" \
+            "https://ghcr.io/v2/${REPO}/tags/list?n=1000" | jq -r '.tags // [] | .[]')
+          tags="${IMAGE}:latest,${IMAGE}:${V}"
+          if printf '%s\n' "$existing" | grep -qxF "$V"; then
+            last=$(printf '%s\n' "$existing" | awk -v p="${V}-" \
+              'index($0,p)==1 && substr($0,length(p)+1) ~ /^[0-9]+$/ {n=substr($0,length(p)+1)+0; if(n>m) m=n} END{print m+0}')
+            next=$((last + 1))
+            tags="${tags},${IMAGE}:${V}-${next}"
+            echo "::notice::${V} already exists; adding increment tag ${V}-${next}"
+          fi
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -56,7 +80,7 @@ jobs:
           file: ./_docker/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.versions.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

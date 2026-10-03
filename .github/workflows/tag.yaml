@@ -77,8 +77,8 @@ jobs:
           MODIFIED_JSON=$(echo "$JSON" | jq --arg euro "${{ steps.euro.outputs.version }}" '
             .tags |= map(sub(":v"; ":")) |
             .tags += [
-              "ghcr.io/quantumx-apps/office-server:\($euro)",
-              "ghcr.io/quantumx-apps/office-server:latest"
+              "ghcr.io/gtsteffaniak/office-server:\($euro)",
+              "ghcr.io/gtsteffaniak/office-server:latest"
             ] |
             .tags |= unique
           ')

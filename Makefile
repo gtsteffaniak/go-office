@@ -305,7 +305,7 @@ PLAYWRIGHT_LOCAL_CONTAINER ?= go-office-playwright-server
 PLAYWRIGHT_BASE_IMAGE ?= ghcr.io/gtsteffaniak/playwright-base:chromium
 PLAYWRIGHT_RUN_SCRIPT := ./scripts/run-playwright.sh
 
-DOCKER_IMAGE ?= ghcr.io/quantumx-apps/office-server:local
+DOCKER_IMAGE ?= ghcr.io/gtsteffaniak/office-server:local
 DOCKER_BUILDER_IMAGE ?= go-office:builder
 DOCKER_CONTAINER ?= go-office-serve
 DOCKER_PORT ?= 8080

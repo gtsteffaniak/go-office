@@ -64,7 +64,7 @@ CLI flags (`-assets`, `-addr`, `-jwt`, `-disable-samples`, …) override environ
 | `OFFICE_DEBUG` | Legacy alias for `OFFICE_DEBUG_LOGGING` | unset |
 | `OFFICE_LOG_JSON` | JSON log lines on stderr (`1` / `true`) | unset (text) |
 | `OFFICE_POLL_HOLD` | Coauthoring long-poll hold (`0`, `2s`, `500ms`, …) | `2s` production default |
-| `OFFICE_CONVERT_LIMIT` | Max concurrent x2t subprocesses | `2` (Playwright Docker default: `4`) |
+| `OFFICE_CONVERT_LIMIT` | Max concurrent x2t subprocesses | CPU count, capped at `6` |
 | `OFFICE_SAVE_DELAY` | Coauthoring save debounce before flush | `5s` production default |
 
 ### ONLYOFFICE Document Server fallbacks

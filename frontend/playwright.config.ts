@@ -1,7 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
+import { availableParallelism } from "node:os";
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:8080";
-const defaultWorkers = 6;
+// One worker per available CPU, capped at 6 (availableParallelism is
+// cgroup-quota aware via libuv, so containers scale down). Raise it explicitly
+// with PLAYWRIGHT_WORKERS.
+const defaultWorkers = Math.max(1, Math.min(availableParallelism(), 6));
 const workers = process.env.PLAYWRIGHT_WORKERS
   ? Number(process.env.PLAYWRIGHT_WORKERS)
   : defaultWorkers;

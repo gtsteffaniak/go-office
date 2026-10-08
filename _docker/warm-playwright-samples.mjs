@@ -7,13 +7,17 @@
  * Fails fast: global deadline (default 60s) and per-request timeout (default 20s).
  */
 import fs from "node:fs";
+import { availableParallelism } from "node:os";
 import path from "node:path";
 
 const base = (process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:8080").replace(/\/$/, "");
 const demoBase = (process.env.PLAYWRIGHT_DEMO_BASE ?? "/demo").replace(/\/$/, "");
 const apiBase = (process.env.PLAYWRIGHT_API_BASE ?? "/api/office").replace(/\/$/, "");
 const samplesDir = process.env.PLAYWRIGHT_SAMPLES_DIR ?? "/app/sample-files";
-const convertLimit = Math.max(1, Number(process.env.OFFICE_CONVERT_LIMIT ?? 6));
+const convertLimit = Math.max(
+  1,
+  Number(process.env.OFFICE_CONVERT_LIMIT ?? Math.min(availableParallelism(), 6)),
+);
 const deadlineMs = Math.max(1_000, Number(process.env.PLAYWRIGHT_PREWARM_DEADLINE_MS ?? 60_000));
 const requestTimeoutMs = Math.max(1_000, Number(process.env.PLAYWRIGHT_PREWARM_REQUEST_MS ?? 20_000));
 const prewarmThumbnails = process.env.PLAYWRIGHT_PREWARM_THUMBNAILS !== "0";

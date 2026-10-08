@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -16,10 +17,20 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
+// DefaultConvertLimit is the fallback cap on concurrent x2t subprocesses:
+// one per available CPU, at most 6. runtime.GOMAXPROCS honors cgroup CPU
+// quotas (Go 1.25+), so containers and low-core CI runners scale down
+// automatically. Callers can always raise the limit explicitly via
+// Options.Limit / OFFICE_CONVERT_LIMIT.
+func DefaultConvertLimit() int {
+	return min(runtime.GOMAXPROCS(0), 6)
+}
+
 // Options configures the x2t subprocess converter.
 type Options struct {
 	AssetDir string
-	Limit    int
+	// Limit caps concurrent x2t subprocesses. Values <= 0 use DefaultConvertLimit.
+	Limit int
 	// QueueWaitTimeout caps how long acquire waits when the caller context has no
 	// deadline. Zero uses DefaultQueueWaitTimeout.
 	QueueWaitTimeout time.Duration
@@ -59,7 +70,7 @@ func New(opts Options) (*Converter, error) {
 	}
 	limit := opts.Limit
 	if limit <= 0 {
-		limit = 1
+		limit = DefaultConvertLimit()
 	}
 	fontDir := filepath.Join(opts.AssetDir, "core-fonts")
 	if st, err := os.Stat(fontDir); err != nil || !st.IsDir() {

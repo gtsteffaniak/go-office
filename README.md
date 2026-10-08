@@ -153,7 +153,7 @@ make check-sample-matrix
 make test-playwright
 ```
 
-Playwright defaults: `PLAYWRIGHT_WORKERS=6`, `OFFICE_CONVERT_LIMIT=6` (set in `scripts/run-playwright.sh` and the Playwright Docker test image). Override via environment when running locally or in CI.
+Playwright defaults: `PLAYWRIGHT_WORKERS` and `OFFICE_CONVERT_LIMIT` each default to the machine's CPU count capped at `6` (computed in `scripts/run-playwright.sh`, the Playwright Docker test image, and `frontend/playwright.config.ts`). Override via environment when running locally or in CI — e.g. raise `OFFICE_CONVERT_LIMIT` above 6 on a large host.
 
 ## Layout
 

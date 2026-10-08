@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/quantumx-apps/go-office/internal/convert"
 )
 
 // DefaultBasePath is the default URL prefix for the embedded document server.
@@ -30,7 +32,9 @@ type Options struct {
 	// Must match the pinned Euro-Office asset build.
 	ProtocolVersion string
 
-	// ConvertLimit caps concurrent x2t subprocess conversions (default 2).
+	// ConvertLimit caps concurrent x2t subprocess conversions.
+	// Values <= 0 default to the available CPU count capped at 6
+	// (convert.DefaultConvertLimit); larger values are honored as set.
 	ConvertLimit int
 
 	// PollHold is how long coauthoring long-poll GETs block waiting for packets.
@@ -87,7 +91,7 @@ func (o *Options) normalize() {
 		o.ProtocolVersion = "0.0.0-dev"
 	}
 	if o.ConvertLimit <= 0 {
-		o.ConvertLimit = 2
+		o.ConvertLimit = convert.DefaultConvertLimit()
 	}
 	if o.Logger == nil {
 		o.Logger = slog.Default()

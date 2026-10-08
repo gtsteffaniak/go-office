@@ -3,10 +3,22 @@ package convert
 import (
 	"context"
 	"errors"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestDefaultConvertLimitScalesWithCpus(t *testing.T) {
+	got := DefaultConvertLimit()
+	want := min(runtime.GOMAXPROCS(0), 6)
+	if got != want {
+		t.Fatalf("DefaultConvertLimit = %d, want %d", got, want)
+	}
+	if got < 1 || got > 6 {
+		t.Fatalf("DefaultConvertLimit = %d, want within [1, 6]", got)
+	}
+}
 
 func TestAcquireConvertSlotRespectsCancel(t *testing.T) {
 	c := &Converter{admission: newConvertAdmission(1)}

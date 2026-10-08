@@ -111,6 +111,11 @@ const LOAD_MASK_SELECTORS = [
   ".asc-loadmask-body",
 ];
 
+type AscWorksheetView = {
+  setSelection?: (range: unknown, ...rest: unknown[]) => void;
+  getSelectionName?: () => string;
+};
+
 type AscEditor = {
   asc_selectRange?: (ref: string) => void;
   asc_getCellText?: () => string;
@@ -122,7 +127,9 @@ type AscEditor = {
   asc_nativeInsertText?: (text: string) => void;
   asc_PasteText?: (text: string) => void;
   PasteText?: (text: string) => void;
+  asc_PasteData?: (format: number, data: string) => void;
   asc_closeCellEditor?: (save: boolean) => void;
+  wb?: { getWorksheet?: () => AscWorksheetView | undefined };
   asc_findText?: (
     text: string | { searchString: string; matchCase?: boolean },
     matchCase?: boolean,
@@ -141,37 +148,87 @@ type AscEditor = {
 };
 
 type AscEditorWindow = {
-  Asc?: { editor?: AscEditor; spreadsheet?: AscEditor; presentation?: AscEditor };
+  Asc?: {
+    editor?: AscEditor;
+    spreadsheet?: AscEditor;
+    presentation?: AscEditor;
+    Range?: new (c1: number, r1: number, c2: number, r2: number) => unknown;
+  };
+  AscCommon?: { c_oAscClipboardDataFormat?: { Text?: number } };
   editor?: AscEditor;
 };
 
+/**
+ * Every `*_ViaBrowser`/`*InBrowser` function below is serialized into the page
+ * by Playwright, so module-scope helpers and constants are NOT reachable inside
+ * them — the cell-selection logic (ws.setSelection(new Asc.Range(...)), which
+ * replaces the missing `asc_selectRange` in the Euro-Office cell build) must be
+ * inlined at each call site; a shared module function call throws
+ * ReferenceError in the page. `col`/`row` args are 0-based (Asc.Range is 0-based).
+ */
 function cellSetApiReadyInBrowser(): boolean {
   const w = window as AscEditorWindow;
   const api = w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor;
   if (!api) {
     return false;
   }
-  const canSelect = typeof api.asc_selectRange === "function";
+  const canSelect =
+    typeof api.asc_selectRange === "function" ||
+    (() => {
+      // The getWorksheet method exists long before the document view is loaded:
+      // early in boot it returns undefined and setSelection/asc_PasteData throw.
+      // Only declare select-ready once a worksheet object is actually returned.
+      if (typeof w.Asc?.Range !== "function") {
+        return false;
+      }
+      try {
+        const ws = api.wb?.getWorksheet?.();
+        return typeof ws?.setSelection === "function";
+      } catch {
+        return false;
+      }
+    })();
   const canWrite =
-    typeof api.asc_setCellValue === "function" || typeof api.asc_insertText === "function";
+    typeof api.asc_PasteData === "function" ||
+    typeof api.asc_setCellValue === "function" ||
+    typeof api.asc_insertText === "function";
   return canSelect && canWrite;
 }
 
-function selectCellInBrowser(cellRef: string): boolean {
+function selectCellInBrowser(
+  _el: Element,
+  arg: { ref: string; col: number; row: number },
+): boolean {
   const w = window as AscEditorWindow;
   const api = w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor;
-  if (!api?.asc_selectRange) {
+  if (!api) {
+    return false;
+  }
+  // Inlined selection logic — module refs do not survive serialization (see the
+  // block comment above).
+  if (typeof api.asc_selectRange === "function") {
+    try {
+      api.asc_selectRange(arg.ref);
+      return true;
+    } catch {}
+  }
+  const ws = api.wb?.getWorksheet?.();
+  const Range = w.Asc?.Range;
+  if (typeof ws?.setSelection !== "function" || typeof Range !== "function") {
     return false;
   }
   try {
-    api.asc_selectRange(cellRef);
+    ws.setSelection(new Range(arg.col, arg.row, arg.col, arg.row), false);
     return true;
   } catch {
     return false;
   }
 }
 
-function wordSlideInteractiveInBrowser(kind: SampleFile["editor"]): boolean {
+function wordSlideInteractiveInBrowser(
+  _el: Element,
+  kind: SampleFile["editor"],
+): boolean {
   const w = window as AscEditorWindow;
   const api =
     kind === "slide"
@@ -193,24 +250,102 @@ function wordSlideInteractiveInBrowser(kind: SampleFile["editor"]): boolean {
   return rect.width > 50 && rect.height > 50;
 }
 
-function readCellViaBrowser(cellRef: string): string {
+function readCellViaBrowser(
+  _el: Element,
+  arg: { ref: string; col: number; row: number },
+): string {
   const w = window as AscEditorWindow;
   const api = w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor;
-  if (!api?.asc_selectRange) {
+  if (!api) {
     return "";
   }
-  api.asc_selectRange(cellRef);
-  return api.asc_getCellText?.() ?? api.asc_getFormula?.() ?? "";
+  // Inlined selection logic — module refs do not survive serialization (see the
+  // block comment above).
+  let selOk = false;
+  if (typeof api.asc_selectRange === "function") {
+    try {
+      api.asc_selectRange(arg.ref);
+      selOk = true;
+    } catch {
+      selOk = false;
+    }
+  }
+  if (!selOk) {
+    const ws = api.wb?.getWorksheet?.();
+    const Range = w.Asc?.Range;
+    if (typeof ws?.setSelection === "function" && typeof Range === "function") {
+      try {
+        ws.setSelection(new Range(arg.col, arg.row, arg.col, arg.row), false);
+        selOk = true;
+      } catch {
+        selOk = false;
+      }
+    }
+  }
+  if (!selOk) {
+    return "";
+  }
+  const byApi = api.asc_getCellText?.() ?? api.asc_getFormula?.();
+  if (byApi) {
+    return byApi;
+  }
+  // No public read-back on this build: the formula bar mirrors the active cell.
+  const el = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+    "#ce-cell-content, #ce-text",
+  );
+  return el?.value ?? "";
 }
 
-function setCellViaBrowser(arg: { cellRef: string; cellValue: string }): boolean {
+function setCellViaBrowser(
+  _el: Element,
+  arg: {
+    ref: string;
+    col: number;
+    row: number;
+    cellValue: string;
+  },
+): boolean {
   const w = window as AscEditorWindow;
   const api = w.Asc?.spreadsheet ?? w.Asc?.editor ?? w.editor;
   if (!api) {
     return false;
   }
+  // Inlined selection logic — module refs do not survive serialization (see the
+  // block comment above).
+  let selOk = false;
   if (typeof api.asc_selectRange === "function") {
-    api.asc_selectRange(arg.cellRef);
+    try {
+      api.asc_selectRange(arg.ref);
+      selOk = true;
+    } catch {
+      selOk = false;
+    }
+  }
+  if (!selOk) {
+    const ws = api.wb?.getWorksheet?.();
+    const Range = w.Asc?.Range;
+    if (typeof ws?.setSelection === "function" && typeof Range === "function") {
+      try {
+        ws.setSelection(new Range(arg.col, arg.row, arg.col, arg.row), false);
+        selOk = true;
+      } catch {
+        selOk = false;
+      }
+    }
+  }
+  if (!selOk) {
+    return false;
+  }
+  // asc_PasteData writes and commits to the active cell synchronously; the other
+  // methods are kept for builds that expose them (none exist on Euro-Office cell).
+  if (typeof api.asc_PasteData === "function") {
+    const fmt = w.AscCommon?.c_oAscClipboardDataFormat?.Text ?? 1;
+    try {
+      api.asc_PasteData(fmt, arg.cellValue);
+      return true;
+    } catch {
+      // fall through to the text-insertion methods
+    }
   }
   if (typeof api.asc_setCellValue === "function") {
     api.asc_setCellValue(arg.cellValue);
@@ -225,7 +360,10 @@ function setCellViaBrowser(arg: { cellRef: string; cellValue: string }): boolean
   return false;
 }
 
-function findTextInBrowser(arg: { needle: string; kind?: SampleFile["editor"] }): boolean {
+function findTextInBrowser(
+  _el: Element,
+  arg: { needle: string; kind?: SampleFile["editor"] },
+): boolean {
   const w = window as AscEditorWindow;
   const api =
     arg.kind === "cell"
@@ -250,7 +388,10 @@ function findTextInBrowser(arg: { needle: string; kind?: SampleFile["editor"] })
   }
 }
 
-function replaceTextInBrowser(arg: { from: string; to: string; kind?: SampleFile["editor"] }): boolean {
+function replaceTextInBrowser(
+  _el: Element,
+  arg: { from: string; to: string; kind?: SampleFile["editor"] },
+): boolean {
   const w = window as AscEditorWindow;
   const api =
     arg.kind === "cell"
@@ -277,7 +418,10 @@ function replaceTextInBrowser(arg: { from: string; to: string; kind?: SampleFile
   }
 }
 
-function insertTextInBrowser(arg: { chunk: string; kind: SampleFile["editor"] }): boolean {
+function insertTextInBrowser(
+  _el: Element,
+  arg: { chunk: string; kind: SampleFile["editor"] },
+): boolean {
   const w = window as AscEditorWindow;
   const api =
     arg.kind === "cell"
@@ -402,7 +546,14 @@ async function isEditorInteractive(
     if (!(await formulaBar.isVisible().catch(() => false))) {
       return false;
     }
-    return cellName.isEnabled().catch(() => false);
+    if (!(await cellName.isEnabled().catch(() => false))) {
+      return false;
+    }
+    // The name box input is enabled while the document view is still loading and
+    // reads "" until the worksheet selection model exists — editable checks and
+    // SDK writes all fail in that window, so do not report interactive yet.
+    const ref = await cellName.inputValue().catch(() => "");
+    return /^[A-Za-z]+\d+$/.test(ref.trim());
   }
 
   if (editor === "word" || editor === "slide") {
@@ -801,7 +952,7 @@ async function cellNameShowsRef(frame: FrameLocator, ref: string): Promise<boole
 async function selectCellViaSdk(frame: FrameLocator, ref: string): Promise<boolean> {
   const selected = await frame
     .locator("body")
-    .evaluate(selectCellInBrowser, ref)
+    .evaluate(selectCellInBrowser, cellCoords(ref))
     .catch(() => false);
   if (!selected) {
     return false;
@@ -904,6 +1055,12 @@ function parseCellRef(ref: string): { col: number; row: number } {
   return { col, row: Number.parseInt(match[2], 10) };
 }
 
+/** A1-style ref plus 0-based coordinates, for the Asc.Range SDK calls. */
+function cellCoords(ref: string): { ref: string; col: number; row: number } {
+  const { col, row } = parseCellRef(ref);
+  return { ref, col: col - 1, row: row - 1 };
+}
+
 function parseCsvLine(line: string): string[] {
   const cells: string[] = [];
   let current = "";
@@ -948,7 +1105,7 @@ export function csvCellValue(csv: string, ref: string): string {
 }
 
 async function readCellValue(frame: FrameLocator, ref: string): Promise<string> {
-  const viaSdk = await frame.locator("body").evaluate(readCellViaBrowser, ref);
+  const viaSdk = await frame.locator("body").evaluate(readCellViaBrowser, cellCoords(ref));
   if (viaSdk) {
     return viaSdk;
   }
@@ -960,7 +1117,9 @@ async function readCellValue(frame: FrameLocator, ref: string): Promise<string> 
 }
 
 async function setCellValue(frame: FrameLocator, ref: string, value: string): Promise<boolean> {
-  return frame.locator("body").evaluate(setCellViaBrowser, { cellRef: ref, cellValue: value });
+  return frame
+    .locator("body")
+    .evaluate(setCellViaBrowser, { ...cellCoords(ref), cellValue: value });
 }
 
 async function cellShowsValue(
@@ -981,7 +1140,9 @@ async function cellShowsValue(
   }
 
   try {
-    const viaSdk = await frame.locator("body").evaluate(readCellViaBrowser, ref);
+    const viaSdk = await frame
+      .locator("body")
+      .evaluate(readCellViaBrowser, cellCoords(ref));
     if (viaSdk.includes(expected)) {
       return true;
     }
@@ -1292,7 +1453,7 @@ async function settleFrame(frame: FrameLocator, ms = 350): Promise<void> {
   // completed edit into an unhandled rejection that masks the real assertion failure.
   await frame
     .locator("body")
-    .evaluate((delay) => new Promise((r) => setTimeout(r, delay)), ms)
+    .evaluate((_el, delay) => new Promise((r) => setTimeout(r, delay)), ms)
     .catch(() => {});
 }
 
@@ -1893,7 +2054,10 @@ export type WordFormatOptions = {
   highlight?: boolean;
 };
 
-function applyWordFormatInBrowser(arg: { marker: string; format: WordFormatOptions }): boolean {
+function applyWordFormatInBrowser(
+  _el: Element,
+  arg: { marker: string; format: WordFormatOptions },
+): boolean {
   const w = window as AscEditorWindow;
   const api = w.Asc?.editor ?? w.editor;
   if (!api || typeof api.asc_findText !== "function") {

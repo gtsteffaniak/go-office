@@ -772,7 +772,18 @@ func ensureExecutable(path string) error {
 	return nil
 }
 
+// absX2TPath makes file paths embedded in x2t task XML absolute. x2t runs with
+// the isolated run dir as its working directory, so a relative path would
+// resolve against that dir instead of the server working directory.
+func absX2TPath(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
+}
+
 func buildTaskXML(from, to, fontDir, themeDir, sourceExt, allFonts, tempDir string) string {
+	from, to = absX2TPath(from), absX2TPath(to)
 	ext := strings.TrimPrefix(strings.ToLower(sourceExt), ".")
 	formatFrom := FormatFromExtension(ext)
 	formatTo := FormatCanvasTo(ext)
@@ -809,6 +820,7 @@ func buildTaskXML(from, to, fontDir, themeDir, sourceExt, allFonts, tempDir stri
 }
 
 func buildReverseTaskXML(from, to, fontDir, themeDir, allFonts, targetExt string, fromChanges bool, tempDir string) string {
+	from, to = absX2TPath(from), absX2TPath(to)
 	formatFrom := FormatCanvasTo(targetExt)
 	formatTo := FormatFromExtension(targetExt)
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -857,6 +869,7 @@ func buildReverseTaskXML(from, to, fontDir, themeDir, allFonts, targetExt string
 }
 
 func buildOfficeToOfficeXML(from, to, fontDir, themeDir, allFonts, fromExt, toExt, tempDir string) string {
+	from, to = absX2TPath(from), absX2TPath(to)
 	fromExt = strings.TrimPrefix(strings.ToLower(fromExt), ".")
 	toExt = strings.TrimPrefix(strings.ToLower(toExt), ".")
 	formatFrom := FormatFromExtension(fromExt)

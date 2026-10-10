@@ -39,7 +39,12 @@ if command -v nproc >/dev/null 2>&1; then
 else
   NCORES=4
 fi
-DEFAULT_PARALLEL=6
+# Default parallelism for Playwright + x2t: one per core, capped at 6.
+# Override via PLAYWRIGHT_WORKERS / OFFICE_CONVERT_LIMIT (e.g. to go above 6).
+DEFAULT_PARALLEL=$(( NCORES < 6 ? NCORES : 6 ))
+if [ "${DEFAULT_PARALLEL}" -lt 1 ]; then
+  DEFAULT_PARALLEL=1
+fi
 : "${PLAYWRIGHT_WORKERS:=${DEFAULT_PARALLEL}}"
 : "${OFFICE_CONVERT_LIMIT:=${DEFAULT_PARALLEL}}"
 : "${PLAYWRIGHT_PREWARM_DEADLINE_SEC:=60}"

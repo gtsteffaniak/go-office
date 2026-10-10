@@ -113,6 +113,7 @@ func (c *Converter) ConvertFile(ctx context.Context, req ConvertRequest) error {
 }
 
 func buildConvertTaskXML(from, to, fontDir, themeDir, fromExt, toExt string, formatTo int, thumb *Thumbnail, allFonts, tempDir string) string {
+	from, to = absX2TPath(from), absX2TPath(to)
 	formatFrom := FormatFromExtension(fromExt)
 	now := time.Now().UTC().Format(time.RFC3339)
 

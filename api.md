@@ -250,7 +250,7 @@ See [migration.md](migration.md) for the full matrix. Summary:
 | Listen port | Docker `-p host:80` | `OFFICE_ADDR` (default `:80` in image) |
 | Public URL for cache links | nginx / proxy config | `OFFICE_PUBLIC_ORIGIN` |
 | Debug logging | nginx / service logs | `OFFICE_DEBUG_LOGGING`, `OFFICE_LOG_JSON` |
-| x2t concurrency | internal DS tuning | `OFFICE_CONVERT_LIMIT` (default `2`) |
+| x2t concurrency | internal DS tuning | `OFFICE_CONVERT_LIMIT` (default: CPU count, max `6`) |
 
 ---
 

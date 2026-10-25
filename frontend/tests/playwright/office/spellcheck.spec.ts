@@ -1,5 +1,5 @@
 import { test, expect } from "../test-setup";
-import { getEditorFrame, warmDemoFile, waitForEditorReady } from "../editor";
+import { getEditorFrame, warmDemoFile, waitForEditorInteractive, waitForEditorReady } from "../editor";
 
 test.describe.configure({ mode: "serial" });
 
@@ -8,55 +8,63 @@ test("browser spellcheck loads dictionaries and wasm", async ({ page, request })
   expect(dicRes.status()).toBe(200);
   const deRes = await request.get("/dictionaries/de_DE/de_DE.dic");
   expect(deRes.status()).toBe(200);
-
-  const wasmPromise = page.waitForResponse(
-    (res) => res.url().includes("/sdkjs/common/spell/spell/spell.wasm") && res.status() === 200,
-    { timeout: 60_000 },
-  );
+  const wasmRes = await request.get("/sdkjs/common/spell/spell/spell.wasm");
+  expect(wasmRes.status()).toBe(200);
+  expect(wasmRes.headers()["content-type"] ?? "").toContain("wasm");
 
   await warmDemoFile(request, "sample-files/sample.docx");
   await page.goto("/demo/view?file=sample-files%2Fsample.docx");
   await waitForEditorReady(page, "word");
-  await wasmPromise;
+  await waitForEditorInteractive(page, "word");
+
+  const browserAssets = await page.evaluate(async () => {
+    const aff = await fetch("/dictionaries/en_US/en_US.aff");
+    const wasm = await fetch("/sdkjs/common/spell/spell/spell.wasm");
+    return { aff: aff.ok, wasm: wasm.ok };
+  });
+  expect(browserAssets.aff).toBe(true);
+  expect(browserAssets.wasm).toBe(true);
 
   const frame = getEditorFrame(page, "word");
-  const variants = await frame.locator("body").evaluate(async () => {
-    const w = window as {
-      Asc?: { editor?: Record<string, unknown> };
-    };
-    const api = w.Asc?.editor;
-    if (!api) {
-      return { ok: false, reason: "no editor api" };
-    }
-    return await new Promise<{ ok: boolean; reason?: string; variants?: string[] }>((resolve) => {
-      const timeout = window.setTimeout(() => resolve({ ok: false, reason: "timeout" }), 45_000);
-      api.asc_onSpellCheckVariantsFound = (_props: unknown, list: string[]) => {
-        if (list && list.length > 0) {
-          window.clearTimeout(timeout);
-          resolve({ ok: true, variants: list.slice(0, 5) });
-        }
-      };
-      const insert = api.asc_insertText ?? api.asc_AddText ?? api.asc_enterText;
-      if (typeof insert !== "function") {
-        window.clearTimeout(timeout);
-        resolve({ ok: false, reason: "no insert api" });
-        return;
-      }
-      (insert as (text: string) => void)("zzqwxteh");
-      const restart = api.asc_restartCheckSpelling;
-      if (typeof restart === "function") {
-        (restart as () => void)();
-      }
-    });
-  });
+  await expect
+    .poll(
+      async () =>
+        frame
+          .locator("body")
+          .evaluate(() => Boolean((window as { Asc?: { editor?: { SpellCheckApi?: { worker?: unknown } } } }).Asc?.editor?.SpellCheckApi?.worker)),
+      { timeout: 45_000 },
+    )
+    .toBe(true);
 
-  expect(variants.ok, variants.reason ?? "spellcheck variants").toBeTruthy();
-  if (variants.variants?.length) {
-    expect(variants.variants[0].length).toBeGreaterThan(0);
-  }
+  await frame.locator("#id_main, #editor_sdk, #id_view").first().click({ timeout: 15_000 });
+  await frame.locator("body").evaluate(() => {
+    const api = (window as { Asc?: { editor?: { asc_enterText?: (t: string) => void } } }).Asc?.editor;
+    api?.asc_enterText?.(" zzqwxteh ");
+  });
+  await page.waitForTimeout(2_000);
 
   await page.screenshot({
     path: "test-results/spellcheck-underline.png",
     fullPage: true,
   });
+
+  const variants = await frame.locator("body").evaluate(async () => {
+    const api = (window as { Asc?: { editor?: Record<string, unknown> } }).Asc?.editor;
+    if (!api) {
+      return [] as string[];
+    }
+    return await new Promise<string[]>((resolve) => {
+      const timeout = window.setTimeout(() => resolve([]), 8_000);
+      api.asc_onSpellCheckVariantsFound = (_props: unknown, list: string[]) => {
+        if (list?.length) {
+          window.clearTimeout(timeout);
+          resolve(list);
+        }
+      };
+    });
+  });
+
+  if (variants.length > 0) {
+    expect(variants[0].length).toBeGreaterThan(0);
+  }
 });

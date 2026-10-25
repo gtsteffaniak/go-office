@@ -498,6 +498,9 @@ func authResponsePackets(build BuildInfo, sessionID string, indexUser int, req a
 		"buildVersion":       build.BuildVersion,
 		"buildNumber":        build.BuildNumber,
 		"licenseType":        handshakeOK,
+		// Empty string selects sdkjs browser Hunspell (wasm) rather than the legacy Node
+		// /spellchecker/ service referenced by g_cAscSpellCheckUrl in full Document Server.
+		"g_cAscSpellCheckUrl": "",
 		"settings": map[string]any{
 			"binaryChanges":           false,
 			"websocketMaxPayloadSize": 1572864,

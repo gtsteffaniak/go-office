@@ -123,7 +123,8 @@ Paths are relative to `documentServerUrl` (default site root). `OFFICE_BASE_PATH
 
 | Endpoint | Method | ONLYOFFICE | go-office | Notes |
 | -------- | ------ | :--------: | :---------: | ----- |
-| **`/spellchecker/`** | * | ✅ | ❌ | Separate Node service; nginx proxies to port 8080. Editor works; spell-check calls fail silently or error in console |
+| **`/spellchecker/`** | * | ✅ | ❌ | Upstream Node spell-check service; **not used** by go-office — sdkjs runs Hunspell in the browser (`spell.wasm`) and loads `/dictionaries/` over HTTP |
+| **`/dictionaries/`** | GET | ✅ | ✅ | Hunspell `.aff`/`.dic` (and hyphenation files) for locales in `spellcheckGetLanguages()`; served from `assets/dictionaries/` |
 | **`/example/`** (bundled test apps) | GET | ✅ | ✅ | Upstream ships a bundled test example — "a simple doc management system" for trying the editors before integration, disabled by default. go-office serves its demo app at this path as an **alias of `/demo/`**: same landing page, viewer, and warm endpoint. `/demo/` stays canonical; both render identically and generated links keep the prefix of the path you used. This is not upstream's Node.js example app. |
 | Admin panel | GET | ✅ | ❌ | Port 9000 in full install |
 | `/plugins.json` (root) | GET | ✅ | ✅ | Empty plugin list (`[]`) for mobile/desktop editors |
@@ -282,7 +283,7 @@ See [migration.md](migration.md) for the full matrix. Summary:
 | `async: true` on `/converter` | Use synchronous conversion only |
 | `POST /command` | Use editor forcesave; accept no `info`/`drop` |
 | WOPI integrators | Use Docs API instead |
-| Spell checker service | Disable server spell-check; or proxy `/spellchecker/` elsewhere |
+| Legacy `/spellchecker/` Node service | Not required — browser spell-check uses `/dictionaries/` and `sdkjs/common/spell/spell/` |
 | Upstream Node.js test example app | `/example/` serves go-office's demo app (same as `/demo/`), not upstream's example |
 | Multi-user co-editing | Single editor per `key` only |
 | Callback status 1 / 4 telemetry | Track sessions in host app, not document server |
@@ -305,7 +306,8 @@ See [migration.md](migration.md) for the full matrix. Summary:
 | `/example/` alias | `go test ./internal/demo/...` (`TestExampleAliasServesDemoUI`, `TestExampleViewerUsesAliasBase`) |
 | Fixture format integrity | `make check-sample-matrix` (OLE2 vs ZIP magic checks) |
 | Command service | **No tests** — endpoint absent |
-| WOPI / spellchecker | **No tests** — endpoints absent |
+| WOPI | **No tests** — endpoints absent |
+| Browser spell-check (`/dictionaries/`, `spell.wasm`) | Playwright `spellcheck` spec; `go test` static route tests |
 
 ---
 

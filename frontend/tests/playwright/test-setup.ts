@@ -9,14 +9,12 @@ function isHarmlessConsoleError(errorText: string): boolean {
   return (
     // Firefox logs background lazy-load font failures; core icons still render.
     /downloadable font: download failed.*material-symbols\.woff2/i.test(errorText) ||
-    // ONLYOFFICE may warn when optional spellcheck dictionaries are absent in demo.
-    /dictionaries\/en_US/i.test(errorText) ||
     // Coauthoring falls back to long-polling when websocket upgrade is unavailable.
     /WebSocket connection to 'ws:.*\/doc\/.*\/c\/\?.*transport=websocket' failed.*501/i.test(
       errorText,
     ) ||
     /Error during WebSocket handshake: Unexpected response code: 501/i.test(errorText) ||
-    // Generic browser network summary for expected 404s (themes, dictionaries, favicon).
+    // Generic browser network summary for expected 404s (themes, favicon).
     /^Failed to load resource: the server responded with a status of 404/i.test(errorText) ||
     // Slide themes bundle may be absent in trimmed asset trees; stub is served when present.
     /sdkjs\/slide\/themes\/themes\.js/i.test(errorText)
@@ -35,7 +33,6 @@ function isHarmlessFailedResponse(url: string, status: number): boolean {
   if (status === 404) {
     return (
       /\/themes\.json(?:\?|$)/.test(url) ||
-      /\/dictionaries\//.test(url) ||
       /\/favicon\.ico(?:\?|$)/.test(url) ||
       /\/sdkjs\/slide\/themes\//.test(url)
     );

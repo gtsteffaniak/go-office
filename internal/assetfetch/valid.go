@@ -11,7 +11,7 @@ func ValidAssetDir(dir string) bool {
 	if dir == "" {
 		return false
 	}
-	if needsConverterBin(dir) || !FontsReady(dir) {
+	if needsConverterBin(dir) || !FontsReady(dir) || !DictionariesReady(dir) {
 		return false
 	}
 	apiJs := filepath.Join(dir, "web-apps", "apps", "api", "documents", "api.js")

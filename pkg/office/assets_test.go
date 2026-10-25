@@ -137,4 +137,30 @@ func writeMinimalValidAssets(t *testing.T, dir string) {
 	if err := os.WriteFile(filepath.Join(dir, "VERSION"), []byte("9.3.4-hotfix.1"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	spellDir := filepath.Join(dir, "sdkjs", "common", "spell", "spell")
+	if err := os.MkdirAll(spellDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"spell.js", "spell.wasm"} {
+		if err := os.WriteFile(filepath.Join(spellDir, name), []byte("spell"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "dictionaries"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "dictionaries", ".installed-langs"), []byte("en_US\nde_DE\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, lang := range []string{"en_US", "de_DE"} {
+		langDir := filepath.Join(dir, "dictionaries", lang)
+		if err := os.MkdirAll(langDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for _, ext := range []string{".aff", ".dic"} {
+			if err := os.WriteFile(filepath.Join(langDir, lang+ext), []byte("d"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 }

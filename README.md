@@ -23,6 +23,7 @@ Embedded Go document server library compatible with ONLYOFFICE / Euro-Office bro
 - Demo UI, sample matrix, and Playwright E2E in CI
 - Runtime asset discovery/fetch via `DiscoverAssets`, `FetchAssets`, and `EnsureAssets` (caller-controlled; `office.New` never downloads)
 - Demo warm endpoint (`GET /demo/warm`) pre-converts samples; coauthoring session reset on config (`BuildEditorConfig`, `POST /session/reset`)
+- Browser spell-check (Hunspell in `spell.wasm`, dictionaries at `/dictionaries/`; no `/spellchecker/` service)
 
 ## Quick start (Makefile)
 
@@ -68,6 +69,7 @@ The release is pinned in `scripts/euro-office.version` as `EURO_OFFICE_VERSION` 
 - `assets/web-apps/` — editor UI + `api.js`
 - `assets/sdkjs/` — document engine
 - `assets/converter/bin/` — Linux x2t binaries
+- `assets/dictionaries/` — Hunspell dictionaries for sdkjs browser spell-check (from the Euro-Office package or pinned `Euro-Office/dictionaries` release)
 - `assets/VERSION` — Euro-Office version string for `Options.ProtocolVersion`
 
 **Non-Linux workstations:** run `make build` / `make serve` (uses Docker automatically), use the dev container, or pre-populate `AssetDir`.

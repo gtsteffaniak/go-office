@@ -44,7 +44,9 @@ func DirWithPolicy(root, subdir string, immutableExtless bool) http.Handler {
 func cacheControlImmutable(path string, immutableExtless bool) bool {
 	if strings.HasSuffix(path, ".js") ||
 		strings.HasSuffix(path, ".css") ||
-		strings.HasSuffix(path, ".wasm") {
+		strings.HasSuffix(path, ".wasm") ||
+		strings.HasSuffix(path, ".aff") ||
+		strings.HasSuffix(path, ".dic") {
 		return true
 	}
 	if !immutableExtless {

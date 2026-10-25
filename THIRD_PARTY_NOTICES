@@ -12,12 +12,74 @@ to that source URL and license identifier.
 Euro-Office Document Server assets (pinned)
 --------------------------------------------
 - Release: v9.3.4-hotfix.1 (see scripts/euro-office.version)
-- Components: web-apps/, sdkjs/, server/FileConverter/bin (x2t)
+- Components: web-apps/, sdkjs/, dictionaries/ (browser spell-check), server/FileConverter/bin (x2t)
 - Source: https://github.com/Euro-Office/DocumentServer
 - License: GNU Affero General Public License v3.0
 - Fetched via `go run ./cmd/fetch-assets` (downloads release .deb; not vendored in git)
 - Branding: editor UI attribution (logos, "Powered by" notices) must not be removed
   or replaced when deployed; see NOTICE (AGPL Section 7)
+
+Euro-Office Hunspell dictionaries (browser spell-check)
+-------------------------------------------------------
+- Release: v9.3.4-hotfix.1 (same pin as `scripts/euro-office.version`)
+- Source: extracted from the Euro-Office Document Server `.deb` when present, otherwise
+  https://github.com/Euro-Office/dictionaries (archive checksum pinned in
+  `internal/assetfetch/dictionaries.go`)
+- Fetched via `go run ./cmd/fetch-assets` into `assets/dictionaries/` (not vendored in git)
+- Locales: one folder per language id in sdkjs `spellcheckGetLanguages()` (49 languages at v9.3.4-hotfix.1)
+- Per-locale license files (`.aff`/`.dic`, hyphenation, and notices) are kept in each folder; summary:
+
+<!-- dictionary-licenses-begin -->
+- **ar** — AUTHORS.txt, COPYING.txt, README_ar.txt
+- **az_Latn_AZ** — (see upstream dictionary package)
+- **bg_BG** — COPYING, README_hyph_bg_BG.txt, Readme_bg_BG.txt
+- **ca_ES** — README_hyph_ca_ES.txt
+- **ca_ES_valencia** — Readme_ca_ES_valencia.txt
+- **cs_CZ** — (see upstream dictionary package)
+- **da_DK** — README_hyph_da_DK.txt
+- **de_AT** — COPYING_GPLv2, COPYING_GPLv3, COPYING_LGPL_v2.0.txt, COPYING_LGPL_v2.1.txt, COPYING_OASIS.txt
+- **de_CH** — COPYING_GPLv2, COPYING_GPLv3, COPYING_LGPL_v2.0.txt, COPYING_LGPL_v2.1.txt, COPYING_OASIS.txt
+- **de_DE** — COPYING_GPLv2, COPYING_GPLv3, COPYING_LGPL_v2.0.txt, COPYING_LGPL_v2.1.txt, COPYING_OASIS.txt, README_hyph_de.txt
+- **el_GR** — README_hyph_el_GR.txt
+- **en_AU** — README_en_AU.txt, WordNet_license.txt, license.txt
+- **en_CA** — Readme_en_CA.txt, WordNet_license.txt, license.txt
+- **en_GB** — README_en_GB.txt, WordNet_license.txt, license.txt
+- **en_US** — README_en_US.txt, README_hyph_en_US.txt, WordNet_license.txt, license.txt
+- **en_ZA** — Readme_en_ZA.txt, WordNet_license.txt, license.txt
+- **es_ES** — LICENSE.md, README_hyph_es_ES.txt
+- **eu_ES** — (see upstream dictionary package)
+- **fr_FR** — README_hyph_fr_FR.txt, fr_FR_README.txt
+- **gl_ES** — COPYING_th_gl, README_hyph_gl_ES.txt, Readme_gl_ES.txt
+- **hr_HR** — README_hyph_hr_HR.txt, Readme_hr_HR.txt
+- **hu_HU** — README_hu_HU.txt, README_hyph_hu_HU.txt
+- **id_ID** — LICENSE-dict, LICENSE-thes, README_id_ID.txt
+- **it_IT** — README_hyph_it_IT.txt, it_IT_COPYING, it_IT_license.txt, th_it_IT_COPYING
+- **kk_KZ** — README_kk_KZ.txt
+- **ko_KR** — ko_KR_LICENSE.txt, ko_KR_LICENSE_GPL.txt, ko_KR_LICENSE_LGPL.txt, ko_KR_LICENSE_MPL.txt
+- **lb_LU** — Readme_lb_LU.txt
+- **lt_LT** — (see upstream dictionary package)
+- **lv_LV** — README_hyph_lv_LV.txt, license.txt, lv_LV_license.txt
+- **mn_MN** — Readme_mn_MN.txt
+- **nb_NO** — COPYING, README_hyph_nb_NO.txt
+- **nl_NL** — license_en_EN.txt
+- **nn_NO** — COPYING
+- **oc_FR** — LICENSES-en.txt, README_oc_FR.txt, license.txt
+- **pl_PL** — (see upstream dictionary package)
+- **pt_BR** — README_hyph_pt_BR.txt, README_pt_BR.TXT, license-thes.readme
+- **pt_PT** — LICENSES.txt, README_hyph_pt_PT.txt, README_pt_PT.txt
+- **ro_RO** — COPYING.GPL, COPYING.LGPL, COPYING.MPL
+- **ru_RU** — (see upstream dictionary package)
+- **sk_SK** — LICENSE.txt
+- **sl_SI** — README_hyph_sl_SI.txt, Readme_sl_SI.txt
+- **sr_Cyrl_RS** — Readme_sr_Cyrl_RS.txt
+- **sr_Latn_RS** — Readme_sr_Latn_RS.txt
+- **sv_SE** — LICENSE_en_US.txt, LICENSE_sv_SE.txt, README_hyph_sv_SE.txt
+- **tr_TR** — LICENSE, tr_TR_README.txt
+- **uk_UA** — README_hyph_uk_UA.txt, README_th_uk_UA.txt, README_uk_UA.txt
+- **uz_Cyrl_UZ** — README.md
+- **uz_Latn_UZ** — README.md
+- **vi_VN** — LICENSES-en.txt, LICENSES-vi.txt
+<!-- dictionary-licenses-end -->
 
 github.com/golang-jwt/jwt/v5
 ----------------------------

@@ -97,8 +97,6 @@ func isExpectedHTTPError(r *http.Request, status int) bool {
 			return true
 		case strings.HasPrefix(path, "/sdkjs/slide/themes/"):
 			return true
-		case strings.HasPrefix(path, "/dictionaries/"):
-			return true
 		case strings.HasPrefix(path, "/.well-known/"):
 			return true
 		}

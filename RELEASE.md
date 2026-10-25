@@ -41,7 +41,7 @@ These are documented in [api.md](api.md) but not planned for near-term releases:
 - WebSocket coauthoring transport (polling works today)
 - `POST /command` HTTP service
 - WOPI (`/hosting/discovery`, file operations)
-- Spell checker service (`/spellchecker/`)
+- Legacy Node spell checker service (`/spellchecker/`) — browser spell-check uses `/dictionaries/` instead
 - Webhooks
 - Async `/converter`
 

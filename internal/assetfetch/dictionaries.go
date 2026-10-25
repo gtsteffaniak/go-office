@@ -196,7 +196,7 @@ func copyDictionaryLang(srcDict, dstDict, lang string) error {
 		return fmt.Errorf("assetfetch: dictionary %q missing under %s", lang, srcDict)
 	}
 	dstLang := filepath.Join(dstDict, lang)
-	if err := os.MkdirAll(dstLang, 0o755); err != nil {
+	if err = os.MkdirAll(dstLang, 0o755); err != nil {
 		return err
 	}
 	entries, err := os.ReadDir(srcLang)
@@ -286,7 +286,7 @@ func fetchDictionariesArchive(ctx context.Context, client *http.Client, version,
 
 	archivePath := filepath.Join(tmpRoot, "dictionaries.tar.gz")
 	url := fmt.Sprintf("https://codeload.github.com/Euro-Office/dictionaries/tar.gz/refs/tags/v%s", version)
-	if err := downloadFile(ctx, client, url, archivePath); err != nil {
+	if err = downloadFile(ctx, client, url, archivePath); err != nil {
 		return err
 	}
 	sum, err := fileSHA256(archivePath)
@@ -297,10 +297,10 @@ func fetchDictionariesArchive(ctx context.Context, client *http.Client, version,
 		return fmt.Errorf("assetfetch: dictionaries archive checksum mismatch (got %s)", sum)
 	}
 	extractDir := filepath.Join(tmpRoot, "extract")
-	if err := os.MkdirAll(extractDir, 0o755); err != nil {
+	if err = os.MkdirAll(extractDir, 0o755); err != nil {
 		return err
 	}
-	if err := extractTarGz(archivePath, extractDir); err != nil {
+	if err = extractTarGz(archivePath, extractDir); err != nil {
 		return err
 	}
 	srcRoot, err := findDictionaryArchiveRoot(extractDir)

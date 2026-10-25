@@ -201,9 +201,21 @@ func TestServesDictionaries(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s status = %d", path, rec.Code)
 		}
-		if cc := rec.Header().Get("Cache-Control"); cc != "public, max-age=31536000, immutable" {
+		cc := rec.Header().Get("Cache-Control")
+		if cc != "public, max-age=86400" {
 			t.Fatalf("%s Cache-Control = %q", path, cc)
 		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/office/dictionaries/en_US/en_US.dic", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("gzip status = %d", rec.Code)
+	}
+	if rec.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatalf("Content-Encoding = %q", rec.Header().Get("Content-Encoding"))
 	}
 }
 

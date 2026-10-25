@@ -190,7 +190,7 @@ func isUpToDate(marker, release, outDir string) bool {
 	if string(b) != release {
 		return false
 	}
-	return ValidAssetDir(outDir)
+	return validAssetDirCore(outDir)
 }
 
 func downloadFile(ctx context.Context, client *http.Client, url, dest string) error {

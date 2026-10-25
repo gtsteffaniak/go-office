@@ -173,6 +173,52 @@ func TestDownloadFile(t *testing.T) {
 	}
 }
 
+func TestServesDictionaries(t *testing.T) {
+	dir := t.TempDir()
+	langDir := filepath.Join(dir, "dictionaries", "en_US")
+	if err := os.MkdirAll(langDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(langDir, "en_US.dic"), []byte("dic"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(langDir, "en_US.aff"), []byte("aff"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv, err := office.New(nopStorage{}, office.Options{
+		AssetDir: dir,
+		BasePath: "/office",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{"/office/dictionaries/en_US/en_US.dic", "/dictionaries/en_US/en_US.dic"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d", path, rec.Code)
+		}
+		cc := rec.Header().Get("Cache-Control")
+		if cc != "public, max-age=86400" {
+			t.Fatalf("%s Cache-Control = %q", path, cc)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/office/dictionaries/en_US/en_US.dic", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("gzip status = %d", rec.Code)
+	}
+	if rec.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatalf("Content-Encoding = %q", rec.Header().Get("Content-Encoding"))
+	}
+}
+
 func TestServesFonts(t *testing.T) {
 	dir := t.TempDir()
 	fontsDir := filepath.Join(dir, "fonts")

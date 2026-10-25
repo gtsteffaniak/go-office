@@ -49,6 +49,9 @@ func Build(req EditorRequest, token string) map[string]any {
 				"autosave":  true,
 				"forcesave": true,
 				"uiTheme":   req.Theme,
+				"features": map[string]any{
+					"spellcheck": true,
+				},
 			},
 			"coEditing": map[string]any{
 				"mode":   "fast",

@@ -6,12 +6,12 @@ import (
 	"strings"
 )
 
-// ValidAssetDir reports whether dir contains a complete Euro-Office asset tree (any version).
-func ValidAssetDir(dir string) bool {
+// validAssetDirCore reports whether dir has a complete asset tree, excluding spellcheck languages.
+func validAssetDirCore(dir string) bool {
 	if dir == "" {
 		return false
 	}
-	if needsConverterBin(dir) || !FontsReady(dir) {
+	if needsConverterBin(dir) || !FontsReady(dir) || !SpellEngineReady(dir) {
 		return false
 	}
 	apiJs := filepath.Join(dir, "web-apps", "apps", "api", "documents", "api.js")
@@ -23,6 +23,11 @@ func ValidAssetDir(dir string) bool {
 		return true
 	}
 	return false
+}
+
+// ValidAssetDir reports whether dir contains a complete Euro-Office asset tree (any version).
+func ValidAssetDir(dir string) bool {
+	return validAssetDirCore(dir) && DictionariesReady(dir)
 }
 
 // ReadInstalledVersion returns assets/VERSION or the .extracted marker when VERSION is absent.

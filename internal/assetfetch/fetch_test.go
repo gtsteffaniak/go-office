@@ -63,6 +63,51 @@ func TestValidAssetDirRequiresFonts(t *testing.T) {
 	}
 }
 
+func TestIsUpToDateWithoutDictionariesUsesCoreOnly(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, ".extracted")
+	if err := os.WriteFile(marker, []byte("9.3.4-hotfix.1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	apiDir := filepath.Join(dir, "web-apps", "apps", "api", "documents")
+	if err := os.MkdirAll(apiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(apiDir, "api.js"), []byte("api"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{
+		filepath.Join(dir, "sdkjs", "common", "AllFonts.js"),
+		filepath.Join(dir, "converter", "bin", "font_selection.bin"),
+		filepath.Join(dir, "converter", "bin", "AllFonts.js"),
+		filepath.Join(dir, "converter", "bin", "x2t"),
+		filepath.Join(dir, "sdkjs", "common", "spell", "spell", "spell.js"),
+		filepath.Join(dir, "sdkjs", "common", "spell", "spell", "spell.wasm"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		size := 1
+		if strings.Contains(p, "AllFonts.js") {
+			size = 64 * 1024
+		}
+		if strings.Contains(p, "font_selection.bin") {
+			size = 1024
+		}
+		payload := make([]byte, size)
+		payload[0] = 'x'
+		if err := os.WriteFile(p, payload, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !assetfetch.IsUpToDate(marker, "9.3.4-hotfix.1", dir) {
+		t.Fatal("expected core assets without dictionaries to be up to date for incremental dictionary install")
+	}
+	if assetfetch.ValidAssetDir(dir) {
+		t.Fatal("expected ValidAssetDir to require dictionaries")
+	}
+}
+
 func TestIsUpToDateRequiresFonts(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, ".extracted")

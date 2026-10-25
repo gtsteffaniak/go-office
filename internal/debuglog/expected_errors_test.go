@@ -14,8 +14,8 @@ func TestIsExpectedHTTPError(t *testing.T) {
 		{"/favicon.ico", 404, true},
 		{"/themes.json", 404, true},
 		{"/sdkjs/slide/themes/themes.js", 404, true},
-		{"/dictionaries/en_US/en_US.aff", 404, true},
 		{"/.well-known/appspecific/com.chrome.devtools.json", 404, true},
+		{"/dictionaries/en_US/en_US.aff", 404, false},
 		{"/missing-api", 404, false},
 		{"/themes.json", 500, false},
 	}

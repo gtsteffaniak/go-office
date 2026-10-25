@@ -216,6 +216,7 @@ func (s *Server) buildRoutes() {
 		webApps := static.Dir(s.opts.AssetDir, "web-apps")
 		sdkjs := static.Dir(s.opts.AssetDir, "sdkjs")
 		fonts := static.DirWithPolicy(s.opts.AssetDir, "fonts", true)
+		dictionaries := static.DirDictionaries(s.opts.AssetDir)
 		if webApps != nil {
 			s.mux.Handle(joinURLPath(prefix, "web-apps/"), http.StripPrefix(joinURLPath(prefix, "web-apps"), webApps))
 		}
@@ -224,6 +225,9 @@ func (s *Server) buildRoutes() {
 		}
 		if fonts != nil {
 			s.mux.Handle(joinURLPath(prefix, "fonts/"), http.StripPrefix(joinURLPath(prefix, "fonts"), fonts))
+		}
+		if dictionaries != nil {
+			s.mux.Handle(joinURLPath(prefix, "dictionaries/"), http.StripPrefix(joinURLPath(prefix, "dictionaries"), dictionaries))
 		}
 		s.mux.HandleFunc(joinURLPath(prefix, "document_editor_service_worker.js"), s.handleServiceWorker)
 		if mirrorAssetsAtRoot(prefix) {
@@ -235,6 +239,9 @@ func (s *Server) buildRoutes() {
 			}
 			if fonts != nil {
 				s.mux.Handle("/fonts/", http.StripPrefix("/fonts/", fonts))
+			}
+			if dictionaries != nil {
+				s.mux.Handle("/dictionaries/", http.StripPrefix("/dictionaries/", dictionaries))
 			}
 			s.mux.HandleFunc("/document_editor_service_worker.js", s.handleServiceWorker)
 			s.mux.HandleFunc("/plugins.json", s.handlePluginsJSON)

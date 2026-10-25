@@ -6,6 +6,11 @@ Euro-Office / ONLYOFFICE editor assets (`web-apps/`, `sdkjs/`, `x2t`) are **not*
 
 ## [Unreleased]
 
+### Spell-check
+
+- Fetch and serve Hunspell dictionaries at `/dictionaries/` (from the Euro-Office Document Server `.deb` or pinned `Euro-Office/dictionaries` archive) so sdkjs browser spell-check works without a `/spellchecker/` Node service.
+- Static route with correct `application/wasm` caching for `spell.wasm` (under `/sdkjs/`); Playwright coverage for dictionary loads and spell suggestions.
+
 ## [0.2.0] - 2026-09-01
 
 **Euro-Office pin:** `9.3.4-hotfix.1`

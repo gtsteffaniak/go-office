@@ -151,8 +151,8 @@ Plan accordingly before migrating production **edit-and-save** workflows:
 | Callback status 1 / 4 (editing telemetry) | ✅ | ❌ — not emitted outbound (see [api.md](api.md#32-callback--integrator-receives-posts-document-server--your-app)) |
 | `POST /coauthoring/CommandService.ashx` | ✅ | ❌ |
 | `GET /hosting/discovery` (WOPI) | ✅ | ❌ |
-| `/spellchecker/` | ✅ | ❌ |
-| Spell checker service | ⚠️ Optional | ❌ |
+| `/spellchecker/` (Node service) | ✅ | ❌ (not needed) |
+| Browser spell-check (`/dictionaries/`, Hunspell wasm) | ✅ | ✅ |
 | Admin panel | ✅ | ❌ (port 9000 in full install) |
 
 Opening and viewing documents in the editor works; **saving edits back to storage** is supported via coauthoring flush, reverse x2t, and the integrator callback. See [api.md](api.md) for the full compatibility matrix.

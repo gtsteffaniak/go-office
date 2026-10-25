@@ -66,6 +66,9 @@ func fetchLocked(ctx context.Context, opts Options, version string) error {
 		if err := ensureSlideThemesJS(opts.OutDir); err != nil {
 			return err
 		}
+		if err := EnsureDictionaries(ctx, opts, version, opts.OutDir); err != nil {
+			return err
+		}
 		return fixDoctRendererConfig(filepath.Join(opts.OutDir, "converter", "bin"))
 	}
 	if needsConverterBin(opts.OutDir) {
@@ -131,6 +134,9 @@ func fetchLocked(ctx context.Context, opts Options, version string) error {
 			return err
 		}
 	}
+	if err := installDictionariesFromPackage(dsRoot, opts.OutDir); err != nil {
+		return err
+	}
 	toolsSrc := filepath.Join(dsRoot, "server", "tools", "allfontsgen")
 	if st, err := os.Stat(toolsSrc); err == nil && !st.IsDir() {
 		toolsDst := filepath.Join(opts.OutDir, "tools", "allfontsgen")
@@ -154,6 +160,11 @@ func fetchLocked(ctx context.Context, opts Options, version string) error {
 	}
 	if err := ensureSlideThemesJS(opts.OutDir); err != nil {
 		return err
+	}
+	if !DictionariesReady(opts.OutDir) {
+		if err := fetchDictionariesArchive(ctx, opts.Client, version, opts.OutDir); err != nil {
+			return err
+		}
 	}
 
 	fmt.Printf("Done. Set OFFICE_ASSETS=%s and ProtocolVersion=%s\n", opts.OutDir, version)
@@ -179,7 +190,7 @@ func isUpToDate(marker, release, outDir string) bool {
 	if string(b) != release {
 		return false
 	}
-	return ValidAssetDir(outDir)
+	return validAssetDirCore(outDir)
 }
 
 func downloadFile(ctx context.Context, client *http.Client, url, dest string) error {
